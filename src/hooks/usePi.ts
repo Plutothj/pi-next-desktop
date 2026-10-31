@@ -5,6 +5,7 @@ import {
   type ModelInfo,
   type PiMessage,
   type ProjectInfo,
+  type UiDialogRequest,
   type QueueState,
   type RpcEvent,
   type SessionInfo,
@@ -40,6 +41,8 @@ export type State = {
   commands: CommandInfo[];
   /** Extension statuses pushed via ctx.ui.setStatus, e.g. a git extension's branch. */
   statuses: Record<string, string>;
+  /** Blocking extension dialog (select / input / editor) awaiting an answer. */
+  dialog: UiDialogRequest | null;
   autoCompact: boolean;
 };
 
@@ -57,6 +60,7 @@ const initialState: State = {
   projects: [],
   commands: [],
   statuses: {},
+  dialog: null,
   autoCompact: true,
 };
 
@@ -158,11 +162,16 @@ function reduce(state: State, rec: RpcEvent): State {
       else delete statuses[key];
       return { ...state, statuses };
     }
+    case "ui_dialog":
+      return { ...state, dialog: rec.dialog ?? null };
+    case "ui_dialog_clear":
+      return { ...state, dialog: null };
     case "child_exit":
       return {
         ...state,
         status: "exited",
         isStreaming: false,
+        dialog: null,
         error: `pi 进程退出 (${rec.code ?? rec.signal ?? "?"})`,
       };
     default:
@@ -256,6 +265,15 @@ export function usePi() {
   const clearError = useCallback(() => {
     setState((s) => ({ ...s, error: undefined }));
   }, []);
+
+  // Answers a blocking extension dialog; pi resumes once the response lands.
+  const respondDialog = useCallback(
+    async (dialog: UiDialogRequest, values: { value?: string; cancelled?: boolean }) => {
+      await window.pi.respondUi(dialog.id, values).catch(() => null);
+      setState((s) => ({ ...s, dialog: null }));
+    },
+    [],
+  );
 
   const prompt = useCallback(
     async (text: string, images?: FileUIPart[], behavior?: "steer" | "followUp") => {
@@ -469,6 +487,7 @@ export function usePi() {
     prompt,
     send,
     clearError,
+    respondDialog,
     setModel,
     setThinking,
     newSession,

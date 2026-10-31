@@ -88,6 +88,7 @@ export type RpcEvent = {
   key?: string;
   text?: string;
   task?: TaskInfo;
+  dialog?: UiDialogRequest;
   message_text?: string;
   aborted?: boolean;
   reason?: string;
@@ -100,6 +101,15 @@ export type SessionInfo = {
   timestamp: string;
   title: string;
   mtime: number;
+};
+
+export type UiDialogRequest = {
+  id: string;
+  method: "select" | "input" | "editor";
+  title?: string;
+  options?: string[];
+  placeholder?: string;
+  prefill?: string;
 };
 
 export type GitStatus = {
@@ -263,6 +273,11 @@ export type PiBridge = {
   sessions: () => Promise<SessionInfo[]>;
   deleteSession: (filePath: string) => Promise<{ ok: boolean; switched?: boolean; error?: string }>;
   forkSessionAt: (entryId: string) => Promise<{ ok: boolean; sessionFile?: string; error?: string }>;
+  respondUi: (
+    id: string,
+    values: { value?: string; cancelled?: boolean; confirmed?: boolean },
+  ) => Promise<{ ok: boolean; error?: string }>;
+  debugDialog: (dialog: Omit<UiDialogRequest, "id">) => Promise<{ ok: boolean; id: string }>;
   projects: {
     list: () => Promise<ProjectInfo[]>;
     add: (dir: string) => Promise<{ ok: boolean; error?: string }>;

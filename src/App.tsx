@@ -49,6 +49,7 @@ import { FilesPanel } from "@/components/files-panel";
 import { AgentsPanel } from "@/components/agents-panel";
 import { BrowserPanel } from "@/components/browser-panel";
 import { CommandPalette, type PanelTab } from "@/components/command-palette";
+import { ExtensionDialog } from "@/components/extension-dialog";
 import { usePi } from "@/hooks/usePi";
 import { useTasks } from "@/hooks/useTasks";
 import { useGit } from "@/hooks/useGit";
@@ -88,6 +89,7 @@ function Shell() {
     prompt,
     send,
     clearError,
+    respondDialog,
     setModel,
     setThinking,
     newSession,
@@ -412,7 +414,9 @@ function Shell() {
               ))}
             </div>
           ) : null}
-          <Composer
+          <div className="relative">
+            <ExtensionDialog dialog={state.dialog} onRespond={respondDialog} />
+            <Composer
             commands={state.commands}
             cwd={state.cwd}
             onClearQueue={() => send({ type: "clear_queue" })}
@@ -443,7 +447,8 @@ function Shell() {
                 ))}
               </PromptInputSelectContent>
             </PromptInputSelect>
-          </Composer>
+            </Composer>
+          </div>
         </div>
       </main>
 

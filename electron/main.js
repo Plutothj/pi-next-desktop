@@ -128,6 +128,8 @@ function startPi(cwd) {
     child = null;
     for (const { reject } of pending.values()) reject(new Error("pi exited"));
     pending.clear();
+    pendingDialogs.clear();
+    send({ type: "ui_dialog_clear" });
     send({ type: "child_exit", code, signal });
   });
 }
@@ -136,6 +138,8 @@ function stopPi() {
   if (!child) return;
   const dying = child;
   child = null;
+  pendingDialogs.clear();
+  send({ type: "ui_dialog_clear" });
   try { dying.stdin.end(); } catch {}
   // Commands aimed at the old process will never be answered.
   for (const { reject } of pending.values()) reject(new Error("pi 重启中"));
@@ -217,11 +221,47 @@ function handleExtensionUi(req) {
     send({ type: "ui_widget", key: req.widgetKey, lines: (req.widgetLines ?? []).map(stripAnsi) });
     return;
   }
-  // select / input / editor are not implemented in v1: cancel so pi never hangs.
+  // select / input / editor are answered from the renderer; pi keeps the
+  // request open until pi:uiRespond writes the matching response.
   if (["select", "input", "editor"].includes(req.method)) {
-    send({ type: "ui_notify", message: `不支持的扩展对话框: ${req.method}`, notifyType: "warning" });
-    reply({ cancelled: true });
+    pendingDialogs.add(req.id);
+    send({
+      type: "ui_dialog",
+      dialog: {
+        id: req.id,
+        method: req.method,
+        title: req.title,
+        options: req.options,
+        placeholder: req.placeholder,
+        prefill: req.prefill,
+      },
+    });
   }
+}
+
+const pendingDialogs = new Set();
+
+ipcMain.handle("pi:uiRespond", (_e, { id, value, cancelled, confirmed }) => {
+  if (!pendingDialogs.has(id)) return { ok: false, error: "请求已失效" };
+  pendingDialogs.delete(id);
+  const payload = { type: "extension_ui_response", id };
+  if (cancelled) payload.cancelled = true;
+  else if (confirmed !== undefined) payload.confirmed = Boolean(confirmed);
+  else payload.value = typeof value === "string" ? value : "";
+  try {
+    child?.stdin.write(JSON.stringify(payload) + "\n");
+  } catch {}
+  return { ok: true };
+});
+
+// Dev-only helper so the dialog UI can be exercised without an extension.
+if (process.env.PI_DEBUG) {
+  ipcMain.handle("pi:debugDialog", (_e, dialog) => {
+    const id = `debug-${Date.now()}`;
+    pendingDialogs.add(id);
+    send({ type: "ui_dialog", dialog: { ...dialog, id } });
+    return { ok: true, id };
+  });
 }
 
 function command(payload) {
