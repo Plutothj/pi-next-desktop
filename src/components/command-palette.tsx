@@ -2,10 +2,12 @@ import { useEffect } from "react";
 import {
   BotIcon,
   FilesIcon,
+  KeyboardIcon,
   MessageSquareIcon,
   Minimize2Icon,
   PlusIcon,
   Settings2Icon,
+  StethoscopeIcon,
   TerminalIcon,
 } from "lucide-react";
 import {
@@ -37,6 +39,8 @@ export function CommandPalette({
     settings: () => void;
     panel: (tab: PanelTab) => void;
     openSession: (path: string, cwd?: string) => void;
+    shortcuts: () => void;
+    diagnostics: () => void;
   };
   sessions: SessionInfo[];
 }) {
@@ -101,6 +105,12 @@ export function CommandPalette({
         <CommandGroup heading="设置">
           <CommandItem onSelect={run(actions.settings)}>
             <Settings2Icon className="size-3.5" /> 打开设置
+          </CommandItem>
+          <CommandItem onSelect={run(actions.shortcuts)}>
+            <KeyboardIcon className="size-3.5" /> 快捷键
+          </CommandItem>
+          <CommandItem onSelect={run(actions.diagnostics)}>
+            <StethoscopeIcon className="size-3.5" /> 导出诊断信息…
           </CommandItem>
         </CommandGroup>
       </CommandList>

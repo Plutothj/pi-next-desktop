@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld("pi", {
   deleteSession: (filePath) => ipcRenderer.invoke("pi:deleteSession", { path: filePath }),
   forkSessionAt: (entryId) => ipcRenderer.invoke("pi:forkSessionAt", { entryId }),
   respondUi: (id, values) => ipcRenderer.invoke("pi:uiRespond", { id, ...values }),
+  exportHtml: () => ipcRenderer.invoke("pi:exportHtml"),
+  diagExport: () => ipcRenderer.invoke("diag:export"),
   // Only registered when the main process runs with PI_DEBUG.
   debugDialog: (dialog) => ipcRenderer.invoke("pi:debugDialog", dialog),
   projects: {

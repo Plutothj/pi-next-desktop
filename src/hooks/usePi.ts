@@ -394,6 +394,16 @@ export function usePi() {
     [send],
   );
 
+  // Internal model switch (dual-model chain): updates the live session but
+  // leaves the user's persisted default model untouched.
+  const switchModel = useCallback(
+    async (model: ModelInfo) => {
+      setState((s) => ({ ...s, model }));
+      return send({ type: "set_model", provider: model.provider, modelId: model.id });
+    },
+    [send],
+  );
+
   const setThinking = useCallback(
     async (level: string) => {
       setState((s) => ({ ...s, thinkingLevel: level }));
@@ -489,6 +499,7 @@ export function usePi() {
     clearError,
     respondDialog,
     setModel,
+    switchModel,
     setThinking,
     newSession,
     openSession,

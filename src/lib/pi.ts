@@ -278,6 +278,8 @@ export type PiBridge = {
     values: { value?: string; cancelled?: boolean; confirmed?: boolean },
   ) => Promise<{ ok: boolean; error?: string }>;
   debugDialog: (dialog: Omit<UiDialogRequest, "id">) => Promise<{ ok: boolean; id: string }>;
+  exportHtml: () => Promise<{ ok: boolean; path?: string; error?: string }>;
+  diagExport: () => Promise<{ ok: boolean; path?: string; error?: string }>;
   projects: {
     list: () => Promise<ProjectInfo[]>;
     add: (dir: string) => Promise<{ ok: boolean; error?: string }>;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BotIcon,
   GlobeIcon,
@@ -9,10 +9,13 @@ import {
   FolderIcon,
   MessageSquarePlusIcon,
   Minimize2Icon,
+  MoonIcon,
   Settings2Icon,
+  SunIcon,
   TerminalIcon,
   SearchIcon,
   Trash2Icon,
+  WorkflowIcon,
   WrenchIcon,
   XIcon,
 } from "lucide-react";
@@ -29,6 +32,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  PromptInputButton,
   PromptInputProvider,
   PromptInputSelect,
   PromptInputSelectContent,
@@ -50,12 +54,16 @@ import { AgentsPanel } from "@/components/agents-panel";
 import { BrowserPanel } from "@/components/browser-panel";
 import { CommandPalette, type PanelTab } from "@/components/command-palette";
 import { ExtensionDialog } from "@/components/extension-dialog";
+import { DualModelDialog } from "@/components/dual-model-dialog";
+import { ShortcutsDialog } from "@/components/shortcuts-dialog";
 import { usePi } from "@/hooks/usePi";
 import { useTasks } from "@/hooks/useTasks";
 import { useGit } from "@/hooks/useGit";
 import { useSessionStats } from "@/hooks/useSessionStats";
+import { useDualModel } from "@/hooks/useDualModel";
+import { useTheme } from "@/hooks/useTheme";
 import { baseName, cn } from "@/lib/utils";
-import type { PiMessage } from "@/lib/pi";
+import type { ModelInfo, PiMessage } from "@/lib/pi";
 
 const THINKING = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
@@ -63,6 +71,13 @@ const THINKING = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 // keeps the UI in a read-only-ish posture. Tools are still available to the model.
 const PLAN_PREFIX =
   "只做分析与方案：不要修改文件、不要执行写操作命令，给出分步骤方案后停下等我确认。\n\n";
+
+// Dual-model chain directives. The planner runs read-only; the executor picks
+// up the same conversation once the planning turn settles.
+const DUAL_PLAN_PREFIX =
+  "【规划阶段】只做分析与方案：不要修改任何文件，也不要执行会改变状态的命令。请给出分步骤实施方案，具体到要改的文件/函数/命令，并说明每步如何验证。完成后停下，等待执行阶段。\n\n";
+const DUAL_EXEC_PREFIX =
+  "【执行阶段】请按上面确定的方案开始实施。逐项完成并验证；如果实际情况与方案不符，做最小必要调整，并在最终回复中说明偏差。";
 
 function timeAgo(ms: number) {
   const min = Math.round((Date.now() - ms) / 60000);
@@ -91,6 +106,7 @@ function Shell() {
     clearError,
     respondDialog,
     setModel,
+    switchModel,
     setThinking,
     newSession,
     openSession,
@@ -106,6 +122,17 @@ function Shell() {
   const [planMode, setPlanMode] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [dualOpen, setDualOpen] = useState(false);
+  const [dualPhase, setDualPhase] = useState<"idle" | "planning" | "executing">("idle");
+  const dual = useDualModel();
+  const chainRef = useRef<{
+    phase: "idle" | "planning" | "executing";
+    started: boolean;
+    original?: ModelInfo;
+    sessionFile?: string;
+  }>({ phase: "idle", started: false });
+  const { theme, toggle: toggleTheme } = useTheme();
   const [panel, setPanel] = useState<PanelTab | null>(null);
   const [view, setView] = useState<"grouped" | "workspace" | "timeline">("workspace");
   const [sort, setSort] = useState<"updated" | "created">("updated");
@@ -127,14 +154,118 @@ function Shell() {
     refreshSessions();
   }, [refreshSessions]);
 
+  // ⌘N — new task, mirroring ZCode.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n") {
+        event.preventDefault();
+        newSession();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [newSession]);
+
+  // Ends the dual-model chain; restores the user's model unless aborted by a
+  // session switch (where the model belongs to the new session).
+  const resetDualChain = useCallback(
+    async (restore = true) => {
+      const chain = chainRef.current;
+      chainRef.current = { phase: "idle", started: false };
+      setDualPhase("idle");
+      if (restore && chain.original) await switchModel(chain.original);
+    },
+    [switchModel],
+  );
+
+  const startDualChain = useCallback(
+    async (text: string, files: Parameters<typeof prompt>[1], planner: ModelInfo) => {
+      chainRef.current = {
+        phase: "planning",
+        started: false,
+        original: state.model,
+        sessionFile: state.sessionFile,
+      };
+      setDualPhase("planning");
+      const switched = await switchModel(planner);
+      if (!switched) {
+        await resetDualChain();
+        return;
+      }
+      const res = await prompt(DUAL_PLAN_PREFIX + text, files, "followUp");
+      if (!res) await resetDualChain();
+      // The executor is looked up again when planning settles (config may change).
+    },
+    [state.model, state.sessionFile, switchModel, prompt, resetDualChain],
+  );
+
   const submit = (message: PromptInputMessage, behavior?: "steer" | "followUp") => {
     const text = message.text.trim();
     if (!text) return;
+    // A fresh task with dual-model enabled starts the planning turn.
+    if (dual.config.enabled && dualPhase === "idle" && !state.isStreaming) {
+      const planner = dual.find(state.models, dual.config.planner);
+      const executor = dual.find(state.models, dual.config.executor);
+      if (planner && executor) {
+        startDualChain(text, message.files, planner);
+        return;
+      }
+    }
     const body = planMode ? PLAN_PREFIX + text : text;
     // Always name a streamingBehavior: it only matters while pi is mid-run
     // (where a missing one is rejected outright), and is ignored when idle.
     // This keeps sends working even if our isStreaming flag lags reality.
     prompt(body, message.files, behavior ?? "followUp");
+  };
+
+  // Advance the chain when a phase's run settles.
+  useEffect(() => {
+    const chain = chainRef.current;
+    if (chain.phase === "idle") return;
+    if (state.isStreaming) {
+      chain.started = true;
+      return;
+    }
+    if (!chain.started) return;
+    if (chain.sessionFile !== state.sessionFile) {
+      resetDualChain(false);
+      return;
+    }
+    if (chain.phase === "planning") {
+      const executor = dual.find(state.models, dual.config.executor);
+      if (!executor) {
+        resetDualChain();
+        return;
+      }
+      chain.phase = "executing";
+      chain.started = false;
+      setDualPhase("executing");
+      void (async () => {
+        const switched = await switchModel(executor);
+        if (!switched) {
+          await resetDualChain();
+          return;
+        }
+        const res = await prompt(DUAL_EXEC_PREFIX, undefined, "followUp");
+        if (!res) await resetDualChain();
+      })();
+    } else {
+      resetDualChain();
+    }
+  }, [
+    state.isStreaming,
+    state.sessionFile,
+    state.models,
+    dual.config,
+    dual.find,
+    switchModel,
+    prompt,
+    resetDualChain,
+  ]);
+
+  const stopAll = () => {
+    if (chainRef.current.phase !== "idle") resetDualChain();
+    send({ type: "abort" });
   };
 
   const localCommand = (name: string) => {
@@ -290,6 +421,7 @@ function Shell() {
                     key={s.path}
                     showProject={view !== "workspace"}
                     onDelete={() => deleteSession(s.path)}
+                    onExport={() => window.pi.exportHtml()}
                     onOpen={() => openSession(s.path, s.cwd)}
                     onRename={(title) => {
                       if (s.path === state.sessionFile) renameSession(title);
@@ -310,16 +442,24 @@ function Shell() {
           </div>
         </ScrollArea>
 
-        <div className="shrink-0 border-t p-2">
+        <div className="flex shrink-0 items-center gap-1 border-t p-2">
           <button
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px] hover:bg-sidebar-accent"
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px] hover:bg-sidebar-accent"
             onClick={() => openSettings("general")}
             type="button"
           >
-            <Settings2Icon className="size-4 text-muted-foreground" />
+            <Settings2Icon className="size-4 shrink-0 text-muted-foreground" />
             设置
             <span className="ml-auto font-mono text-[10px] text-muted-foreground">⌘K</span>
           </button>
+          <Button
+            onClick={toggleTheme}
+            size="icon-sm"
+            title={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"}
+            variant="ghost"
+          >
+            {theme === "dark" ? <SunIcon className="size-4" /> : <MoonIcon className="size-4" />}
+          </Button>
         </div>
       </aside>
 
@@ -398,10 +538,16 @@ function Shell() {
         <Chat onFork={handleFork} state={state} />
 
         <div className="mx-auto w-full max-w-3xl px-6 pb-4">
-          {git?.isRepo || Object.keys(state.statuses).length > 0 ? (
+          {git?.isRepo || Object.keys(state.statuses).length > 0 || dualPhase !== "idle" ? (
             <div className="mb-1.5 flex items-center gap-2 px-1">
               {git?.isRepo ? (
                 <BranchPicker cwd={state.cwd} git={git} onSwitched={refreshGit} />
+              ) : null}
+              {dualPhase !== "idle" ? (
+                <span className="flex items-center gap-1 rounded-md border bg-background/60 px-2 py-1 text-[11px] text-primary">
+                  <WorkflowIcon className="size-3" />
+                  {dualPhase === "planning" ? "规划中" : "执行中"} · {state.model?.name ?? ""}
+                </span>
               ) : null}
               {Object.entries(state.statuses).map(([key, text]) => (
                 <span
@@ -421,7 +567,7 @@ function Shell() {
             cwd={state.cwd}
             onClearQueue={() => send({ type: "clear_queue" })}
             onLocalCommand={localCommand}
-            onStop={() => send({ type: "abort" })}
+            onStop={stopAll}
             onSubmit={submit}
             onTogglePlan={() => setPlanMode((v) => !v)}
             planMode={planMode}
@@ -429,6 +575,14 @@ function Shell() {
             streaming={state.isStreaming}
           >
             <ContextUsage onRefresh={refreshStats} stats={stats} />
+            <PromptInputButton
+              className={cn("gap-1 text-xs", dual.config.enabled && "text-primary")}
+              onClick={() => setDualOpen(true)}
+              title="双模型：规划模型出方案，执行模型落地"
+            >
+              <WorkflowIcon className="size-3.5" />
+              {dual.config.enabled ? "双模型" : "单模型"}
+            </PromptInputButton>
             <ModelPicker
               model={state.model}
               models={state.models}
@@ -520,10 +674,26 @@ function Shell() {
           },
           panel: (tab) => setPanel(tab),
           openSession: (path, cwd) => openSession(path, cwd),
+          shortcuts: () => setShortcutsOpen(true),
+          diagnostics: () => {
+            window.pi.diagExport();
+          },
         }}
         onOpenChange={setPaletteOpen}
         open={paletteOpen}
         sessions={state.sessions}
+      />
+
+      <ShortcutsDialog onOpenChange={setShortcutsOpen} open={shortcutsOpen} />
+
+      <DualModelDialog
+        config={dual.config}
+        models={state.models}
+        onOpenChange={setDualOpen}
+        open={dualOpen}
+        setEnabled={dual.setEnabled}
+        setExecutor={dual.setExecutor}
+        setPlanner={dual.setPlanner}
       />
     </div>
   );
@@ -553,6 +723,7 @@ function TaskRow({
   onRename,
   onReveal,
   onDelete,
+  onExport,
 }: {
   session: SessionRow;
   active: boolean;
@@ -565,6 +736,7 @@ function TaskRow({
   onRename: (title: string) => void;
   onReveal: () => void;
   onDelete: () => void;
+  onExport: () => void;
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   // Cross-project sessions carry a badge so the unified list stays readable.
@@ -638,6 +810,9 @@ function TaskRow({
         <DropdownMenuContent align="end">
           <DropdownMenuItem onSelect={() => setRenaming(session.path)}>重命名</DropdownMenuItem>
           <DropdownMenuItem onSelect={onOpen}>打开</DropdownMenuItem>
+          {active ? (
+            <DropdownMenuItem onSelect={onExport}>导出 HTML…</DropdownMenuItem>
+          ) : null}
           <DropdownMenuItem onSelect={onReveal}>在 Finder 中显示</DropdownMenuItem>
           <DropdownMenuItem
             onSelect={() => {
