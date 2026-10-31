@@ -2,6 +2,8 @@
 
 pi coding agent 的桌面客户端。Electron 壳 + React/shadcn/ui 界面，后端直接跑 `pi --mode rpc`。
 
+> 架构、模块、IPC、协议与调试指南见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。
+
 ## 运行
 
 ```bash

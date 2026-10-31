@@ -1,90 +1,12 @@
-// Session history: pi has no list RPC, so we read ~/.pi/agent/sessions
-// directly. Also hosts session deletion, fork-at-entry, and HTML export.
+// Session IPC handlers. Pure file logic lives in session-files.js.
 
-import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { requireString, safeHandle } from "./ipc.js";
-import { logLine } from "./diag.js";
-
-// pi's session JSONL format version this build understands. File-level forks
-// write that format by hand, so refuse unknown versions loudly instead of
-// producing a file pi cannot load.
-export const SUPPORTED_SESSION_VERSION = 3;
-
-export const sessionsRoot = () => path.join(os.homedir(), ".pi", "agent", "sessions");
-
-function sessionTitle(file) {
-  let raw;
-  try { raw = fs.readFileSync(file, "utf8"); } catch { return null; }
-  const lines = raw.split("\n");
-  let header = null;
-  let title = null;
-  const changed = { added: 0, removed: 0 };
-  for (const [index, line] of lines.entries()) {
-    if (!line.trim()) continue;
-    // Cheap substring pre-filters before JSON.parse: renames (session_info),
-    // the first user message (only until a title exists), and tool calls
-    // (the only records that change files).
-    if (index > 0) {
-      const mayRename = line.includes('"session_info"');
-      const mayUser = !title && line.includes('"role":"user"');
-      const mayTool = line.includes('"toolCall"');
-      if (!mayRename && !mayUser && !mayTool) continue;
-    }
-    let rec;
-    try { rec = JSON.parse(line); } catch { continue; }
-    if (rec.type === "session" && !header) header = rec;
-    // Renames append a session_info entry; the last one wins.
-    if (rec.type === "session_info" && rec.name) title = rec.name;
-    if (!title && rec.type === "message" && rec.message?.role === "user") {
-      const c = rec.message.content;
-      const text = typeof c === "string" ? c : c?.find((b) => b.type === "text")?.text;
-      if (text) title = text.replace(/\s+/g, " ").slice(0, 80);
-    }
-    if (rec.type === "message" && rec.message?.role === "assistant") {
-      for (const block of rec.message.content ?? []) {
-        if (block?.type !== "toolCall") continue;
-        const args = block.arguments ?? {};
-        const linesOf = (text) => (typeof text === "string" ? text.split("\n").length : 0);
-        if (block.name === "write") changed.added += linesOf(args.content);
-        if (block.name === "edit") {
-          for (const edit of args.edits ?? [{ oldText: args.oldText, newText: args.newText }]) {
-            changed.removed += linesOf(edit?.oldText);
-            changed.added += linesOf(edit?.newText);
-          }
-        }
-      }
-    }
-  }
-  if (!header) return null;
-  return {
-    path: file,
-    ...header,
-    title: title ?? "新会话",
-    mtime: fs.statSync(file).mtimeMs,
-    changed,
-  };
-}
-
-export function scanSessions() {
-  const root = sessionsRoot();
-  const out = [];
-  let dirs = [];
-  try { dirs = fs.readdirSync(root, { withFileTypes: true }); } catch { return out; }
-  for (const dir of dirs) {
-    if (!dir.isDirectory()) continue;
-    let files = [];
-    try { files = fs.readdirSync(path.join(root, dir.name)); } catch { continue; }
-    for (const name of files) {
-      if (!name.endsWith(".jsonl")) continue;
-      const info = sessionTitle(path.join(root, dir.name, name));
-      if (info) out.push(info);
-    }
-  }
-  return out.sort((a, b) => b.mtime - a.mtime);
-}
+import { requireString } from "./ipc-helpers.js";
+import { safeHandle } from "./ipc.js";
+import { logLine } from "./logs.js";
+import { buildForkLines, scanSessions, sessionsRoot } from "./session-files.js";
 
 export function registerSessionHandlers({ pi, dialog, shell }) {
   safeHandle("pi:sessions", () => scanSessions());
@@ -114,20 +36,10 @@ export function registerSessionHandlers({ pi, dialog, shell }) {
 
       const raw = fs.readFileSync(sessionFile, "utf8").split("\n").filter(Boolean);
       const header = JSON.parse(raw[0]);
-      if (header?.type !== "session") return { ok: false, error: "会话文件格式异常" };
-      if (Number(header.version) > SUPPORTED_SESSION_VERSION) {
-        return {
-          ok: false,
-          error: `会话格式 v${header.version} 超出当前支持（v${SUPPORTED_SESSION_VERSION}），请升级 Pi Desktop`,
-        };
-      }
-
+      const { newId, lines } = buildForkLines(header, chain);
       const now = new Date().toISOString();
-      const newId = crypto.randomUUID();
-      const newHeader = { ...header, id: newId, timestamp: now, parentSession: header.id };
       const fileTimestamp = now.replace(/[:.]/g, "-");
       const newFile = path.join(path.dirname(sessionFile), `${fileTimestamp}_${newId}.jsonl`);
-      const lines = [JSON.stringify(newHeader), ...chain.map((entry) => JSON.stringify(entry))];
       fs.writeFileSync(newFile, `${lines.join("\n")}\n`);
 
       const switched = await pi.command({ type: "switch_session", sessionPath: newFile }).catch((err) => {

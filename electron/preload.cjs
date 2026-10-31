@@ -24,7 +24,7 @@ contextBridge.exposeInMainWorld("pi", {
     deleteProvider: (name) => ipcRenderer.invoke("cfg:deleteProvider", name),
     setSetting: (patch) => ipcRenderer.invoke("cfg:setSetting", patch),
     gallery: (query) => ipcRenderer.invoke("cfg:gallery", query),
-    readSkill: (file) => ipcRenderer.invoke("cfg:readSkill", file),
+    readSkill: (file, cwd) => ipcRenderer.invoke("cfg:readSkill", { file, cwd }),
     deleteSkill: (dir) => ipcRenderer.invoke("cfg:deleteSkill", dir),
     setMcp: (name, enabled) => ipcRenderer.invoke("cfg:setMcp", { name, enabled }),
     savePersona: (payload) => ipcRenderer.invoke("cfg:savePersona", payload),

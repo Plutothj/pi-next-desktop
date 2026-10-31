@@ -1,32 +1,11 @@
-// Diagnostics: an in-memory log ring plus an export handler. Colleagues can
-// hand over one file with versions, environment, and recent errors.
+// Diagnostics: wires the log ring into an export handler. Colleagues can hand
+// over one file with versions, environment, and recent errors.
 
 import { app, dialog, shell } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
-const MAX_LOG_LINES = 500;
-const recent = [];
-
-/** Adds a line to the diagnostic ring without writing to stderr. */
-export function recordLine(scope, ...parts) {
-  const detail = parts
-    .map((part) => (part instanceof Error ? (part.stack ?? part.message) : String(part)))
-    .join(" ");
-  recent.push(`[${new Date().toISOString()}] [${scope}] ${detail}`);
-  if (recent.length > MAX_LOG_LINES) recent.shift();
-}
-
-export function logLine(scope, ...parts) {
-  recordLine(scope, ...parts);
-  const detail = parts
-    .map((part) => (part instanceof Error ? (part.stack ?? part.message) : String(part)))
-    .join(" ");
-  console.error(`[${scope}] ${detail}`);
-}
-
-export const recentLogs = () => recent.slice();
+import { recentLogs } from "./logs.js";
 
 export function registerDiagHandlers({ safeHandle, collect }) {
   safeHandle("diag:export", async () => {

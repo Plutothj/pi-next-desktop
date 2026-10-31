@@ -631,7 +631,13 @@ export function SettingsDialog({
           <div className="min-h-0 flex-1 overflow-auto">
             <div className="mx-auto w-full max-w-5xl px-10 py-8">
               {tab === "providers" ? (
-                <ProvidersPanel cfg={cfg} onApply={apply} setBusy={setBusy} setLog={setLog} />
+                <ProvidersPanel
+                  busy={busy}
+                  cfg={cfg}
+                  onApply={apply}
+                  setBusy={setBusy}
+                  setLog={setLog}
+                />
               ) : null}
               {tab === "packages" ? (
                 <PackagesPanel
@@ -642,7 +648,7 @@ export function SettingsDialog({
                   setLog={setLog}
                 />
               ) : null}
-              {tab === "skills" ? <SkillsPanel cfg={cfg} onApply={apply} /> : null}
+              {tab === "skills" ? <SkillsPanel cfg={cfg} cwd={cwd} onApply={apply} /> : null}
               {tab === "general" ? <SettingsForm cfg={cfg} sections={GROUPS.general} /> : null}
               {tab === "appearance" ? <SettingsForm cfg={cfg} sections={GROUPS.appearance} /> : null}
               {tab === "tools" ? <SettingsForm cfg={cfg} sections={GROUPS.tools} /> : null}
@@ -1138,9 +1144,11 @@ const labelOf = (kind: string) =>
 
 function SkillsPanel({
   cfg,
+  cwd,
   onApply,
 }: {
   cfg: CfgSnapshot;
+  cwd: string;
   onApply: (r: { ok: boolean; error?: string }) => Promise<void>;
 }) {
   const [preview, setPreview] = useState<{ name: string; body: string } | null>(null);
@@ -1171,7 +1179,7 @@ function SkillsPanel({
               <Button
                 className="h-9 px-3 text-xs"
                 onClick={async () =>
-                  setPreview({ name: s.name, body: await window.pi.cfg.readSkill(s.path) })
+                  setPreview({ name: s.name, body: await window.pi.cfg.readSkill(s.path, cwd) })
                 }
                 size="sm"
                 variant="ghost"
@@ -1220,7 +1228,7 @@ function Card({
   children,
 }: {
   icon: typeof BoxesIcon;
-  title: string;
+  title: React.ReactNode;
   desc?: string;
   children?: React.ReactNode;
 }) {

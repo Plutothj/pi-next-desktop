@@ -79,12 +79,12 @@ export const PI_BG_INSTRUCTIONS =
   "`pi-bg --kill <id>`. The task keeps running after your turn and appears in the user's UI. " +
   "Keep ordinary short commands in the normal bash tool.";
 
-// Ask the CLI itself whether it knows the flag (help text lists it). Cached per
+// Ask the CLI itself what it supports (help text lists the flags). Cached per
 // CLI path so a pi upgrade is picked up after an app restart.
-const appendPromptSupport = new Map();
+const cliProbes = new Map();
 
-export function supportsAppendPrompt(rt) {
-  const cached = appendPromptSupport.get(rt.cli);
+export function probeCli(rt) {
+  const cached = cliProbes.get(rt.cli);
   if (cached) return cached;
   const probe = new Promise((resolve) => {
     let out = "";
@@ -101,17 +101,52 @@ export function supportsAppendPrompt(rt) {
     });
     const timer = setTimeout(() => {
       try { proc.kill(); } catch {}
-      // Unknown either way: prefer trying the flag.
-      done(true);
+      // Unknown either way: prefer trying the flags.
+      done({ appendPrompt: true, modeFlag: true });
     }, 5000);
     proc.stdout.setEncoding("utf8");
     proc.stderr.setEncoding("utf8");
     proc.stdout.on("data", (d) => { out += d; });
     proc.stderr.on("data", (d) => { out += d; });
-    proc.on("error", () => done(true));
-    proc.on("exit", () => done(out.includes("append-system-prompt")));
+    proc.on("error", () => done({ appendPrompt: true, modeFlag: true }));
+    proc.on("exit", () => {
+      done({
+        appendPrompt: out.includes("append-system-prompt"),
+        modeFlag: out.includes("--mode"),
+      });
+    });
   });
-  appendPromptSupport.set(rt.cli, probe);
+  cliProbes.set(rt.cli, probe);
+  return probe;
+}
+
+// `pi --version`, cached; used for diagnostics and startup logging.
+const versionProbes = new Map();
+
+export function cliVersion(rt) {
+  const cached = versionProbes.get(rt.cli);
+  if (cached) return cached;
+  const probe = new Promise((resolve) => {
+    let out = "";
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      resolve(out.trim().split("\n")[0] || null);
+    };
+    const proc = spawn(rt.node, [rt.cli, "--version"], {
+      env: { ...process.env, ...rt.env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const timer = setTimeout(() => { try { proc.kill(); } catch {} done(); }, 5000);
+    proc.stdout.setEncoding("utf8");
+    proc.stderr.setEncoding("utf8");
+    proc.stdout.on("data", (d) => { out += d; });
+    proc.stderr.on("data", (d) => { out += d; });
+    proc.on("error", done);
+    proc.on("exit", done);
+  });
+  versionProbes.set(rt.cli, probe);
   return probe;
 }
 
@@ -170,7 +205,10 @@ export class PiProcess {
       // A superseded process exiting during a restart is not news.
       if (this.child !== proc) return;
       this.child = null;
-      for (const { reject } of this.pending.values()) reject(new Error("pi exited"));
+      for (const entry of this.pending.values()) {
+        clearTimeout(entry.timer);
+        entry.reject(new Error("pi exited"));
+      }
       this.pending.clear();
       this.onExit({ code, signal });
     });
@@ -183,7 +221,10 @@ export class PiProcess {
     this.child = null;
     try { dying.stdin.end(); } catch {}
     // Commands aimed at the old process will never be answered.
-    for (const { reject } of this.pending.values()) reject(new Error("pi 重启中"));
+    for (const entry of this.pending.values()) {
+      clearTimeout(entry.timer);
+      entry.reject(new Error("pi 重启中"));
+    }
     this.pending.clear();
     setTimeout(() => { try { dying.kill("SIGKILL"); } catch {} }, 1500);
   }
@@ -197,23 +238,31 @@ export class PiProcess {
       return;
     }
     if (rec.type === "response" && rec.id && this.pending.has(rec.id)) {
-      const { resolve, reject } = this.pending.get(rec.id);
+      const entry = this.pending.get(rec.id);
       this.pending.delete(rec.id);
-      rec.success ? resolve(rec) : reject(new Error(rec.error || "command failed"));
+      clearTimeout(entry.timer);
+      rec.success ? entry.resolve(rec) : entry.reject(new Error(rec.error || "command failed"));
       return;
     }
     this.onRecord(rec);
   }
 
-  command(payload) {
+  /** Sends an RPC command; rejects after timeoutMs so a hung pi can't pin callers. */
+  command(payload, timeoutMs = 30_000) {
     if (!this.child) return Promise.reject(new Error("pi 未运行"));
     const id = String(this.nextId++);
     const record = { id, ...payload };
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const entry = { resolve, reject, timer: null };
+      entry.timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`pi 命令超时: ${payload.type ?? "?"}（${timeoutMs / 1000}s）`));
+      }, timeoutMs);
+      this.pending.set(id, entry);
       try {
         this.child.stdin.write(`${JSON.stringify(record)}\n`);
       } catch (err) {
+        clearTimeout(entry.timer);
         this.pending.delete(id);
         reject(err);
       }

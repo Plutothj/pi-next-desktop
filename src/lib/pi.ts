@@ -295,11 +295,13 @@ export type PiBridge = {
     checkout: (cwd: string, branch: string) => Promise<{ ok: boolean; error?: string }>;
   };
   term: {
-    run: (cmd: string, cwd: string, label?: string) => Promise<{ id: string; cwd: string }>;
+    run: (cmd: string, cwd: string, label?: string, host?: string) => Promise<{ id: string; cwd: string }>;
+
     list: () => Promise<TaskInfo[]>;
     output: (id: string) => Promise<string>;
     kill: (id: string) => Promise<unknown>;
     remove: (id: string) => Promise<unknown>;
+    hosts: () => Promise<string[]>;
   };
   cfg: {
     read: (cwd?: string) => Promise<CfgSnapshot>;
@@ -307,7 +309,7 @@ export type PiBridge = {
     deleteProvider: (name: string) => Promise<{ ok: boolean; restart?: boolean }>;
     setSetting: (patch: Record<string, unknown>) => Promise<{ ok: boolean; restart?: boolean }>;
     gallery: (query?: string) => Promise<GalleryPackage[] | { error: string }>;
-    readSkill: (file: string) => Promise<string>;
+    readSkill: (file: string, cwd?: string) => Promise<string>;
     deleteSkill: (dir: string) => Promise<{ ok: boolean; error?: string; restart?: boolean }>;
     setResources: (source: string, disabled: Record<string, boolean>) => Promise<{ ok: boolean; restart?: boolean }>;
     setMcp: (name: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>;

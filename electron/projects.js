@@ -4,7 +4,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { safeHandle } from "./ipc.js";
-import { logLine } from "./diag.js";
+import { logLine } from "./logs.js";
 
 export function registerProjectHandlers({ userDataDir, scanSessions }) {
   const projectsFile = path.join(userDataDir, "projects.json");

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import type { BundledLanguage } from "shiki";
 import { ChevronLeftIcon, FileIcon, FolderIcon, Loader2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CodeBlock, CodeBlockCopyButton } from "@/components/ai-elements/code-block";
@@ -52,7 +53,7 @@ export function FilesPanel({ cwd }: { cwd: string }) {
           {isTable ? (
             <DelimitedTable content={file.content} delimiter={ext === "tsv" ? "\t" : ","} />
           ) : (
-            <CodeBlock code={file.content} language={LANGS[ext] ?? "text"}>
+            <CodeBlock code={file.content} language={(LANGS[ext] ?? "text") as BundledLanguage}>
               <CodeBlockCopyButton />
             </CodeBlock>
           )}

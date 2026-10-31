@@ -7,8 +7,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { safeHandle } from "./ipc.js";
-import { logLine } from "./diag.js";
+import { logLine } from "./logs.js";
 
 export function termPaths(userDataDir) {
   // Node speaks named pipes with the same net API on Windows, and AF_UNIX is
@@ -196,7 +195,7 @@ export function createTaskManager({ userDataDir, send }) {
             host: typeof payload.host === "string" ? payload.host : undefined,
             origin: "agent",
           });
-          return { ok: true, id: task.id, label: task.label, cwd: task.cwd, status: task.status };
+          return { ok: true, id: task.id, label: task.label, cwd: task.cwd, status: task.status, origin: task.origin };
         }
         case "list":
           return {
@@ -284,23 +283,17 @@ export function createTaskManager({ userDataDir, send }) {
     try { server?.close(); } catch {}
   }
 
-  function registerHandlers() {
-    safeHandle("term:run", (_e, { cmd, cwd, label, host } = {}) => {
-      if (typeof cmd !== "string" || !cmd.trim()) return { ok: false, error: "命令不能为空" };
-      const task = startTask({ cmd, cwd, label, host, origin: "user" });
-      return { id: task.id, cwd: task.cwd };
-    });
-    safeHandle("term:list", () => [...tasks.values()].map(({ kill, ...rest }) => rest));
-    safeHandle("term:out", (_e, id) => tasks.get(id)?.output ?? "");
-    safeHandle("term:kill", (_e, id) => {
-      tasks.get(id)?.kill?.();
-      return { ok: true };
-    });
-    safeHandle("term:remove", (_e, id) => {
-      tasks.get(id)?.kill?.();
-      tasks.delete(id);
-      return { ok: true };
-    });
+  const listTasks = () => [...tasks.values()].map(({ kill, ...rest }) => rest);
+
+  function killTask(id) {
+    tasks.get(id)?.kill?.();
+    return { ok: true };
+  }
+
+  function removeTask(id) {
+    tasks.get(id)?.kill?.();
+    tasks.delete(id);
+    return { ok: true };
   }
 
   const snapshot = () => [...tasks.values()].map(({ kill, output, ...rest }) => ({
@@ -308,5 +301,5 @@ export function createTaskManager({ userDataDir, send }) {
     outputTail: output.slice(-300),
   }));
 
-  return { paths, startTask, startBridge, stopBridge, registerHandlers, snapshot };
+  return { paths, startTask, startBridge, stopBridge, listTasks, killTask, removeTask, snapshot };
 }

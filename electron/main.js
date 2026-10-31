@@ -7,18 +7,21 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { registerConfigHandlers } from "./config-ipc.js";
-import { logLine, recordLine, registerDiagHandlers } from "./diag.js";
+import { logLine, recordLine } from "./logs.js";
+import { registerDiagHandlers } from "./diag.js";
 import { registerGitHandlers } from "./git.js";
 import { safeHandle } from "./ipc.js";
 import {
   PI_BG_INSTRUCTIONS,
   PiProcess,
+  cliVersion,
+  probeCli,
   resolveRuntime,
   runtimeVersion,
-  supportsAppendPrompt,
 } from "./pi-process.js";
 import { registerProjectHandlers } from "./projects.js";
-import { registerSessionHandlers, scanSessions } from "./sessions.js";
+import { scanSessions } from "./session-files.js";
+import { registerSessionHandlers } from "./sessions.js";
 import { createTaskManager, installTermCli } from "./tasks.js";
 import { registerWorkspaceHandlers } from "./workspace.js";
 
@@ -57,15 +60,20 @@ const pi = new PiProcess({
 
 // ---------------------------------------------------------------- pi lifecycle
 
+// Boots are serialised: a rapid project switch waits for the previous start
+// instead of interleaving two poll loops.
+let bootLock = Promise.resolve();
+
 async function startPi(cwd) {
   pi.stop();
   pendingDialogs.clear();
   send({ type: "ui_dialog_clear" });
 
   const rt = resolveRuntime();
+  const probe = await probeCli(rt);
   const argv = [rt.cli, "--mode", "rpc"];
   // Unknown flags make pi exit on startup; probe the CLI before adding one.
-  if (await supportsAppendPrompt(rt)) {
+  if (probe.appendPrompt) {
     argv.push("--append-system-prompt", PI_BG_INSTRUCTIONS);
   } else {
     send({
@@ -88,7 +96,9 @@ async function startPi(cwd) {
       ...(rt.installRoot ? { PI_MANAGED_INSTALL_ROOT: rt.installRoot } : {}),
     },
   });
-  logLine("pi", `started ${rt.cli} (v${runtimeVersion(rt)}) in ${cwd}`);
+  const version = (await cliVersion(rt)) ?? runtimeVersion(rt);
+  logLine("pi", `started ${rt.cli} (v${version}) in ${cwd}`);
+  return { rt, version };
 }
 
 // Extension text is written for a TUI; strip CSI/OSC escapes and control chars.
@@ -179,35 +189,70 @@ function createWindow() {
     win.loadFile(path.join(import.meta.dirname, "..", "dist", "index.html"));
   }
 
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
-    return { action: "deny" };
-  });
+  win.webContents.setWindowOpenHandler(({ url }) => openExternal(url));
 }
+
+// Only http(s) may leave the app; file:// or custom schemes stay local.
+function openExternal(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      shell.openExternal(url);
+    } else {
+      logLine("openExternal", "blocked non-http(s) url", url);
+    }
+  } catch {
+    logLine("openExternal", "blocked invalid url", url);
+  }
+  return { action: "deny" };
+}
+
+// Harden webviews: no window opening, no Node, no extra preload.
+app.on("web-contents-created", (_event, contents) => {
+  if (contents.getType() === "webview") {
+    contents.setWindowOpenHandler(() => ({ action: "deny" }));
+    contents.on("will-attach-webview", (_e, webPreferences, params) => {
+      delete webPreferences.preload;
+      webPreferences.nodeIntegration = false;
+      webPreferences.contextIsolation = true;
+      const src = String(params.src ?? "");
+      if (!/^https?:\/\//i.test(src)) params.src = "about:blank";
+    });
+  }
+});
 
 // ---------------------------------------------------------------- ipc
 
 safeHandle("pi:start", async (_e, { cwd } = {}) => {
   const resolved = cwd && fs.existsSync(cwd) ? cwd : os.homedir();
-  await startPi(resolved);
-  // Cold start: get_state can answer before the session/model exist, so poll.
-  let state = null;
-  for (let i = 0; i < 40; i++) {
-    await new Promise((r) => setTimeout(r, 400));
-    state = await pi.command({ type: "get_state" }).catch((e) => ({ error: String(e) }));
-    if (process.env.PI_DEBUG) recordLine("boot-poll", i, JSON.stringify(state).slice(0, 200));
-    if (state?.data?.model) break;
-  }
-  const [models, messages] = await Promise.all([
-    pi.command({ type: "get_available_models" }).catch(() => null),
-    pi.command({ type: "get_messages" }).catch(() => null),
-  ]);
-  return {
-    state: state?.data ?? null,
-    models: models?.data?.models ?? [],
-    messages: messages?.data?.messages ?? [],
-    cwd: resolved,
+  const run = async () => {
+    await startPi(resolved);
+    // Cold start: get_state can answer before the session/model exist, so poll.
+    let state = null;
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 400));
+      state = await pi.command({ type: "get_state" }).catch((e) => ({ error: String(e) }));
+      if (process.env.PI_DEBUG) recordLine("boot-poll", i, JSON.stringify(state).slice(0, 200));
+      if (state?.data?.model) break;
+    }
+    const [models, messages] = await Promise.all([
+      pi.command({ type: "get_available_models" }).catch(() => null),
+      pi.command({ type: "get_messages" }).catch(() => null),
+    ]);
+    return {
+      state: state?.data ?? null,
+      models: models?.data?.models ?? [],
+      messages: messages?.data?.messages ?? [],
+      cwd: resolved,
+    };
   };
+  // Serialise overlapping boots; the caller always gets the latest result.
+  const result = bootLock.then(run, run);
+  bootLock = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
 });
 
 safeHandle("pi:send", async (_e, payload) => {
@@ -254,13 +299,13 @@ if (process.env.PI_DEBUG) {
 registerSessionHandlers({ pi, dialog, shell });
 registerProjectHandlers({ userDataDir: app.getPath("userData"), scanSessions });
 registerGitHandlers();
-taskManager.registerHandlers();
 registerWorkspaceHandlers();
 registerConfigHandlers({ send });
 registerDiagHandlers({
   safeHandle,
   collect: async () => {
     const rt = resolveRuntime();
+    const probe = await probeCli(rt);
     let session = "unavailable";
     try {
       const state = await pi.command({ type: "get_state" });
@@ -274,8 +319,9 @@ registerDiagHandlers({
       runtime: {
         cli: rt.cli,
         node: rt.node,
-        version: runtimeVersion(rt),
+        version: (await cliVersion(rt)) ?? runtimeVersion(rt),
         managed: Boolean(rt.installRoot),
+        flags: probe,
       },
       piRunning: pi.running,
       session,
@@ -283,6 +329,17 @@ registerDiagHandlers({
     };
   },
 });
+
+// Task handlers live here so tasks.js stays Electron-free and testable.
+safeHandle("term:run", (_e, { cmd, cwd, label, host } = {}) => {
+  if (typeof cmd !== "string" || !cmd.trim()) return { ok: false, error: "命令不能为空" };
+  const task = taskManager.startTask({ cmd, cwd, label, host, origin: "user" });
+  return { id: task.id, cwd: task.cwd };
+});
+safeHandle("term:list", () => taskManager.listTasks());
+safeHandle("term:out", (_e, id) => taskManager.listTasks().find((t) => t.id === id)?.output ?? "");
+safeHandle("term:kill", (_e, id) => taskManager.killTask(id));
+safeHandle("term:remove", (_e, id) => taskManager.removeTask(id));
 
 // ---------------------------------------------------------------- lifecycle
 
