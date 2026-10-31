@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   BotIcon,
   GlobeIcon,
   BrainIcon,
+  CheckIcon,
   ChevronDownIcon,
   FilesIcon,
   FolderIcon,
@@ -14,7 +15,6 @@ import {
   Trash2Icon,
   WrenchIcon,
   XIcon,
-  ZapIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,27 +29,20 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  ModelSelector,
-  ModelSelectorContent,
-  ModelSelectorEmpty,
-  ModelSelectorGroup,
-  ModelSelectorInput,
-  ModelSelectorItem,
-  ModelSelectorList,
-  ModelSelectorName,
-  ModelSelectorTrigger,
-} from "@/components/ai-elements/model-selector";
-import {
   PromptInputProvider,
   PromptInputSelect,
   PromptInputSelectContent,
   PromptInputSelectItem,
   PromptInputSelectTrigger,
   PromptInputSelectValue,
+  usePromptInputController,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import { Chat } from "@/components/chat";
 import { Composer } from "@/components/composer";
+import { BranchPicker } from "@/components/branch-picker";
+import { ContextUsage } from "@/components/context-usage";
+import { ModelPicker } from "@/components/model-picker";
 import { SettingsDialog, type SettingsTab } from "@/components/settings-dialog";
 import { TerminalPanel } from "@/components/terminal-panel";
 import { FilesPanel } from "@/components/files-panel";
@@ -58,8 +51,10 @@ import { BrowserPanel } from "@/components/browser-panel";
 import { CommandPalette, type PanelTab } from "@/components/command-palette";
 import { usePi } from "@/hooks/usePi";
 import { useTasks } from "@/hooks/useTasks";
-import { cn } from "@/lib/utils";
-import type { ModelInfo } from "@/lib/pi";
+import { useGit } from "@/hooks/useGit";
+import { useSessionStats } from "@/hooks/useSessionStats";
+import { baseName, cn } from "@/lib/utils";
+import type { PiMessage } from "@/lib/pi";
 
 const THINKING = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
@@ -89,26 +84,35 @@ function Shell() {
   const {
     state,
     boot,
+    openProject,
     prompt,
     send,
+    clearError,
     setModel,
     setThinking,
     newSession,
     openSession,
+    deleteSession,
     refreshSessions,
     renameSession,
     compact,
+    forkAt,
   } = usePi();
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const controller = usePromptInputController();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [planMode, setPlanMode] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [panel, setPanel] = useState<PanelTab | null>(null);
-  const [view, setView] = useState<"grouped" | "workspace" | "timeline">("grouped");
+  const [view, setView] = useState<"grouped" | "workspace" | "timeline">("workspace");
   const [sort, setSort] = useState<"updated" | "created">("updated");
   const { tasks, run: runTask, kill: killTask, remove: removeTask, hosts } = useTasks();
+  const { git, refresh: refreshGit } = useGit(state.cwd, state.isStreaming);
+  const { stats, refresh: refreshStats } = useSessionStats(
+    state.sessionFile,
+    state.isStreaming,
+  );
 
   (window as unknown as Record<string, unknown>).__pi = state;
 
@@ -121,15 +125,14 @@ function Shell() {
     refreshSessions();
   }, [refreshSessions]);
 
-  const submit = (message: PromptInputMessage) => {
+  const submit = (message: PromptInputMessage, behavior?: "steer" | "followUp") => {
     const text = message.text.trim();
     if (!text) return;
     const body = planMode ? PLAN_PREFIX + text : text;
-    if (state.isStreaming) {
-      send({ type: "follow_up", message: body });
-    } else {
-      prompt(body, message.files);
-    }
+    // Always name a streamingBehavior: it only matters while pi is mid-run
+    // (where a missing one is rejected outright), and is ignored when idle.
+    // This keeps sends working even if our isStreaming flag lags reality.
+    prompt(body, message.files, behavior ?? "followUp");
   };
 
   const localCommand = (name: string) => {
@@ -138,7 +141,19 @@ function Shell() {
     else if (name === "plan") setPlanMode((v) => !v);
   };
 
-  const projects = collectProjects(state.sessions);
+  // Fork rebuilds history up to (not including) the chosen user prompt and
+  // returns its text; prefill the composer so it can be edited and resent.
+  const handleFork = useCallback(
+    async (message: PiMessage) => {
+      const res = await forkAt(message);
+      if (res.ok && res.text) controller.textInput.setInput(res.text);
+    },
+    [forkAt, controller],
+  );
+
+  const activeProject =
+    state.projects.find((p) => p.path === state.cwd) ??
+    (state.cwd ? { path: state.cwd, name: baseName(state.cwd) } : null);
 
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
@@ -176,24 +191,44 @@ function Shell() {
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button className="mx-2 mb-2 justify-start gap-2 text-xs" variant="ghost">
+            <Button
+              className="mx-2 mb-2 h-auto justify-start gap-2 py-1.5 text-xs"
+              variant="ghost"
+            >
               <FolderIcon className="size-3.5 shrink-0" />
-              <span className="truncate">{state.cwd || "~"}</span>
+              <span className="min-w-0 flex-1 text-left">
+                <span className="block truncate">{activeProject?.name ?? "选择项目"}</span>
+                <span className="block truncate text-[10px] text-muted-foreground">
+                  {state.cwd || "~"}
+                </span>
+              </span>
               <ChevronDownIcon className="ml-auto size-3 opacity-50" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="max-w-72">
+          <DropdownMenuContent align="start" className="max-h-80 w-72">
             <DropdownMenuLabel className="text-[11px] text-muted-foreground">
-              最近项目
+              项目
             </DropdownMenuLabel>
-            {projects.map((cwd) => (
+            {state.projects.length === 0 ? (
+              <p className="px-2 py-1.5 text-[11px] text-muted-foreground">
+                还没有项目，打开一个文件夹开始
+              </p>
+            ) : null}
+            {state.projects.map((p) => (
               <DropdownMenuItem
                 className="text-xs"
-                key={cwd}
-                onSelect={() => boot(cwd)}
+                key={p.path}
+                onSelect={() => {
+                  // Already the live workspace: just close the menu.
+                  if (p.path !== state.cwd) openProject(p.path);
+                }}
               >
-                <FolderIcon className="size-3.5" />
-                <span className="truncate">{cwd}</span>
+                <FolderIcon className={cn("size-3.5 shrink-0", !p.exists && "opacity-40")} />
+                <span className="min-w-0 flex-1 truncate" title={p.path}>
+                  {p.name}
+                  <span className="ml-1.5 text-[10px] text-muted-foreground">{p.sessions}</span>
+                </span>
+                {p.path === state.cwd ? <CheckIcon className="size-3 shrink-0" /> : null}
               </DropdownMenuItem>
             ))}
             <DropdownMenuSeparator />
@@ -201,7 +236,7 @@ function Shell() {
               className="text-xs"
               onSelect={async () => {
                 const dir = await window.pi.pickFolder();
-                if (dir) boot(dir);
+                if (dir) openProject(dir);
               }}
             >
               <FolderIcon className="size-3.5" />
@@ -238,23 +273,27 @@ function Shell() {
             {state.sessions.length === 0 ? (
               <p className="px-2 py-6 text-center text-muted-foreground text-xs">暂无任务</p>
             ) : null}
-            {groupSessions(state.sessions, view, sort).map(([label, items]) => (
+            {groupSessions(state.sessions, state.projects, view, sort).map(([label, items]) => (
               <div key={label}>
                 <p className="px-2 pt-2 pb-1 text-[10px] font-medium text-muted-foreground">
                   {label}
                 </p>
+                {items.length === 0 ? (
+                  <p className="px-2 py-1 text-[10px] text-muted-foreground/60">暂无任务</p>
+                ) : null}
                 {items.map((s) => (
                   <TaskRow
                     active={state.sessionFile === s.path}
+                    currentCwd={state.cwd}
                     key={s.path}
-                    onOpen={() => openSession(s.path)}
+                    showProject={view !== "workspace"}
+                    onDelete={() => deleteSession(s.path)}
+                    onOpen={() => openSession(s.path, s.cwd)}
                     onRename={(title) => {
                       if (s.path === state.sessionFile) renameSession(title);
                       else {
-                        send({ type: "switch_session", sessionPath: s.path }).then(() => {
-                          renameSession(title);
-                          openSession(s.path);
-                        });
+                        // Renaming applies to the live session: switch first.
+                        openSession(s.path, s.cwd).then(() => renameSession(title));
                       }
                     }}
                     onReveal={() => shellReveal(s.path)}
@@ -337,66 +376,60 @@ function Shell() {
             >
               <Minimize2Icon className="size-3.5" />
             </Button>
-
-            <ModelSelector onOpenChange={setPickerOpen} open={pickerOpen}>
-              <ModelSelectorTrigger asChild>
-                <Button className="h-7 gap-1 px-2 text-xs" size="sm" variant="outline">
-                  <ZapIcon className="size-3" />
-                  <span className="max-w-40 truncate">{state.model?.name ?? "选择模型"}</span>
-                  <ChevronDownIcon className="size-3 opacity-50" />
-                </Button>
-              </ModelSelectorTrigger>
-              <ModelSelectorContent title="选择模型">
-                <ModelSelectorInput placeholder="搜索模型…" />
-                <ModelSelectorList>
-                  <ModelSelectorEmpty>没有匹配的模型</ModelSelectorEmpty>
-                  {groupByProvider(state.models).map(([provider, models]) => (
-                    <ModelSelectorGroup heading={provider} key={provider}>
-                      {models.map((m) => (
-                        <ModelSelectorItem
-                          key={`${m.provider}/${m.id}`}
-                          onSelect={() => {
-                            setModel(m);
-                            setPickerOpen(false);
-                          }}
-                          value={`${m.provider} ${m.name} ${m.id}`}
-                        >
-                          <ModelSelectorName>{m.name}</ModelSelectorName>
-                          {m.reasoning ? (
-                            <Badge className="ml-auto text-[10px]" variant="outline">
-                              reasoning
-                            </Badge>
-                          ) : null}
-                        </ModelSelectorItem>
-                      ))}
-                    </ModelSelectorGroup>
-                  ))}
-                </ModelSelectorList>
-              </ModelSelectorContent>
-            </ModelSelector>
           </div>
         </header>
 
-        {state.status === "exited" || state.status === "error" ? (
-          <div className="border-b bg-destructive/10 px-4 py-2 text-destructive text-xs">
-            {state.error ?? "连接失败"}
+        {state.error || state.status === "exited" || state.status === "error" ? (
+          <div className="flex items-center gap-2 border-b bg-destructive/10 px-4 py-2 text-destructive text-xs">
+            <span className="min-w-0 flex-1 break-words">{state.error ?? "连接失败"}</span>
+            <button
+              className="shrink-0 rounded px-1 opacity-60 hover:opacity-100"
+              onClick={clearError}
+              title="清除错误"
+              type="button"
+            >
+              <XIcon className="size-3.5" />
+            </button>
           </div>
         ) : null}
 
-        <Chat state={state} />
+        <Chat onFork={handleFork} state={state} />
 
         <div className="mx-auto w-full max-w-3xl px-6 pb-4">
-          <QueueBar queue={state.queue} onClear={() => send({ type: "clear_queue" })} />
+          {git?.isRepo || Object.keys(state.statuses).length > 0 ? (
+            <div className="mb-1.5 flex items-center gap-2 px-1">
+              {git?.isRepo ? (
+                <BranchPicker cwd={state.cwd} git={git} onSwitched={refreshGit} />
+              ) : null}
+              {Object.entries(state.statuses).map(([key, text]) => (
+                <span
+                  className="max-w-64 truncate rounded-md border bg-background/60 px-2 py-1 text-[11px] text-muted-foreground"
+                  key={key}
+                  title={key}
+                >
+                  {text}
+                </span>
+              ))}
+            </div>
+          ) : null}
           <Composer
             commands={state.commands}
             cwd={state.cwd}
+            onClearQueue={() => send({ type: "clear_queue" })}
             onLocalCommand={localCommand}
             onStop={() => send({ type: "abort" })}
             onSubmit={submit}
             onTogglePlan={() => setPlanMode((v) => !v)}
             planMode={planMode}
+            queue={state.queue}
             streaming={state.isStreaming}
           >
+            <ContextUsage onRefresh={refreshStats} stats={stats} />
+            <ModelPicker
+              model={state.model}
+              models={state.models}
+              onSelect={setModel}
+            />
             <PromptInputSelect onValueChange={setThinking} value={state.thinkingLevel}>
               <PromptInputSelectTrigger className="h-7 gap-1 text-xs">
                 <BrainIcon className="size-3.5" />
@@ -481,38 +514,12 @@ function Shell() {
             if (dir) boot(dir);
           },
           panel: (tab) => setPanel(tab),
+          openSession: (path, cwd) => openSession(path, cwd),
         }}
         onOpenChange={setPaletteOpen}
         open={paletteOpen}
+        sessions={state.sessions}
       />
-    </div>
-  );
-}
-
-function QueueBar({
-  queue,
-  onClear,
-}: {
-  queue: { steering: string[]; followUp: string[] };
-  onClear: () => void;
-}) {
-  const items = [
-    ...queue.steering.map((text) => ({ text, kind: "打断" })),
-    ...queue.followUp.map((text) => ({ text, kind: "排队" })),
-  ];
-  if (!items.length) return null;
-
-  return (
-    <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1.5">
-      {items.map((item, i) => (
-        <span className="flex items-center gap-1 rounded bg-background px-1.5 py-0.5 text-[11px]">
-          <span className="text-muted-foreground">{item.kind}</span>
-          <span className="max-w-40 truncate">{item.text}</span>
-        </span>
-      ))}
-      <Button className="ml-auto h-6 px-1.5 text-[11px]" onClick={onClear} variant="ghost">
-        <Trash2Icon className="mr-1 size-3" /> 清空队列
-      </Button>
     </div>
   );
 }
@@ -521,32 +528,44 @@ const shellReveal = (target: string) => window.pi.reveal(target);
 
 type SessionRow = {
   path: string;
+  id: string;
   title: string;
   cwd: string;
   mtime: number;
   changed?: { added: number; removed: number };
 };
 
-/** One task row: title, relative time, status dot, hover menu. */
+/** One task row: title, project badge, relative time, status dot, hover menu. */
 function TaskRow({
   session,
   active,
   streaming,
   renaming,
   setRenaming,
+  showProject,
+  currentCwd,
   onOpen,
   onRename,
   onReveal,
+  onDelete,
 }: {
   session: SessionRow;
   active: boolean;
   streaming: boolean;
   renaming: boolean;
   setRenaming: (path: string | null) => void;
+  showProject: boolean;
+  currentCwd: string;
   onOpen: () => void;
   onRename: (title: string) => void;
   onReveal: () => void;
+  onDelete: () => void;
 }) {
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // Cross-project sessions carry a badge so the unified list stays readable.
+  const project = baseName(session.cwd);
+  const showBadge = showProject && session.cwd !== currentCwd;
+
   if (renaming) {
     return (
       <Input
@@ -569,7 +588,7 @@ function TaskRow({
     <div className="group relative">
       <button
         className={cn(
-          "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 pr-7 text-left hover:bg-sidebar-accent",
+          "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 pr-9 text-left hover:bg-sidebar-accent",
           active && "bg-sidebar-accent",
         )}
         onClick={onOpen}
@@ -583,6 +602,14 @@ function TaskRow({
           title={streaming ? "运行中" : "已完成"}
         />
         <span className="min-w-0 flex-1 truncate text-xs">{session.title}</span>
+        {showBadge ? (
+          <span
+            className="max-w-20 shrink-0 truncate rounded bg-muted px-1 py-px text-[9px] text-muted-foreground"
+            title={session.cwd}
+          >
+            {project}
+          </span>
+        ) : null}
         {session.changed && session.changed.added + session.changed.removed > 0 ? (
           <span className="shrink-0 font-mono text-[10px]">
             <span className="text-emerald-500">+{session.changed.added}</span>{" "}
@@ -593,11 +620,11 @@ function TaskRow({
           {timeAgo(session.mtime).replace("前", "")}
         </span>
       </button>
-      <DropdownMenu>
+      <DropdownMenu onOpenChange={(open) => !open && setConfirmingDelete(false)}>
         <DropdownMenuTrigger asChild>
           <Button
-            className="absolute top-1 right-1 opacity-0 group-hover:opacity-100"
-            size="icon-sm"
+            className="absolute top-1/2 right-1 -translate-y-1/2 opacity-0 group-hover:opacity-100"
+            size="icon-xs"
             variant="ghost"
           >
             <ChevronDownIcon className="size-3" />
@@ -607,6 +634,27 @@ function TaskRow({
           <DropdownMenuItem onSelect={() => setRenaming(session.path)}>重命名</DropdownMenuItem>
           <DropdownMenuItem onSelect={onOpen}>打开</DropdownMenuItem>
           <DropdownMenuItem onSelect={onReveal}>在 Finder 中显示</DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => {
+              navigator.clipboard.writeText(session.id);
+            }}
+          >
+            复制会话 ID
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className={cn(confirmingDelete ? "text-destructive focus:text-destructive" : "text-muted-foreground")}
+            onSelect={(e) => {
+              // Two-step inline confirm instead of a modal.
+              if (!confirmingDelete) {
+                e.preventDefault();
+                setConfirmingDelete(true);
+                return;
+              }
+              onDelete();
+            }}
+          >
+            {confirmingDelete ? "确认删除" : "删除"}
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
@@ -616,6 +664,7 @@ function TaskRow({
 /** ZCode's three list views: day buckets, by workspace, or one flat timeline. */
 function groupSessions(
   sessions: SessionRow[],
+  projects: { path: string; name: string }[],
   view: "grouped" | "workspace" | "timeline",
   sort: "updated" | "created",
 ): [string, SessionRow[]][] {
@@ -624,12 +673,29 @@ function groupSessions(
     .sort((a, b) => (sort === "updated" ? b.mtime - a.mtime : a.mtime - b.mtime));
   if (view === "timeline") return [["时间线", list]];
 
+  if (view === "workspace") {
+    // Projects without sessions still get a group, so the sidebar reads as a
+    // project list rather than an archive of past work.
+    const labels = new Map<string, string>();
+    const buckets = new Map<string, SessionRow[]>();
+    for (const project of projects) {
+      labels.set(project.path, project.name);
+      buckets.set(project.path, []);
+    }
+    for (const session of list) {
+      const bucket = buckets.get(session.cwd) ?? [];
+      bucket.push(session);
+      buckets.set(session.cwd, bucket);
+    }
+    return [...buckets.entries()].map(([cwd, items]) => [
+      labels.get(cwd) ?? baseName(cwd),
+      items,
+    ]);
+  }
+
   const buckets = new Map<string, SessionRow[]>();
   for (const session of list) {
-    const label =
-      view === "workspace"
-        ? session.cwd.split("/").pop() || session.cwd
-        : dayBucket(session.mtime);
+    const label = dayBucket(session.mtime);
     const bucket = buckets.get(label) ?? [];
     bucket.push(session);
     buckets.set(label, bucket);
@@ -646,18 +712,3 @@ function dayBucket(ms: number) {
   return "更早";
 }
 
-function collectProjects(sessions: { cwd: string }[]) {
-  const seen = new Set<string>();
-  for (const s of sessions) seen.add(s.cwd);
-  return [...seen].slice(0, 8);
-}
-
-function groupByProvider(models: ModelInfo[]): [string, ModelInfo[]][] {
-  const map = new Map<string, ModelInfo[]>();
-  for (const m of models) {
-    const list = map.get(m.provider) ?? [];
-    list.push(m);
-    map.set(m.provider, list);
-  }
-  return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-}

@@ -20,6 +20,16 @@ export function useTasks() {
   useEffect(() => {
     refresh();
     return window.pi.onEvent((rec: RpcEvent) => {
+      // Tasks started by the agent (pi-bg) arrive as term_add pushes; silent
+      // ones never emit output events, so this is their only announcement.
+      if (rec.type === "term_add") {
+        const task = rec.task;
+        if (!task) return;
+        setTasks((list) =>
+          list.some((t) => t.id === task.id) ? list : [task, ...list].slice(0, 30),
+        );
+        return;
+      }
       if (rec.type !== "term_data" && rec.type !== "term_exit") return;
       if (!rec.id) return;
       setTasks((list) => {
@@ -51,6 +61,7 @@ export function useTasks() {
         exitCode: null,
         startedAt: Date.now(),
         output: "",
+        origin: "user",
       };
       setTasks((list) => [task, ...list].slice(0, 30));
       return task;

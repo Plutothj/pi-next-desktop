@@ -312,7 +312,7 @@ const SECTIONS: SSection[] = [
         label: "Shell 路径",
         hint: "bash 工具用的 shell，支持 ~。",
         type: "text",
-        placeholder: "/bin/zsh",
+        placeholder: "默认 shell",
       },
       { key: "shellCommandPrefix", label: "命令前缀", hint: "每条 shell 命令前自动加。", type: "text" },
       {

@@ -4,6 +4,7 @@ import {
   type ContentBlock,
   type ModelInfo,
   type PiMessage,
+  type ProjectInfo,
   type QueueState,
   type RpcEvent,
   type SessionInfo,
@@ -35,7 +36,10 @@ export type State = {
   sessionName?: string;
   sessionFile?: string;
   sessions: SessionInfo[];
+  projects: ProjectInfo[];
   commands: CommandInfo[];
+  /** Extension statuses pushed via ctx.ui.setStatus, e.g. a git extension's branch. */
+  statuses: Record<string, string>;
   autoCompact: boolean;
 };
 
@@ -50,7 +54,9 @@ const initialState: State = {
   tools: {},
   queue: { steering: [], followUp: [] },
   sessions: [],
+  projects: [],
   commands: [],
+  statuses: {},
   autoCompact: true,
 };
 
@@ -145,6 +151,13 @@ function reduce(state: State, rec: RpcEvent): State {
     }
     case "queue_update":
       return { ...state, queue: { steering: rec.steering ?? [], followUp: rec.followUp ?? [] } };
+    case "ui_status": {
+      const key = rec.key ?? "status";
+      const statuses = { ...state.statuses };
+      if (rec.text) statuses[key] = rec.text;
+      else delete statuses[key];
+      return { ...state, statuses };
+    }
     case "child_exit":
       return {
         ...state,
@@ -162,56 +175,94 @@ export function usePi() {
   const started = useRef(false);
 
   const refreshSessions = useCallback(async () => {
-    const sessions = await window.pi.sessions().catch(() => []);
-    setState((s) => ({ ...s, sessions }));
+    const [sessions, projects] = await Promise.all([
+      window.pi.sessions().catch(() => []),
+      window.pi.projects.list().catch(() => []),
+    ]);
+    setState((s) => ({ ...s, sessions, projects }));
   }, []);
 
-  const boot = useCallback(async (cwd?: string) => {
-    setState((s) => ({ ...s, status: "connecting", error: undefined }));
-    const res = await window.pi.start(cwd);
-    const st = res.state ?? {};
-    const commands = (await window.pi
-      .send({ type: "get_commands" })
-      .catch(() => null)) as { commands?: CommandInfo[] } | null;
-    setState((s) => ({
-      ...s,
-      status: "ready",
-      cwd: res.cwd,
-      models: res.models,
-      messages: res.messages,
-      streaming: null,
-      tools: {},
-      isStreaming: Boolean(st.isStreaming),
-      model: (st.model as ModelInfo) ?? undefined,
-      thinkingLevel: String(st.thinkingLevel ?? "off"),
-      sessionName: st.sessionName as string | undefined,
-      sessionFile: st.sessionFile as string | undefined,
-      commands: commands?.commands ?? [],
-      autoCompact: Boolean((st.autoCompactionEnabled as boolean) ?? true),
-    }));
-    refreshSessions();
-  }, [refreshSessions]);
+  const boot = useCallback(
+    async (cwd?: string) => {
+      setState((s) => ({ ...s, status: "connecting", error: undefined }));
+      try {
+        const res = await window.pi.start(cwd);
+        const st = res.state ?? {};
+        const commands = (await window.pi
+          .send({ type: "get_commands" })
+          .catch(() => null)) as { commands?: CommandInfo[] } | null;
+        setState((s) => ({
+          ...s,
+          status: "ready",
+          cwd: res.cwd,
+          models: res.models,
+          messages: res.messages,
+          streaming: null,
+          tools: {},
+          queue: { steering: [], followUp: [] },
+          isStreaming: Boolean(st.isStreaming),
+          model: (st.model as ModelInfo) ?? undefined,
+          thinkingLevel: String(st.thinkingLevel ?? "off"),
+          sessionName: st.sessionName as string | undefined,
+          sessionFile: st.sessionFile as string | undefined,
+          commands: commands?.commands ?? [],
+          autoCompact: Boolean((st.autoCompactionEnabled as boolean) ?? true),
+        }));
+        refreshSessions();
+      } catch (err) {
+        setState((s) => ({
+          ...s,
+          status: "error",
+          error: `无法启动 pi：${(err as Error).message}`,
+        }));
+      }
+    },
+    [refreshSessions],
+  );
+
+  // Opening a project pins it to the project list, then boots pi inside it.
+  const openProject = useCallback(
+    async (dir: string) => {
+      await window.pi.projects.add(dir).catch(() => null);
+      await boot(dir);
+    },
+    [boot],
+  );
+
+  // Subscribe on every mount: StrictMode's mount → cleanup → remount cycle
+  // would otherwise leave the listener detached (dev builds only).
+  useEffect(() => {
+    return window.pi.onEvent((rec) => setState((s) => reduce(s, rec)));
+  }, []);
 
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    const off = window.pi.onEvent((rec) => setState((s) => reduce(s, rec)));
     boot();
-    return off;
   }, [boot]);
 
   const send = useCallback(async (payload: Record<string, unknown>) => {
     try {
-      return await window.pi.send(payload);
+      const res = await window.pi.send(payload);
+      // Any successful RPC means the connection is healthy again.
+      setState((s) => (s.error ? { ...s, error: undefined } : s));
+      return res;
     } catch (err) {
       setState((s) => ({ ...s, error: (err as Error).message }));
       return null;
     }
   }, []);
 
+  const clearError = useCallback(() => {
+    setState((s) => ({ ...s, error: undefined }));
+  }, []);
+
   const prompt = useCallback(
-    async (text: string, images?: FileUIPart[]) => {
+    async (text: string, images?: FileUIPart[], behavior?: "steer" | "followUp") => {
       const payload: Record<string, unknown> = { type: "prompt", message: text };
+      // While streaming, pi routes the message by streamingBehavior instead of
+      // throwing "Agent is already processing".
+      if (behavior) payload.streamingBehavior = behavior;
       if (images?.length) {
         payload.images = await Promise.all(
           images.map(async (file) => ({
@@ -238,13 +289,73 @@ export function usePi() {
 
   const compact = useCallback(() => send({ type: "compact" }), [send]);
 
+  // After a fork/switch the whole session identity moves; mirror it locally.
+  const syncAfterSwitch = useCallback(async () => {
+    const [st, msgs] = await Promise.all([
+      send({ type: "get_state" }),
+      send({ type: "get_messages" }),
+    ]);
+    const state_ = (st as any)?.state ?? (st as any) ?? {};
+    const messages = (msgs as any)?.messages ?? [];
+    setState((s) => ({
+      ...s,
+      messages,
+      streaming: null,
+      tools: {},
+      queue: { steering: [], followUp: [] },
+      isStreaming: Boolean(state_.isStreaming),
+      sessionFile: (state_.sessionFile as string | undefined) ?? s.sessionFile,
+      sessionName: state_.sessionName,
+      model: state_.model ?? s.model,
+      thinkingLevel: state_.thinkingLevel ?? s.thinkingLevel,
+    }));
+    refreshSessions();
+    return messages as PiMessage[];
+  }, [send, refreshSessions]);
+
   const fork = useCallback(
-    async (entryId: string) => {
-      await send({ type: "fork", entryId });
-      const msgs = (await send({ type: "get_messages" })) as { messages?: PiMessage[] } | null;
-      setState((s) => ({ ...s, messages: msgs?.messages ?? s.messages, streaming: null }));
+    async (entryId: string): Promise<{ ok: boolean; text?: string }> => {
+      const res = (await send({ type: "fork", entryId })) as
+        | { text?: string; cancelled?: boolean }
+        | null;
+      if (!res || res.cancelled) return { ok: false };
+      await syncAfterSwitch();
+      return { ok: true, text: res.text };
     },
-    [send],
+    [send, syncAfterSwitch],
+  );
+
+  // pi's fork takes a session entry id, not a message object; entries carry
+  // ids while get_messages does not, so match on role + timestamp.
+  const forkAt = useCallback(
+    async (message: PiMessage): Promise<{ ok: boolean; text?: string }> => {
+      const res = (await send({ type: "get_entries" })) as
+        | { entries?: Array<{ type: string; id: string; message?: PiMessage }> }
+        | null;
+      const entry = (res?.entries ?? []).find(
+        (e) =>
+          e.type === "message" &&
+          e.message?.role === message.role &&
+          e.message?.timestamp === message.timestamp,
+      );
+      if (!entry) {
+        setState((s) => ({ ...s, error: "找不到这条消息对应的会话条目，无法分支" }));
+        return { ok: false };
+      }
+      // User prompts fork natively ("before" + prefill). The RPC has no
+      // fork-at, so assistant/tool entries use the file-level fork instead.
+      if (entry.message?.role === "user") return fork(entry.id);
+      const fileFork = await window.pi
+        .forkSessionAt(entry.id)
+        .catch((err) => ({ ok: false as const, error: String(err) }));
+      if (!fileFork.ok) {
+        setState((s) => ({ ...s, error: fileFork.error ?? "分支失败" }));
+        return { ok: false };
+      }
+      await syncAfterSwitch();
+      return { ok: true };
+    },
+    [send, fork, syncAfterSwitch],
   );
 
   const sessionStats = useCallback(async () => {
@@ -256,6 +367,11 @@ export function usePi() {
     async (model: ModelInfo) => {
       setState((s) => ({ ...s, model }));
       await send({ type: "set_model", provider: model.provider, modelId: model.id });
+      // Persist as pi's default so new sessions (including after an app
+      // restart) start on this model instead of resetting to settings.
+      window.pi.cfg
+        .setSetting({ defaultProvider: model.provider, defaultModel: model.id })
+        .catch(() => null);
     },
     [send],
   );
@@ -264,23 +380,69 @@ export function usePi() {
     async (level: string) => {
       setState((s) => ({ ...s, thinkingLevel: level }));
       await send({ type: "set_thinking_level", level });
+      window.pi.cfg.setSetting({ defaultThinkingLevel: level }).catch(() => null);
     },
     [send],
   );
 
   const newSession = useCallback(async () => {
     await send({ type: "new_session" });
-    setState((s) => ({ ...s, messages: [], streaming: null, tools: {}, queue: { steering: [], followUp: [] } }));
+    // Re-read state so the header and the sidebar highlight follow the fresh
+    // session instead of silently staying on the old one.
+    const st = (await send({ type: "get_state" })) as Record<string, unknown> | null;
+    const fresh = (st as { state?: Record<string, unknown> })?.state ?? st ?? {};
+    setState((s) => ({
+      ...s,
+      messages: [],
+      streaming: null,
+      tools: {},
+      queue: { steering: [], followUp: [] },
+      isStreaming: false,
+      sessionFile: fresh.sessionFile as string | undefined,
+      sessionName: fresh.sessionName as string | undefined,
+    }));
     refreshSessions();
   }, [send, refreshSessions]);
 
-  const openSession = useCallback(
+  const deleteSession = useCallback(
     async (file: string) => {
-      await send({ type: "switch_session", sessionPath: file });
+      const res = await window.pi.deleteSession(file).catch(() => null);
+      if (!res?.ok) {
+        setState((s) => ({ ...s, error: res?.error ?? "删除会话失败" }));
+        return;
+      }
+      if (res.switched) {
+        // The main process moved pi onto a fresh session; mirror that here.
+        const st = (await send({ type: "get_state" })) as Record<string, unknown> | null;
+        const fresh = (st as { state?: Record<string, unknown> })?.state ?? st ?? {};
+        setState((s) => ({
+          ...s,
+          messages: [],
+          streaming: null,
+          tools: {},
+          queue: { steering: [], followUp: [] },
+          isStreaming: false,
+          sessionFile: fresh.sessionFile as string | undefined,
+          sessionName: fresh.sessionName as string | undefined,
+        }));
+      }
+      refreshSessions();
+    },
+    [send, refreshSessions],
+  );
+
+  // Rapid clicks on different rows race each other; only the latest applies.
+  const openSeq = useRef(0);
+  const openSession = useCallback(
+    async (file: string, cwd?: string) => {
+      const seq = ++openSeq.current;
+      const switched = await send({ type: "switch_session", sessionPath: file });
+      if (!switched || seq !== openSeq.current) return;
       const [st, msgs] = await Promise.all([
         send({ type: "get_state" }),
         send({ type: "get_messages" }),
       ]);
+      if (seq !== openSeq.current) return;
       const state_ = (st as any)?.state ?? (st as any) ?? {};
       const messages = (msgs as any)?.messages ?? [];
       setState((s) => ({
@@ -288,10 +450,13 @@ export function usePi() {
         messages,
         streaming: null,
         tools: {},
+        queue: { steering: [], followUp: [] },
         sessionFile: file,
         sessionName: state_.sessionName,
         model: state_.model ?? s.model,
         thinkingLevel: state_.thinkingLevel ?? s.thinkingLevel,
+        // Session files record their own cwd; cross-project switches follow it.
+        ...(cwd ? { cwd } : {}),
       }));
     },
     [send],
@@ -300,16 +465,20 @@ export function usePi() {
   return {
     state,
     boot,
+    openProject,
     prompt,
     send,
+    clearError,
     setModel,
     setThinking,
     newSession,
     openSession,
+    deleteSession,
     refreshSessions,
     renameSession,
     compact,
     fork,
+    forkAt,
     sessionStats,
   };
 }

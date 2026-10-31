@@ -1,5 +1,13 @@
 import { useEffect } from "react";
-import { BotIcon, FilesIcon, Minimize2Icon, PlusIcon, Settings2Icon, TerminalIcon } from "lucide-react";
+import {
+  BotIcon,
+  FilesIcon,
+  MessageSquareIcon,
+  Minimize2Icon,
+  PlusIcon,
+  Settings2Icon,
+  TerminalIcon,
+} from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -8,6 +16,8 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import type { SessionInfo } from "@/lib/pi";
+import { baseName } from "@/lib/utils";
 
 export type PanelTab = "files" | "terminal" | "agents" | "browser";
 
@@ -16,6 +26,7 @@ export function CommandPalette({
   open,
   onOpenChange,
   actions,
+  sessions,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -25,7 +36,9 @@ export function CommandPalette({
     pickFolder: () => void;
     settings: () => void;
     panel: (tab: PanelTab) => void;
+    openSession: (path: string, cwd?: string) => void;
   };
+  sessions: SessionInfo[];
 }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -45,9 +58,24 @@ export function CommandPalette({
 
   return (
     <CommandDialog onOpenChange={onOpenChange} open={open}>
-      <CommandInput placeholder="搜索命令…" />
+      <CommandInput placeholder="搜索任务或命令…" />
       <CommandList>
-        <CommandEmpty>没有匹配的命令</CommandEmpty>
+        <CommandEmpty>没有匹配的结果</CommandEmpty>
+        <CommandGroup heading="任务">
+          {sessions.slice(0, 30).map((s) => (
+            <CommandItem
+              key={s.path}
+              onSelect={run(() => actions.openSession(s.path, s.cwd))}
+              value={`${s.title} ${s.cwd} ${s.id}`}
+            >
+              <MessageSquareIcon className="size-3.5 shrink-0" />
+              <span className="min-w-0 flex-1 truncate">{s.title}</span>
+              <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
+                {baseName(s.cwd)}
+              </span>
+            </CommandItem>
+          ))}
+        </CommandGroup>
         <CommandGroup heading="会话">
           <CommandItem onSelect={run(actions.newSession)}>
             <PlusIcon className="size-3.5" /> 新建会话

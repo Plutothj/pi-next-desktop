@@ -5,6 +5,13 @@ contextBridge.exposeInMainWorld("pi", {
   send: (payload) => ipcRenderer.invoke("pi:send", payload),
   pickFolder: () => ipcRenderer.invoke("pi:pickFolder"),
   sessions: () => ipcRenderer.invoke("pi:sessions"),
+  deleteSession: (filePath) => ipcRenderer.invoke("pi:deleteSession", { path: filePath }),
+  forkSessionAt: (entryId) => ipcRenderer.invoke("pi:forkSessionAt", { entryId }),
+  projects: {
+    list: () => ipcRenderer.invoke("projects:list"),
+    add: (dir) => ipcRenderer.invoke("projects:add", dir),
+    remove: (dir) => ipcRenderer.invoke("projects:remove", dir),
+  },
   reveal: (target) => ipcRenderer.invoke("pi:reveal", target),
   cfg: {
     read: (cwd) => ipcRenderer.invoke("cfg:read", { cwd }),
@@ -24,6 +31,11 @@ contextBridge.exposeInMainWorld("pi", {
   tree: (cwd, dir = "") => ipcRenderer.invoke("files:tree", { cwd, dir }),
   readFile: (cwd, file) => ipcRenderer.invoke("files:read", { cwd, file }),
   agents: (cwd) => ipcRenderer.invoke("agents:list", { cwd }),
+  git: {
+    status: (cwd) => ipcRenderer.invoke("git:status", { cwd }),
+    branches: (cwd) => ipcRenderer.invoke("git:branches", { cwd }),
+    checkout: (cwd, branch) => ipcRenderer.invoke("git:checkout", { cwd, branch }),
+  },
   term: {
     run: (cmd, cwd, label, host) => ipcRenderer.invoke("term:run", { cmd, cwd, label, host }),
     list: () => ipcRenderer.invoke("term:list"),

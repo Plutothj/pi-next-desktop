@@ -1,5 +1,6 @@
 import { memo, useMemo, useState } from "react";
-import { CheckIcon, CopyIcon, TerminalIcon } from "lucide-react";
+import { mermaid } from "@streamdown/mermaid";
+import { CheckIcon, CopyIcon, GitForkIcon, TerminalIcon } from "lucide-react";
 import {
   Conversation,
   ConversationContent,
@@ -152,7 +153,13 @@ function Block({
   return null;
 }
 
-const UserMessage = memo(function UserMessage({ message }: { message: PiMessage }) {
+const UserMessage = memo(function UserMessage({
+  message,
+  onFork,
+}: {
+  message: PiMessage;
+  onFork?: (message: PiMessage) => void;
+}) {
   const text = textOf(message.content);
   const images = blocksOf(message).filter((b) => b.type === "image");
   return (
@@ -169,6 +176,18 @@ const UserMessage = memo(function UserMessage({ message }: { message: PiMessage 
           ) : null,
         )}
       </MessageContent>
+      <MessageActions className="justify-end opacity-0 transition-opacity group-hover:opacity-100">
+        <CopyAction text={text} />
+        {onFork ? (
+          <MessageAction
+            label="从这里分支"
+            onClick={() => onFork(message)}
+            tooltip="从这里分支：新会话保留此提问之前的历史，输入框预填该提问"
+          >
+            <GitForkIcon className="size-4" />
+          </MessageAction>
+        ) : null}
+      </MessageActions>
     </Message>
   );
 });
@@ -177,6 +196,7 @@ const AssistantMessage = memo(
   AssistantMessageBase,
   (prev, next) => {
     if (prev.blocks !== next.blocks || prev.streaming !== next.streaming) return false;
+    if (prev.onFork !== next.onFork) return false;
     for (const block of next.blocks) {
       if (block.type !== "toolCall") continue;
       if (prev.tools[block.id] !== next.tools[block.id]) return false;
@@ -187,15 +207,19 @@ const AssistantMessage = memo(
 );
 
 function AssistantMessageBase({
+  message,
   blocks,
   tools,
   results,
   streaming,
+  onFork,
 }: {
+  message?: PiMessage;
   blocks: ContentBlock[];
   tools: Record<string, ToolExec>;
   results: Record<string, PiMessage>;
   streaming?: boolean;
+  onFork?: (message: PiMessage) => void;
 }) {
   const text = blocks
     .filter((b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text")
@@ -220,6 +244,15 @@ function AssistantMessageBase({
       {!streaming && text.trim() ? (
         <MessageActions className="opacity-0 transition-opacity group-hover:opacity-100">
           <CopyAction text={text} />
+          {onFork && message ? (
+            <MessageAction
+              label="从这里分支"
+              onClick={() => onFork(message)}
+              tooltip="从这里分支：新会话保留到此回复为止的历史"
+            >
+              <GitForkIcon className="size-4" />
+            </MessageAction>
+          ) : null}
         </MessageActions>
       ) : null}
     </Message>
@@ -289,8 +322,8 @@ function BashCard({ message }: { message: PiMessage }) {
 
 const PAGE = 60;
 
-export function Chat(props: { state: State }) {
-  const { state } = props;
+export function Chat(props: { state: State; onFork?: (message: PiMessage) => void }) {
+  const { state, onFork } = props;
   // Long sessions get one page at a time: the DOM stays small no matter how
   // many turns the transcript holds.
   const [limit, setLimit] = useState(PAGE);
@@ -332,15 +365,17 @@ export function Chat(props: { state: State }) {
 
         {windowed.map((message, i) => {
           if (message.role === "user") {
-            return <UserMessage key={start + i} message={message} />;
+            return <UserMessage key={start + i} message={message} onFork={onFork} />;
           }
           if (message.role === "assistant") {
             return (
               <AssistantMessage
                 key={start + i}
                 blocks={blocksOf(message)}
-                tools={state.tools}
+                message={message}
+                onFork={onFork}
                 results={results}
+                tools={state.tools}
               />
             );
           }

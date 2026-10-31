@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ChevronLeftIcon, FileIcon, FolderIcon, Loader2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CodeBlock, CodeBlockCopyButton } from "@/components/ai-elements/code-block";
-import { cn } from "@/lib/utils";
+import { baseName, cn } from "@/lib/utils";
 import type { TreeEntry } from "@/lib/pi";
 
 const LANGS: Record<string, string> = {
@@ -75,7 +75,7 @@ export function FilesPanel({ cwd }: { cwd: string }) {
           </Button>
         ) : null}
         <span className="truncate font-mono text-[11px] text-muted-foreground">
-          {dir || cwd.split("/").pop()}
+          {dir || baseName(cwd)}
         </span>
         {loading ? <Loader2Icon className="size-3 animate-spin" /> : null}
       </div>

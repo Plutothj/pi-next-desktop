@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2Icon, PlayIcon, SquareIcon, Trash2Icon, TerminalIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { baseName, cn } from "@/lib/utils";
 import type { TaskInfo } from "@/lib/pi";
 
 const statusDot = {
@@ -29,7 +29,16 @@ export function TerminalPanel({
   const [cmd, setCmd] = useState("");
   const [host, setHost] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
+  const [now, setNow] = useState(Date.now());
   const current = tasks.find((t) => t.id === selected) ?? tasks[0];
+  const running = tasks.filter((t) => t.status === "running").length;
+
+  // Tick while anything runs so elapsed times count up live.
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [running]);
 
   useEffect(() => {
     if (!selected && tasks[0]) setSelected(tasks[0].id);
@@ -49,7 +58,7 @@ export function TerminalPanel({
           className="h-7 flex-1 border-0 bg-transparent px-1 font-mono text-xs shadow-none focus-visible:ring-0"
           onChange={(e) => setCmd(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submit()}
-          placeholder={`在 ${cwd.split("/").pop() || "~"} 运行命令，后台执行…`}
+          placeholder={`在 ${baseName(cwd) || "~"} 运行命令，后台执行…`}
           value={cmd}
         />
         {hosts.length > 0 ? (
@@ -78,30 +87,58 @@ export function TerminalPanel({
         </Button>
       </div>
 
+      <div className="flex shrink-0 items-center gap-2 border-b px-2 py-1 text-[10px] text-muted-foreground">
+        <span>后台任务</span>
+        <span>
+          {running > 0 ? `${running} 个运行中` : tasks.length > 0 ? `共 ${tasks.length} 个` : "暂无"}
+        </span>
+      </div>
+
       <div className="flex min-h-0 flex-1">
-        <div className="w-40 shrink-0 overflow-auto border-r">
+        <div className="w-44 shrink-0 overflow-auto border-r">
           {tasks.length === 0 ? (
             <p className="px-2 py-3 text-[11px] text-muted-foreground">暂无后台任务</p>
           ) : null}
           {tasks.map((task) => (
-            <button
+            <div
               className={cn(
-                "flex w-full items-center gap-1.5 border-b px-2 py-1.5 text-left hover:bg-accent/60",
+                "group/row flex w-full items-center gap-1.5 border-b px-2 py-1.5 text-left hover:bg-accent/60",
                 current?.id === task.id && "bg-accent",
               )}
               key={task.id}
-              onClick={() => setSelected(task.id)}
-              type="button"
             >
-              <span className={cn("size-1.5 shrink-0 rounded-full", statusDot[task.status])} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-mono text-[11px]">{task.label}</span>
-                <span className="block truncate text-[10px] text-muted-foreground">
-                  {duration(task)}
-                  {task.exitCode !== null ? ` · exit ${task.exitCode}` : ""}
+              <button
+                className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                onClick={() => setSelected(task.id)}
+                type="button"
+              >
+                <span className={cn("size-1.5 shrink-0 rounded-full", statusDot[task.status])} />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1">
+                    <span className="min-w-0 truncate font-mono text-[11px]">{task.label}</span>
+                    {task.origin === "agent" ? (
+                      <span className="shrink-0 rounded bg-primary/15 px-1 text-[9px] text-primary" title="由 agent 启动">
+                        agent
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="block truncate text-[10px] text-muted-foreground">
+                    {duration(task, now)}
+                    {task.exitCode !== null ? ` · exit ${task.exitCode}` : ""}
+                  </span>
                 </span>
-              </span>
-            </button>
+              </button>
+              {task.status === "running" ? (
+                <span
+                  className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground opacity-0 hover:bg-accent hover:text-destructive group-hover/row:opacity-100"
+                  onClick={() => onKill(task.id)}
+                  role="button"
+                  title="停止"
+                >
+                  <SquareIcon className="size-3" />
+                </span>
+              ) : null}
+            </div>
           ))}
         </div>
 
@@ -168,9 +205,11 @@ function OutputPane({ task }: { task: TaskInfo }) {
   );
 }
 
-function duration(task: TaskInfo) {
-  const ms = (task.endedAt ?? Date.now()) - task.startedAt;
-  if (ms < 1000) return "刚刚";
-  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
-  return `${Math.round(ms / 60_000)}m`;
+function duration(task: TaskInfo, now: number) {
+  const ms = Math.max(0, (task.endedAt ?? now) - task.startedAt);
+  const total = Math.round(ms / 1000);
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  const text = minutes > 0 ? `${minutes} 分 ${seconds} 秒` : `${seconds} 秒`;
+  return task.status === "running" ? `已运行 ${text}` : text;
 }

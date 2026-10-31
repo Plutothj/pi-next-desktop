@@ -85,6 +85,9 @@ export type RpcEvent = {
   code?: number | null;
   signal?: string | null;
   chunk?: string;
+  key?: string;
+  text?: string;
+  task?: TaskInfo;
   message_text?: string;
   aborted?: boolean;
   reason?: string;
@@ -97,6 +100,25 @@ export type SessionInfo = {
   timestamp: string;
   title: string;
   mtime: number;
+};
+
+export type GitStatus = {
+  isRepo: boolean;
+  branch?: string;
+  detached?: boolean;
+  ahead?: number;
+  behind?: number;
+  dirty?: boolean;
+  error?: string;
+};
+
+export type ProjectInfo = {
+  path: string;
+  name: string;
+  sessions: number;
+  mtime: number;
+  stored: boolean;
+  exists: boolean;
 };
 
 export type ProviderModel = {
@@ -214,6 +236,7 @@ export type TaskInfo = {
   startedAt: number;
   endedAt?: number;
   output: string;
+  origin?: "user" | "agent";
 };
 
 export type TreeEntry = { name: string; path: string; dir: boolean };
@@ -238,10 +261,22 @@ export type PiBridge = {
   pickFolder: () => Promise<string | null>;
   reveal: (target: string) => Promise<void>;
   sessions: () => Promise<SessionInfo[]>;
+  deleteSession: (filePath: string) => Promise<{ ok: boolean; switched?: boolean; error?: string }>;
+  forkSessionAt: (entryId: string) => Promise<{ ok: boolean; sessionFile?: string; error?: string }>;
+  projects: {
+    list: () => Promise<ProjectInfo[]>;
+    add: (dir: string) => Promise<{ ok: boolean; error?: string }>;
+    remove: (dir: string) => Promise<{ ok: boolean }>;
+  };
   files: (cwd: string, query: string) => Promise<string[]>;
   tree: (cwd: string, dir?: string) => Promise<TreeEntry[]>;
   readFile: (cwd: string, file: string) => Promise<{ content?: string; size?: number; error?: string }>;
   agents: (cwd?: string) => Promise<AgentProfile[]>;
+  git: {
+    status: (cwd: string) => Promise<GitStatus>;
+    branches: (cwd: string) => Promise<{ branches: string[]; error?: string }>;
+    checkout: (cwd: string, branch: string) => Promise<{ ok: boolean; error?: string }>;
+  };
   term: {
     run: (cmd: string, cwd: string, label?: string) => Promise<{ id: string; cwd: string }>;
     list: () => Promise<TaskInfo[]>;
