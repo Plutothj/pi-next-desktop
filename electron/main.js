@@ -348,6 +348,13 @@ safeHandle("term:remove", (_e, id) => taskManager.removeTask(id));
 // ---------------------------------------------------------------- lifecycle
 
 app.whenReady().then(() => {
+  // In dev the process is Electron itself, so the Dock would show Electron's
+  // icon; packaged builds get theirs from the bundle (.icns).
+  if (!app.isPackaged && process.platform === "darwin") {
+    try {
+      app.dock.setIcon(path.join(import.meta.dirname, "..", "build", "icon.png"));
+    } catch {}
+  }
   // The bridge and its CLI must exist before pi starts, since pi's bash tool
   // uses the injected PATH / env to reach them.
   installTermCli(app.getPath("userData"));
