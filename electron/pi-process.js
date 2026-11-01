@@ -8,6 +8,24 @@ import path from "node:path";
 
 // Electron ships a Node runtime that can be reused as a plain interpreter.
 const ELECTRON_AS_NODE = { node: process.execPath, args: [], asNode: true };
+const ELECTRON_AS_NODE_ENV = { ELECTRON_RUN_AS_NODE: "1" };
+
+// Finder-launched apps only get /usr/bin:/bin:... on PATH, so node installed
+// via Homebrew is invisible. Spawning the app binary instead would make macOS
+// list a second "exec" Dock item, so look in the usual places first.
+function findSystemNode() {
+  const dataDir = process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share");
+  const candidates = [
+    path.join(dataDir, "pi-node", "current", "bin", "node"),
+    whichSync("node"),
+    "/opt/homebrew/bin/node",
+    "/usr/local/bin/node",
+  ];
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
 
 export function whichSync(bin) {
   // Windows resolves executables through PATHEXT (exe/cmd/bat), not X_OK.
@@ -31,13 +49,15 @@ export function whichSync(bin) {
 export function resolveRuntime() {
   const bundled = path.join(process.resourcesPath ?? "", "runtime");
   if (fs.existsSync(path.join(bundled, "cli.js"))) {
+    const cli = path.join(bundled, "cli.js");
+    const env = { NODE_PATH: path.join(bundled, "vendor") };
     const bundledNode = path.join(bundled, "bin", "node");
-    const node = fs.existsSync(bundledNode) ? bundledNode : null;
-    const env = {
-      NODE_PATH: path.join(bundled, "vendor"),
-      ...(node ? {} : { ELECTRON_RUN_AS_NODE: "1" }),
-    };
-    return { cli: path.join(bundled, "cli.js"), installRoot: null, ...(node ? { node, env } : { ...ELECTRON_AS_NODE, env }) };
+    if (fs.existsSync(bundledNode)) return { cli, installRoot: null, node: bundledNode, env };
+    // Prefer any real node: the app binary as ELECTRON_RUN_AS_NODE shows up
+    // as a second "exec" Dock item on macOS.
+    const node = findSystemNode();
+    if (node) return { cli, installRoot: null, node, env };
+    return { cli, installRoot: null, ...ELECTRON_AS_NODE, env: { ...env, ...ELECTRON_AS_NODE_ENV } };
   }
 
   if (process.env.PI_CLI) {
@@ -50,10 +70,8 @@ export function resolveRuntime() {
     installRoot, "releases", version, "node_modules",
     "@earendil-works", "pi-coding-agent", "dist", "bundle", "cli.js",
   );
-  const dataDir = process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share");
-  const managedNode = path.join(dataDir, "pi-node", "current", "bin", "node");
-  const node = fs.existsSync(managedNode) ? managedNode : whichSync("node") || process.execPath;
-  const env = node === process.execPath ? { ELECTRON_RUN_AS_NODE: "1" } : {};
+  const node = findSystemNode() || process.execPath;
+  const env = node === process.execPath ? ELECTRON_AS_NODE_ENV : {};
   return { node, cli, installRoot, env };
 }
 
