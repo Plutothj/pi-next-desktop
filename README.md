@@ -1,80 +1,167 @@
+<div align="center">
+
+<img src="build/icon.png" width="112" alt="Pi Desktop" />
+
 # Pi Desktop
 
-pi coding agent 的桌面客户端。Electron 壳 + React/shadcn/ui 界面，后端直接跑 `pi --mode rpc`。
+**pi coding agent 的桌面客户端** —— Electron 外壳 + React 界面，后端直接跑 `pi --mode rpc`。
 
-> 架构、模块、IPC、协议与调试指南见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。
+不自研 agent：pi 是唯一事实来源，外壳只负责编排、缓存与交互。
 
-## 运行
+[![Release](https://img.shields.io/github/v/release/Plutothj/pi-next-desktop?label=release)](https://github.com/Plutothj/pi-next-desktop/releases/latest)
+[![CI](https://github.com/Plutothj/pi-next-desktop/actions/workflows/ci.yml/badge.svg)](https://github.com/Plutothj/pi-next-desktop/actions/workflows/ci.yml)
+[![Release build](https://github.com/Plutothj/pi-next-desktop/actions/workflows/release.yml/badge.svg)](https://github.com/Plutothj/pi-next-desktop/actions/workflows/release.yml)
+
+</div>
+
+![对话界面](docs/images/chat.png)
+
+## 特性
+
+### 会话与项目
+- **多项目统一列表**：所有项目的会话混排展示，跨项目点击即切换（pi 按会话头里的 cwd 重建运行时），行内带项目徽标
+- 分组折叠（默认 3 条 + 展开）、按项目/时间分组、平铺三种视图
+- 会话管理：重命名、删除（二次确认）、复制会话 ID、**导出 HTML**、Finder 显示
+- 活跃会话所在分组自动展开，手动收起不会被覆盖
+
+### 对话体验
+- 流式渲染：思考块与工具调用压缩为 **单行日志**（图标 + 名称 + 参数预览 + 状态），点击展开详情/差异
+- 代码高亮、diff 渲染、Mermaid 图表、图片附件缩放查看
+- 消息级操作：复制、**Fork**（用户消息之前分叉并预填输入框；任意助手回复文件级分叉）
+
+### 输入框
+- 模型选择器与思考等级**内嵌 footer**（锚定弹层，非模态）
+- `Enter` 发送、`Shift+Enter` 换行、流式中 `Enter` 排队、`Option+Enter` 立即插入（steer）
+- `/` 命令、`@` 文件引用、图片粘贴/拖拽附件、计划模式
+- 上下文用量环（tokens / 费用 / 缓存命中率）实时刷新
+
+### 工程能力
+- **Git 分支 chip**：当前分支、脏状态、ahead/behind，点击切换分支
+- **后台任务**：`pi-bg` CLI + 本地桥（Unix socket / Windows 命名管道），agent 可主动把长任务丢到终端面板，带实时时长、停止、agent 标记
+- **全局用量统计**：跨全部会话按模型/按天聚合 tokens、费用、调用次数，支持 7 天/30 天/全部筛选
+- **双模型模式**：规划模型只出方案 → 自动切执行模型 → 结束恢复原模型；方案自动落盘到 `<项目>/.pi/plans/`
+- 扩展协议完整支持：`confirm` / `notify` / `setTitle` / `setStatus` / `setWidget` / `select` / `input` / `editor`
+- ⌘K 命令面板（搜索任务/命令）、⌘N 新建任务、浅色/深色主题、快捷键面板
+- 诊断导出（版本、运行时、会话、任务快照 + 最近日志）
+
+### 自包含运行时
+- 安装包内置 **官方 Node** 与 **pi 运行时**，不依赖本机 node / pi 安装
+- 独立配置目录 **`~/.pi-desktop/`**：`agent/`（配置、auth、会话、扩展）、`bin/pi-bg`、`terminal.sock`、`projects.json`
+- 首次启动自动从 `~/.pi/agent` 迁移一次（配置、会话、扩展树），之后与 CLI 版 pi 互不干扰
+
+![文件树](docs/images/files.png)
+
+## 安装
+
+从 [Releases](https://github.com/Plutothj/pi-next-desktop/releases/latest) 下载：
+
+| 平台 | 产物 |
+|---|---|
+| macOS (arm64) | `.dmg` / `.zip` |
+| Windows (x64) | `.exe` 安装包 |
+| Linux (x64) | `.AppImage` |
+
+应用内 **检查更新**（侧边栏底部按钮或 ⌘K）支持自动更新。macOS 包未签名，被 Gatekeeper 拦截时右键 → 打开，或执行：
+
+```bash
+xattr -cr /Applications/Pi.app
+```
+
+## 开发
 
 ```bash
 npm install
-npm start          # 构建前端并启动 Electron
-npm run dev        # 只跑 Vite 开发服务器（配合 PI_DEV_URL 使用）
+
+npm run dev        # 只启动 Vite
+PI_DEV_URL=http://localhost:5173 npm run electron   # 日常开发：热更新模式
+npm start          # 生产资源模式（构建 + 启动）
+npm test           # node:test 冒烟（会话解析 / fork / 任务桥）
+npx tsc --noEmit   # 类型检查（CI 强制 0 错误）
 ```
 
-Electron 二进制下载失败时（GitHub 被墙）：
+Electron 下载失败时（网络原因）：
 
 ```bash
 ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ node node_modules/electron/install.js
 ```
 
-## 结构
-
-```
-electron/main.js       主进程入口：窗口/生命周期、pi 子进程、扩展 UI 协议桥
-electron/pi-process.js 运行时解析（node/cli/版本）、能力探测、RPC 子进程封装
-electron/sessions.js   会话扫描/标题解析、删除、文件级 fork、导出 HTML
-electron/projects.js   项目列表持久化（projects.json）
-electron/git.js        分支状态/切换（直接调 git）
-electron/tasks.js      后台任务表、本地 socket/命名管道桥、pi-bg CLI 安装
-electron/workspace.js  文件搜索/树/预览、子智能体、SSH 主机
-electron/config-ipc.js 设置读写与 pi install/uninstall
-electron/diag.js       诊断日志环 + 导出诊断信息
-electron/ipc.js        统一 IPC 包装（参数校验、错误日志）
-electron/preload.cjs   contextBridge → window.pi
-src/App.tsx            侧边栏（项目/会话）+ 顶栏 + 对话区 + 输入框
-src/hooks/usePi.ts     RPC 事件 → React 状态（流式增量、工具调用、队列、扩展状态/对话框）
-src/hooks/useGit.ts    分支状态；useSessionStats.ts 用量；useTheme.ts 主题
-src/components/chat.tsx  消息渲染，基于 AI Elements
-src/components/ui/    shadcn/ui 组件
-src/components/ai-elements/   Vercel AI Elements（conversation / message / prompt-input / tool / reasoning / model-selector）
-```
-
-启动时可用 `PI_DEBUG=1` 打开调试（`pi:debugDialog` 直接预览扩展对话框）。
-
-## 运行时解析顺序
-
-1. `process.resourcesPath/runtime/cli.js`（打包后的内置运行时，含 `bin/node`）
-2. `$PI_CLI`
-3. `~/.pi/agent/install/` 下由 `current-version` 指向的版本；node 依次取 `~/.local/share/pi-node/current/bin/node`（若存在）、PATH 里的 `node`、最后 `process.execPath` + `ELECTRON_RUN_AS_NODE=1`
-
-## 后台任务桥接
-
-pi 的 bash 工具没有后台模式，所以桌面端安装了 `pi-bg`（`userData/bin`，通过 PATH 注入给 pi 及其子进程），命令经本地 Unix socket（`userData/term.sock`，0600）进入终端面板的任务表：
+打包与发布：
 
 ```bash
-pi-bg "<command>" [--cwd DIR] [--label TEXT] [--host HOST]
-pi-bg --list | --output ID | --kill ID | --wait ID [--timeout 秒]
+npm run stage      # 准备运行时：pi bundle + 官方 Node（有缓存；NODE_MIRROR 可换镜像）
+npm run dist       # 当前平台安装包（不发布）
+npm run release    # 构建并发布到 GitHub Releases（CI 使用）
 ```
 
-桌面端启动 pi 时通过 `--append-system-prompt` 告知 agent：长命令（dev server、watch、长构建）用 `pi-bg` 启动。任务与面板里手动启动的任务共用一套状态，面板中带 `agent` 标记。
+发布新版本：改 `package.json` version → 提交 → 打 tag：
 
-跨平台：macOS/Linux 用 Unix socket（0600）与 `$SHELL -lc`；Windows 用命名管道 `\\.\pipe\pi-desktop-term-<user>`、`cmd.exe /d /s /c` 执行任务、`taskkill /T` 停止进程树，并额外安装 `pi-bg.cmd`（经 Electron 自带的 Node 运行，不依赖系统 Node）。PATH 拼接与路径解析均使用 `path.delimiter` / 双分隔符处理。
+```bash
+git tag v0.2.5 && git push origin v0.2.5
+```
 
-## 兼容性
+`Release` 工作流构建三平台安装包，由单独的 publish job 统一上传（`latest*.yml` 供自动更新使用）。
 
-- 启动 pi 前会执行一次 `pi --help` 探测 `--append-system-prompt`；不支持时省略该参数并提示，pi-bg 本身仍可用。
-- 文件级 fork 前校验会话头 `version`，超出支持版本会拒绝并提示升级，避免写出 pi 无法加载的会话。
-- 扩展的 `select` / `input` / `editor` 由输入框上方的卡片处理（Esc/取消都会回 `cancelled`，pi 不会挂起）。
+### 环境变量
 
-## 发布与自动更新
+| 变量 | 作用 |
+|---|---|
+| `PI_DEV_URL` | 渲染层加载 Vite dev server（热更新） |
+| `PI_DEBUG` | 启用 `pi:debugDialog` 调试扩展对话框、boot 轮询日志 |
+| `PI_CLI` / `PI_NODE` | 覆盖 pi CLI / 解释器（开发时指向本地安装） |
+| `PI_DESKTOP_HOME` | 覆盖 `~/.pi-desktop` 数据目录 |
+| `NODE_MIRROR` | `npm run stage` 下载 Node 的镜像（默认 nodejs.org） |
 
-- **发布**：push `v*` tag（或在 Actions 手动触发 Release 工作流）—— macOS/Windows/Linux 三平台构建 dmg/zip/nsis/AppImage 并上传到 GitHub Releases
-- **更新**：应用内「检查更新」（⌘K 或侧边栏底部按钮；启动 8 秒后也会自动检查一次）—— 有新版本时按钮变为下载入口，下载完成弹出「立即重启安装」
-- 实现：`electron-updater` + GitHub Releases（`build.publish` 指向本仓库）。macOS 包当前**未签名**，自动更新可能受限，此时回退为打开发布页手动下载
-- 本地打包 `npm run dist`（只构建不发布）；机器上没有 pi 安装时，stage 脚本会生成占位 runtime，打包的应用回退到用户本机的 pi 安装
+### 运行时解析顺序
+
+1. `process.resourcesPath/runtime/cli.js`（打包内置运行时，含 `bin/node`）
+2. `$PI_CLI`
+3. `~/.pi/agent/install/` 由 `current-version` 指向的版本；node 依次取托管安装、PATH、常见 Homebrew 路径
+
+## 架构
+
+```
+┌──────────────── Electron 主进程 ────────────────┐
+│ main.js           窗口/生命周期/扩展 UI 协议桥    │
+│ pi-process.js     运行时解析、能力探测、RPC 子进程 │
+│ sessions/projects 会话与项目（文件扫描 + 持久化）  │
+│ git/tasks/workspace 分支、后台任务桥、文件树      │
+│ config-ipc/diag/updater/usage  设置/诊断/更新/统计 │
+└──────────────┬───────────────────┬──────────────┘
+        IPC    │                   │ stdio JSONL
+┌──────────────▼─────────┐   ┌─────▼─────────────────┐
+│ React 渲染层            │   │ pi --mode rpc         │
+│ usePi 单一 reducer      │   │ （内置 Node + bundle） │
+│ Chat/Composer/面板/设置  │   └─────┬─────────────────┘
+└──────────────┬─────────┘         │ 子进程
+               └──── pi-bg CLI ─────┴──▶ 终端面板任务表
+```
+
+- **pi 是唯一事实来源**：会话内容、模型状态、扩展协议都来自 RPC；外壳只做增量缓存与对账
+- 主进程按职责拆分，IPC 统一经 `safeHandle`（参数校验 + 错误日志环）；渲染层单 reducer 承载事件流
+- 跨平台：macOS/Linux 用 Unix socket 与 `$SHELL -lc`；Windows 用命名管道、`cmd.exe`、`taskkill /T`
+
+完整设计、RPC 命令表、IPC 通道表、调试与排错索引见 **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**。
+
+![用量统计](docs/images/usage.png)
+
+## 数据目录
+
+| 内容 | 位置 |
+|---|---|
+| pi 配置 / 会话 / 扩展 | `~/.pi-desktop/agent/`（`PI_CODING_AGENT_DIR`） |
+| 项目列表、任务桥、pi-bg | `~/.pi-desktop/` |
+| 主题 / 双模型配置 | 应用 localStorage |
 
 ## 已知限制
 
-- 会话历史没有 RPC 命令，直接扫 `~/.pi/agent/sessions/*/*.jsonl` 读首行和第一条用户消息。
-- fork 助手消息/任意条目由主进程按 parentId 链复制会话文件实现（pi RPC 只支持在用户消息前 fork）。
+- macOS 安装包未签名/公证：自动更新可能被 Squirrel 拒绝，会回退为打开 Releases 页手动下载
+- Windows 版本由 CI 构建，尚未做真机手测
+- 会话列表通过扫描 `~/.pi-desktop/agent/sessions` 生成（带 mtime 缓存）
+- pi 的会话文件格式按 v3 校验；未知版本会拒绝文件级 fork 并提示升级
+- 扩展的 `select/input/editor` 由输入框上方卡片处理；其他扩展 UI 方法按协议转发
+
+## 致谢
+
+基于 [pi coding agent](https://github.com/earendil-works/pi-coding-agent) 构建；界面使用 Electron、React、Tailwind CSS、shadcn/ui、[Vercel AI Elements](https://ai-sdk.dev/elements)、Streamdown。
+
+> 仓库暂无 LICENSE 文件（默认保留所有权利）。如需对外分发/二次开发，请先补充许可证。
