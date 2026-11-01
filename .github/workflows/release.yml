@@ -1,8 +1,9 @@
 name: Release
 
-# Push a tag (v*) to build macOS/Windows/Linux packages and publish them to
-# GitHub Releases. Manual dispatch publishes a draft release for the version
-# in package.json.
+# Push a tag (v*) to build macOS/Windows/Linux packages, then publish them to
+# GitHub Releases from a single job. electron-builder's own publisher creates a
+# new release per job even when they run sequentially, so builds here are
+# publish-never and the upload happens once with `gh release`.
 on:
   push:
     tags: ["v*"]
@@ -15,10 +16,6 @@ jobs:
   build:
     strategy:
       fail-fast: false
-      # Publishing is not concurrency-safe: parallel jobs each create their own
-      # release for the same tag. Run platforms one after another so every job
-      # finds the existing release and adds its own assets.
-      max-parallel: 1
       matrix:
         os: [macos-latest, windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
@@ -29,17 +26,45 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run stage
-      - run: npm run release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # stage (pi bundle + official node) + vite build + electron-builder --publish never
+      - run: npm run dist
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: dist-${{ matrix.os }}
           path: |
             release/*.dmg
+            release/*.zip
             release/*.exe
             release/*.AppImage
-            release/*.zip
+            release/*.blockmap
+            release/latest*.yml
           if-no-files-found: ignore
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="v$(node -p "require('./package.json').version")"
+          mkdir -p out
+          find artifacts -type f \( \
+            -name '*.dmg' -o -name '*.zip' -o -name '*.exe' -o -name '*.AppImage' \
+            -o -name '*.blockmap' -o -name 'latest*.yml' \) -exec cp {} out/ \;
+          ls -la out
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" out/* --clobber
+          else
+            gh release create "$TAG" out/* --title "$TAG" --notes "Pi Desktop $TAG"
+          fi
