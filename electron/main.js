@@ -25,6 +25,7 @@ import { registerSessionHandlers } from "./sessions.js";
 import { createTaskManager, installTermCli } from "./tasks.js";
 import { registerWorkspaceHandlers } from "./workspace.js";
 import { registerUpdater } from "./updater.js";
+import { registerUsageHandlers } from "./usage-ipc.js";
 
 // ---------------------------------------------------------------- wiring
 
@@ -303,6 +304,7 @@ registerGitHandlers();
 registerWorkspaceHandlers();
 registerConfigHandlers({ send });
 registerUpdater({ safeHandle, send });
+registerUsageHandlers();
 registerDiagHandlers({
   safeHandle,
   collect: async () => {

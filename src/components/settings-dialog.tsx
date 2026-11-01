@@ -32,7 +32,8 @@ import { SkillsPanel } from "@/components/settings/skills";
 import { ExtensionsPanel } from "@/components/settings/extensions";
 import { PersonaPanel } from "@/components/settings/persona";
 import { MemoryPanel, McpPanel, CommandsPanel } from "@/components/settings/memory";
-import { AgentsPanel, StatsPanel, ProjectsPanel } from "@/components/settings/agents";
+import { AgentsPanel, ProjectsPanel } from "@/components/settings/agents";
+import { UsagePanel } from "@/components/settings/usage";
 import { AppearancePanel } from "@/components/settings/appearance";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -623,7 +624,7 @@ export function SettingsDialog({
               {tab === "agents" ? <AgentsPanel cfg={cfg} cwd={cwd} onChanged={onChanged} /> : null}
               {tab === "mcp" ? <McpPanel cfg={cfg} onApply={apply} /> : null}
               {tab === "commands" ? <CommandsPanel cfg={cfg} /> : null}
-              {tab === "stats" ? <StatsPanel /> : null}
+              {tab === "stats" ? <UsagePanel /> : null}
               {tab === "projects" ? <ProjectsPanel cwd={cwd} /> : null}
             </div>
           </div>

@@ -120,6 +120,23 @@ export type UpdateState = {
   current: string;
 };
 
+export type UsageEntry = {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  total: number;
+  cost: number;
+};
+
+export type UsageReport = {
+  totals: UsageEntry;
+  byModel: Array<UsageEntry & { model: string; provider: string; messages: number }>;
+  byDay: Array<UsageEntry & { day: string; messages: number }>;
+  sessions: number;
+  assistantMessages: number;
+};
+
 export type UiDialogRequest = {
   id: string;
   method: "select" | "input" | "editor";
@@ -297,6 +314,9 @@ export type PiBridge = {
   debugDialog: (dialog: Omit<UiDialogRequest, "id">) => Promise<{ ok: boolean; id: string }>;
   exportHtml: () => Promise<{ ok: boolean; path?: string; error?: string }>;
   diagExport: () => Promise<{ ok: boolean; path?: string; error?: string }>;
+  stats: {
+    usage: (days?: "all" | 7 | 30) => Promise<UsageReport>;
+  };
   updater: {
     state: () => Promise<UpdateState>;
     check: () => Promise<UpdateState & { ok: boolean }>;

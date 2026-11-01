@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CheckIcon,
   ChevronDownIcon,
@@ -231,6 +231,8 @@ function TaskRow({
 }
 
 /** Left rail: project switcher, session list, settings/theme footer. */
+const COLLAPSED_COUNT = 3;
+
 export function SessionSidebar({
   state,
   theme,
@@ -263,6 +265,29 @@ export function SessionSidebar({
   const [view, setView] = useState<"grouped" | "workspace" | "timeline">("workspace");
   const [sort, setSort] = useState<"updated" | "created">("updated");
   const [renaming, setRenaming] = useState<string | null>(null);
+  // Groups collapse to the newest few sessions; expanded groups show all.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleGroup = (label: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  // Make sure the active session's group is open. Retries until the sessions
+  // list actually contains the session (it arrives after boot), then stops for
+  // that session — a manual collapse is never overridden.
+  const expandedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!state.sessionFile || expandedFor.current === state.sessionFile) return;
+    const label = groupSessions(state.sessions, state.projects, view, sort).find(([, items]) =>
+      items.some((s) => s.path === state.sessionFile),
+    )?.[0];
+    if (label) {
+      setExpanded((prev) => (prev.has(label) ? prev : new Set(prev).add(label)));
+      expandedFor.current = state.sessionFile;
+    }
+  }, [state.sessionFile, state.sessions, state.projects, view, sort]);
   const activeProject =
     state.projects.find((p) => p.path === state.cwd) ??
     (state.cwd ? { path: state.cwd, name: baseName(state.cwd) } : null);
@@ -379,7 +404,10 @@ export function SessionSidebar({
           {state.sessions.length === 0 ? (
             <p className="px-2 py-6 text-center text-muted-foreground text-xs">暂无任务</p>
           ) : null}
-          {groupSessions(state.sessions, state.projects, view, sort).map(([label, items]) => (
+          {groupSessions(state.sessions, state.projects, view, sort).map(([label, items]) => {
+            const open = view === "timeline" || expanded.has(label);
+            const visible = open ? items : items.slice(0, COLLAPSED_COUNT);
+            return (
             <div key={label}>
               <p className="px-2 pt-2 pb-1 text-[10px] font-medium text-muted-foreground">
                 {label}
@@ -387,7 +415,7 @@ export function SessionSidebar({
               {items.length === 0 ? (
                 <p className="px-2 py-1 text-[10px] text-muted-foreground/60">暂无任务</p>
               ) : null}
-              {items.map((s) => (
+              {visible.map((s) => (
                 <TaskRow
                   active={state.sessionFile === s.path}
                   currentCwd={state.cwd}
@@ -410,8 +438,21 @@ export function SessionSidebar({
                   streaming={state.sessionFile === s.path && state.isStreaming}
                 />
               ))}
+              {items.length > COLLAPSED_COUNT ? (
+                <button
+                  className="flex w-full items-center gap-1 rounded px-2 py-1 text-[10px] text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+                  onClick={() => toggleGroup(label)}
+                  type="button"
+                >
+                  <ChevronDownIcon
+                    className={cn("size-3 transition-transform", open && "rotate-180")}
+                  />
+                  {open ? "收起" : `展开 ${items.length - COLLAPSED_COUNT} 个更早的会话`}
+                </button>
+              ) : null}
             </div>
-          ))}
+            );
+          })}
         </div>
       </ScrollArea>
 

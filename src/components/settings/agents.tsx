@@ -131,35 +131,6 @@ export function AgentsPanel({ cfg, cwd, onChanged }: { cfg: CfgSnapshot; cwd: st
 }
 
 
-export function StatsPanel() {
-  const [stats, setStats] = useState<Record<string, unknown> | null>(null);
-
-  useEffect(() => {
-    window.pi
-      .send({ type: "get_session_stats" })
-      .then((res) => setStats((res as Record<string, unknown>) ?? null))
-      .catch(() => setStats({}));
-  }, []);
-
-  const rows = Object.entries(stats ?? {}).filter(
-    ([, value]) => typeof value === "number" || typeof value === "string",
-  );
-
-  return (
-    <div className="space-y-2">
-      {rows.length === 0 ? (
-        <p className="text-xs text-muted-foreground">当前会话还没有统计数据。</p>
-      ) : null}
-      {rows.map(([key, value]) => (
-        <div className="flex items-center justify-between border-b py-1.5 text-xs" key={key}>
-          <span className="text-muted-foreground">{key}</span>
-          <span className="font-mono">{String(value)}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 
 export function ProjectsPanel({ cwd }: { cwd: string }) {
   const [sessions, setSessions] = useState<{ cwd: string }[]>([]);
