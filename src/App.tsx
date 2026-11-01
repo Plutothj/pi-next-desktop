@@ -12,6 +12,13 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   PromptInputButton,
   PromptInputProvider,
   PromptInputSelect,
@@ -43,6 +50,7 @@ import { useGit } from "@/hooks/useGit";
 import { useSessionStats } from "@/hooks/useSessionStats";
 import { useDualModel } from "@/hooks/useDualModel";
 import { useDualModelChain } from "@/hooks/useDualModelChain";
+import { useUpdater } from "@/hooks/useUpdater";
 import { useTheme } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
 import type { PiMessage } from "@/lib/pi";
@@ -91,7 +99,28 @@ function Shell() {
   const [dualOpen, setDualOpen] = useState(false);
   const dual = useDualModel();
   const dualChain = useDualModelChain({ dual, state, switchModel, prompt, send });
+  const updater = useUpdater();
   const { theme, toggle: toggleTheme } = useTheme();
+  const [restartDismissed, setRestartDismissed] = useState<string | null>(null);
+  const showRestart =
+    updater.state.status === "ready" &&
+    updater.state.version !== null &&
+    restartDismissed !== updater.state.version;
+
+  // One silent update check shortly after startup.
+  useEffect(() => {
+    const timer = setTimeout(() => updater.check(), 8000);
+    return () => clearTimeout(timer);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- run once
+
+  const onUpdateAction = () => {
+    const { status } = updater.state;
+    if (status === "idle" || status === "dev" || status === "up-to-date") updater.check();
+    else if (status === "available") updater.download();
+    else if (status === "ready") setRestartDismissed(null);
+    else if (status === "error") updater.openReleases();
+    // checking/downloading: no-op, progress shows on the button
+  };
   const [panel, setPanel] = useState<PanelTab | null>(null);
   const { tasks, run: runTask, kill: killTask, remove: removeTask, hosts } = useTasks();
   const { git, refresh: refreshGit } = useGit(state.cwd, state.isStreaming);
@@ -163,6 +192,8 @@ function Shell() {
       <SessionSidebar
         state={state}
         theme={theme}
+        update={updater.state}
+        onUpdateAction={onUpdateAction}
         onNewSession={newSession}
         onOpenPalette={() => setPaletteOpen(true)}
         onOpenSkills={() => openSettings("skills")}
@@ -386,6 +417,7 @@ function Shell() {
           panel: (tab) => setPanel(tab),
           openSession: (path, cwd) => openSession(path, cwd),
           shortcuts: () => setShortcutsOpen(true),
+          checkUpdate: () => updater.check(),
           diagnostics: () => {
             window.pi.diagExport();
           },
@@ -396,6 +428,34 @@ function Shell() {
       />
 
       <ShortcutsDialog onOpenChange={setShortcutsOpen} open={shortcutsOpen} />
+
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open) setRestartDismissed(updater.state.version ?? null);
+        }}
+        open={showRestart}
+      >
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm">
+              已下载 {updater.state.version ?? "新版本"}
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground">重启应用以完成安装。</p>
+          <DialogFooter className="gap-2">
+            <Button
+              onClick={() => setRestartDismissed(updater.state.version ?? null)}
+              size="sm"
+              variant="ghost"
+            >
+              稍后
+            </Button>
+            <Button onClick={updater.install} size="sm">
+              立即重启安装
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <DualModelDialog
         config={dual.config}

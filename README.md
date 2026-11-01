@@ -67,6 +67,13 @@ pi-bg --list | --output ID | --kill ID | --wait ID [--timeout 秒]
 - 文件级 fork 前校验会话头 `version`，超出支持版本会拒绝并提示升级，避免写出 pi 无法加载的会话。
 - 扩展的 `select` / `input` / `editor` 由输入框上方的卡片处理（Esc/取消都会回 `cancelled`，pi 不会挂起）。
 
+## 发布与自动更新
+
+- **发布**：push `v*` tag（或在 Actions 手动触发 Release 工作流）—— macOS/Windows/Linux 三平台构建 dmg/zip/nsis/AppImage 并上传到 GitHub Releases
+- **更新**：应用内「检查更新」（⌘K 或侧边栏底部按钮；启动 8 秒后也会自动检查一次）—— 有新版本时按钮变为下载入口，下载完成弹出「立即重启安装」
+- 实现：`electron-updater` + GitHub Releases（`build.publish` 指向本仓库）。macOS 包当前**未签名**，自动更新可能受限，此时回退为打开发布页手动下载
+- 本地打包 `npm run dist`（只构建不发布）；机器上没有 pi 安装时，stage 脚本会生成占位 runtime，打包的应用回退到用户本机的 pi 安装
+
 ## 已知限制
 
 - 会话历史没有 RPC 命令，直接扫 `~/.pi/agent/sessions/*/*.jsonl` 读首行和第一条用户消息。

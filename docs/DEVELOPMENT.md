@@ -390,7 +390,16 @@ submit（enabled && idle && 未流式）
 `defaultThinkingLevel`）。pi 新建会话时读取这些键，因此**应用重启后保持选择**。
 内部切换（双模型、会话切换）**不写**默认值。
 
-### 7.10 主题 / 快捷键 / 导出 / 诊断
+### 7.10 应用内更新
+
+`electron-updater` + GitHub Releases（`build.publish`）。状态机：
+`idle → checking → up-to-date | available → downloading → ready`（error 随时可能进入）。
+状态由主进程 `update_status` 事件推送；侧边栏底部按钮随状态变化
+（检查 → 下载 → 百分比 → 重启对话框；错误时点击打开发布页）。
+启动 8 秒后自动静默检查一次；`--version` 语义比较避免同版本误报。
+未打包（dev）时返回 `dev` 状态，UI 仅显示当前版本。
+
+### 7.11 主题 / 快捷键 / 导出 / 诊断
 
 - 主题：`useTheme` 切 `<html>.dark`，`localStorage: pi-desktop-theme`
 - 快捷键：⌘K 面板、⌘N 新建任务；完整列表在「快捷键」对话框
@@ -485,7 +494,7 @@ npm run stage             # 把本机 pi bundle 复制进 runtime/
 | ~~中~~ 部分完成 | ~~渲染层单体~~ | App.tsx ~370 行（Sidebar/双模型链已抽出）；settings-dialog 拆分仍待做 |
 | ~~中~~ 已建 | ~~测试/CI 缺失~~ | 8 个 node:test 冒烟全绿；CI（tsc/build/test）已配置；存量 tsc 错误清零 |
 | 低 | 偏好存储分散 | localStorage / projects.json / pi settings 三处；建议统一 app prefs |
-| 低 | 打包分发 | 仅 `dir` 目标、无签名/公证/自动更新；`electronDist` 指向本机 Electron，需按平台本机构建 |
+| 低 | 打包分发 | 三平台 dmg/zip/nsis/AppImage + GitHub Releases 发布已配置（push v* tag）；自动更新已实现；macOS 未签名（自动更新受限）、无公证 |
 | 低 | Windows 未真机验证 | 见 §9 |
 | 低 | 扩展 `ui_widget` / `ui_notify` | 已转发，UI 尚未渲染（不影响 agent） |
 

@@ -89,6 +89,7 @@ export type RpcEvent = {
   text?: string;
   task?: TaskInfo;
   dialog?: UiDialogRequest;
+  update?: UpdateState;
   message_text?: string;
   aborted?: boolean;
   reason?: string;
@@ -101,6 +102,22 @@ export type SessionInfo = {
   timestamp: string;
   title: string;
   mtime: number;
+};
+
+export type UpdateState = {
+  status:
+    | "idle"
+    | "dev"
+    | "checking"
+    | "up-to-date"
+    | "available"
+    | "downloading"
+    | "ready"
+    | "error";
+  version: string | null;
+  percent: number;
+  error: string | null;
+  current: string;
 };
 
 export type UiDialogRequest = {
@@ -280,6 +297,13 @@ export type PiBridge = {
   debugDialog: (dialog: Omit<UiDialogRequest, "id">) => Promise<{ ok: boolean; id: string }>;
   exportHtml: () => Promise<{ ok: boolean; path?: string; error?: string }>;
   diagExport: () => Promise<{ ok: boolean; path?: string; error?: string }>;
+  updater: {
+    state: () => Promise<UpdateState>;
+    check: () => Promise<UpdateState & { ok: boolean }>;
+    download: () => Promise<UpdateState & { ok: boolean }>;
+    install: () => Promise<{ ok: boolean; error?: string }>;
+    openReleases: () => Promise<{ ok: boolean }>;
+  };
   projects: {
     list: () => Promise<ProjectInfo[]>;
     add: (dir: string) => Promise<{ ok: boolean; error?: string }>;

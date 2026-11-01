@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   CheckIcon,
   ChevronDownIcon,
+  DownloadIcon,
   FolderIcon,
   MessageSquarePlusIcon,
   MoonIcon,
@@ -23,6 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { baseName, cn } from "@/lib/utils";
 import type { State } from "@/hooks/usePi";
+import type { UpdateState } from "@/lib/pi";
 
 function timeAgo(ms: number) {
   const min = Math.round((Date.now() - ms) / 60000);
@@ -241,6 +243,8 @@ export function SessionSidebar({
   openSession,
   deleteSession,
   renameSession,
+  update,
+  onUpdateAction,
 }: {
   state: State;
   theme: "dark" | "light";
@@ -253,6 +257,8 @@ export function SessionSidebar({
   openSession: (path: string, cwd?: string) => void | Promise<void>;
   deleteSession: (path: string) => Promise<void>;
   renameSession: (title: string) => Promise<void>;
+  update: UpdateState;
+  onUpdateAction: () => void;
 }) {
   const [view, setView] = useState<"grouped" | "workspace" | "timeline">("workspace");
   const [sort, setSort] = useState<"updated" | "created">("updated");
@@ -420,6 +426,27 @@ export function SessionSidebar({
           <span className="ml-auto font-mono text-[10px] text-muted-foreground">⌘K</span>
         </button>
         <Button
+          onClick={onUpdateAction}
+          size="icon-sm"
+          title={updateTitle(update)}
+          variant="ghost"
+        >
+          {update.status === "downloading" ? (
+            <span className="font-mono text-[9px] tabular-nums">{update.percent}</span>
+          ) : (
+            <DownloadIcon
+              className={cn(
+                "size-4",
+                update.status === "available" && "text-primary",
+                update.status === "ready" && "text-primary",
+              )}
+            />
+          )}
+          {update.status === "available" || update.status === "ready" ? (
+            <span className="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-primary" />
+          ) : null}
+        </Button>
+        <Button
           onClick={onToggleTheme}
           size="icon-sm"
           title={theme === "dark" ? "切换到浅色主题" : "切换到深色主题"}
@@ -430,4 +457,26 @@ export function SessionSidebar({
       </div>
     </aside>
   );
+}
+
+function updateTitle(update: UpdateState) {
+  const current = update.current ? `当前 v${update.current}` : "";
+  switch (update.status) {
+    case "checking":
+      return "正在检查更新…";
+    case "up-to-date":
+      return `已是最新（v${update.version ?? current}）`;
+    case "available":
+      return `有新版本 v${update.version}，点击下载`;
+    case "downloading":
+      return `下载中 ${update.percent}%`;
+    case "ready":
+      return `已下载 v${update.version}，点击重启安装`;
+    case "error":
+      return `检查/更新失败：${update.error ?? ""}（点击打开发布页）`;
+    case "dev":
+      return `${current}（开发模式不支持更新）`;
+    default:
+      return current ? `${current} · 检查更新` : "检查更新";
+  }
 }

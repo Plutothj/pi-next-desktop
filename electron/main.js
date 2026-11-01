@@ -24,6 +24,7 @@ import { scanSessions } from "./session-files.js";
 import { registerSessionHandlers } from "./sessions.js";
 import { createTaskManager, installTermCli } from "./tasks.js";
 import { registerWorkspaceHandlers } from "./workspace.js";
+import { registerUpdater } from "./updater.js";
 
 // ---------------------------------------------------------------- wiring
 
@@ -301,6 +302,7 @@ registerProjectHandlers({ userDataDir: app.getPath("userData"), scanSessions });
 registerGitHandlers();
 registerWorkspaceHandlers();
 registerConfigHandlers({ send });
+registerUpdater({ safeHandle, send });
 registerDiagHandlers({
   safeHandle,
   collect: async () => {

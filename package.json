@@ -11,8 +11,9 @@
     "stage": "node scripts/stage-runtime.mjs",
     "start": "npm run build && electron .",
     "electron": "electron .",
-    "dist": "npm run stage && npm run build && electron-builder",
-    "dist:dir": "npm run stage && npm run build && electron-builder --dir"
+    "dist": "npm run stage && npm run build && electron-builder --publish never",
+    "dist:dir": "npm run stage && npm run build && electron-builder --dir",
+    "release": "npm run stage && npm run build && electron-builder --publish always"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -35,6 +36,7 @@
     "cmdk": "^1.1.1",
     "cn": "^0.5.1",
     "diff": "^8.0.4",
+    "electron-updater": "^6.8.11",
     "lucide-react": "^1.66.0",
     "motion": "^14.9.0",
     "nanoid": "^6.0.2",
@@ -64,25 +66,35 @@
     ],
     "mac": {
       "target": [
-        "dir"
+        "dmg",
+        "zip"
       ],
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "identity": null
     },
     "win": {
       "target": [
-        "dir"
+        "nsis"
       ],
       "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "linux": {
       "target": [
-        "dir"
+        "AppImage"
       ],
       "category": "Development"
     },
-    "electronDist": "node_modules/electron/dist",
     "directories": {
       "output": "release"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Plutothj",
+      "repo": "pi-next-desktop"
     }
+  },
+  "description": "pi coding agent 的桌面客户端",
+  "author": {
+    "name": "Plutothj"
   }
 }

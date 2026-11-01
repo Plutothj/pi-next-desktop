@@ -10,6 +10,13 @@ contextBridge.exposeInMainWorld("pi", {
   respondUi: (id, values) => ipcRenderer.invoke("pi:uiRespond", { id, ...values }),
   exportHtml: () => ipcRenderer.invoke("pi:exportHtml"),
   diagExport: () => ipcRenderer.invoke("diag:export"),
+  updater: {
+    state: () => ipcRenderer.invoke("update:state"),
+    check: () => ipcRenderer.invoke("update:check"),
+    download: () => ipcRenderer.invoke("update:download"),
+    install: () => ipcRenderer.invoke("update:install"),
+    openReleases: () => ipcRenderer.invoke("update:releases"),
+  },
   // Only registered when the main process runs with PI_DEBUG.
   debugDialog: (dialog) => ipcRenderer.invoke("pi:debugDialog", dialog),
   projects: {

@@ -4,6 +4,7 @@ import {
   FilesIcon,
   KeyboardIcon,
   MessageSquareIcon,
+  RefreshCwIcon,
   Minimize2Icon,
   PlusIcon,
   Settings2Icon,
@@ -41,6 +42,7 @@ export function CommandPalette({
     openSession: (path: string, cwd?: string) => void;
     shortcuts: () => void;
     diagnostics: () => void;
+    checkUpdate: () => void;
   };
   sessions: SessionInfo[];
 }) {
@@ -108,6 +110,9 @@ export function CommandPalette({
           </CommandItem>
           <CommandItem onSelect={run(actions.shortcuts)}>
             <KeyboardIcon className="size-3.5" /> 快捷键
+          </CommandItem>
+          <CommandItem onSelect={run(actions.checkUpdate)}>
+            <RefreshCwIcon className="size-3.5" /> 检查更新
           </CommandItem>
           <CommandItem onSelect={run(actions.diagnostics)}>
             <StethoscopeIcon className="size-3.5" /> 导出诊断信息…
