@@ -4,9 +4,65 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Pi</title>
+    <style>
+      /* Boot splash: visible before the JS bundle runs; React fades it out
+         once pi is ready. Kept inline so it works without any CSS asset. */
+      #boot-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        background: #1c1c1c;
+        color: rgba(255, 255, 255, 0.55);
+        font: 12px -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+        transition: opacity 0.35s ease;
+        -webkit-app-region: drag;
+      }
+      #boot-splash img {
+        width: 88px;
+        height: 88px;
+        border-radius: 22%;
+      }
+      #boot-splash.hide {
+        opacity: 0;
+        pointer-events: none;
+      }
+      .boot-spinner {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        border: 2px solid rgba(255, 255, 255, 0.14);
+        border-top-color: rgba(255, 255, 255, 0.75);
+        animation: boot-spin 0.8s linear infinite;
+      }
+      @keyframes boot-spin {
+        to { transform: rotate(360deg); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .boot-spinner { animation: none; }
+      }
+    </style>
   </head>
   <body>
+    <div id="boot-splash">
+      <img src="./logo.png" alt="" />
+      <div class="boot-spinner"></div>
+      <p>启动中…</p>
+    </div>
     <div id="root"></div>
+    <script>
+      // If the renderer never boots, do not trap the user on the splash.
+      setTimeout(function () {
+        var el = document.getElementById("boot-splash");
+        if (!el) return;
+        el.classList.add("hide");
+        setTimeout(function () { el.remove(); }, 400);
+      }, 20000);
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

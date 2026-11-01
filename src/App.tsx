@@ -140,6 +140,17 @@ function Shell() {
     refreshSessions();
   }, [refreshSessions]);
 
+  // Fade out the boot splash once pi is ready (or failed, so the error UI shows).
+  useEffect(() => {
+    const { status } = state;
+    if (status !== "ready" && status !== "error" && status !== "exited") return;
+    const splash = document.getElementById("boot-splash");
+    if (!splash) return;
+    splash.classList.add("hide");
+    const timer = setTimeout(() => splash.remove(), 400);
+    return () => clearTimeout(timer);
+  }, [state.status]);
+
   // ⌘N — new task, mirroring ZCode.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
