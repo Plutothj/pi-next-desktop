@@ -398,7 +398,7 @@ function Shell() {
                 tasks={tasks}
               />
             ) : null}
-            {panel === "files" ? <FilesPanel cwd={state.cwd} /> : null}
+            {panel === "files" ? <FilesPanel changes={git?.changes} cwd={state.cwd} /> : null}
             {panel === "agents" ? <AgentsPanel cwd={state.cwd} state={state} /> : null}
             {panel === "browser" ? <BrowserPanel cwd={state.cwd} /> : null}
           </div>

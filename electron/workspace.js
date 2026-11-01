@@ -65,7 +65,9 @@ export function registerWorkspaceHandlers() {
     let entries = [];
     try { entries = fs.readdirSync(target, { withFileTypes: true }); } catch { return []; }
     return entries
-      .filter((e) => !SKIP.has(e.name) && !(e.name.startsWith(".") && e.name !== ".pi"))
+      // The tree shows dotfiles like ZCode (.git, .github, .zcode, …); only
+      // heavy build dirs and node_modules stay hidden.
+      .filter((e) => e.name === ".git" || !SKIP.has(e.name))
       .map((e) => ({ name: e.name, path: path.posix.join(dir, e.name), dir: e.isDirectory() }))
       .sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name))
       .slice(0, 500);

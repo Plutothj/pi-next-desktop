@@ -41,6 +41,43 @@ export function registerGitHandlers() {
     const detached = head === "(detached)";
     // Entries (1/2/u = changed, ? = untracked) mean a dirty tree; headers start with #.
     const dirty = lines.some((l) => /^[12u?]\s/.test(l));
+
+    // Per-file status for the file tree: cwd-relative paths, "/" separated.
+    let changes = [];
+    const [porcelain, toplevel] = await Promise.all([
+      git(gitDir(cwd), ["status", "--porcelain", "-z"]),
+      git(gitDir(cwd), ["rev-parse", "--show-toplevel"]),
+    ]);
+    if (porcelain.ok && toplevel.ok) {
+      const root = toplevel.stdout.trim();
+      const base = path.resolve(gitDir(cwd));
+      const tokens = porcelain.stdout.split("\0");
+      let i = 0;
+      while (i < tokens.length) {
+        const entry = tokens[i++];
+        if (!entry) continue;
+        const status = entry.slice(0, 2);
+        const paths = [entry.slice(3)];
+        // Rename/copy entries carry a second path token.
+        if (status[0] === "R" || status[0] === "C") {
+          const original = tokens[i];
+          if (original) {
+            paths.push(original);
+            i += 1;
+          }
+        }
+        for (const file of paths) {
+          const abs = path.resolve(root, file);
+          if (abs !== base && !abs.startsWith(base + path.sep)) continue;
+          changes.push({
+            path: path.relative(base, abs).split(path.sep).join("/"),
+            untracked: status === "??",
+          });
+        }
+        if (changes.length >= 500) break;
+      }
+    }
+
     return {
       isRepo: true,
       branch: detached ? oid.slice(0, 7) || "detached" : head,
@@ -48,6 +85,7 @@ export function registerGitHandlers() {
       ahead,
       behind,
       dirty,
+      changes,
     };
   });
 

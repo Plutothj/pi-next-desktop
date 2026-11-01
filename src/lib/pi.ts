@@ -154,6 +154,7 @@ export type GitStatus = {
   behind?: number;
   dirty?: boolean;
   error?: string;
+  changes?: { path: string; untracked: boolean }[];
 };
 
 export type ProjectInfo = {
