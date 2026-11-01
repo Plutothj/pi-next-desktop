@@ -61,11 +61,16 @@
 | Windows (x64) | `.exe` 安装包 |
 | Linux (x64) | `.AppImage` |
 
-应用内 **检查更新**（侧边栏底部按钮或 ⌘K）支持自动更新。macOS 包未签名，被 Gatekeeper 拦截时右键 → 打开，或执行：
+应用内 **检查更新**（侧边栏底部按钮或 ⌘K）支持自动更新。
+
+**macOS 首次启动**：安装包为 ad-hoc 签名（无 Apple 开发者证书），从网络下载后 Gatekeeper 会拦截。任选一种方式打开：
 
 ```bash
-xattr -cr /Applications/Pi.app
+# 推荐：移除下载隔离标记后直接打开
+xattr -dr com.apple.quarantine /Applications/Pi.app && open /Applications/Pi.app
 ```
+
+或：系统设置 → 隐私与安全性 → 安全性 →「仍要打开」。若提示「已损坏」且上述命令无效，请重新下载（旧版本缺少签名）。
 
 ## 开发
 

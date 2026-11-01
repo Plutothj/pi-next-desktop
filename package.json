@@ -1,6 +1,6 @@
 {
   "name": "pi-desktop",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "private": true,
   "type": "module",
   "main": "electron/main.js",
@@ -70,7 +70,7 @@
         "zip"
       ],
       "category": "public.app-category.developer-tools",
-      "identity": null
+      "identity": "-"
     },
     "win": {
       "target": [
