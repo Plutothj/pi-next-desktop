@@ -1,6 +1,19 @@
 import { memo, useMemo, useState } from "react";
 import { mermaid } from "@streamdown/mermaid";
-import { CheckIcon, CopyIcon, GitForkIcon, TerminalIcon } from "lucide-react";
+import {
+  BrainIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  CopyIcon,
+  FilePenLineIcon,
+  FileTextIcon,
+  GitForkIcon,
+  Loader2Icon,
+  SearchIcon,
+  TerminalIcon,
+  WrenchIcon,
+  XIcon,
+} from "lucide-react";
 import {
   Conversation,
   ConversationContent,
@@ -15,18 +28,6 @@ import {
   MessageResponse,
 } from "@/components/ai-elements/message";
 import {
-  Reasoning,
-  ReasoningContent,
-  ReasoningTrigger,
-} from "@/components/ai-elements/reasoning";
-import {
-  Tool,
-  ToolContent,
-  ToolHeader,
-  ToolInput,
-  ToolOutput,
-} from "@/components/ai-elements/tool";
-import {
   CodeBlock,
   CodeBlockCopyButton,
 } from "@/components/ai-elements/code-block";
@@ -36,9 +37,34 @@ import { FileDiff, editsOf } from "@/components/file-diff";
 import { blocksOf, textOf, type ContentBlock, type PiMessage, type ToolExec } from "@/lib/pi";
 import type { State } from "@/hooks/usePi";
 
-type ToolState = "input-streaming" | "input-available" | "output-available" | "output-error";
+const TOOL_ICONS: Record<string, typeof WrenchIcon> = {
+  bash: TerminalIcon,
+  read: FileTextIcon,
+  write: FilePenLineIcon,
+  edit: FilePenLineIcon,
+  grep: SearchIcon,
+  glob: SearchIcon,
+};
 
-function ToolCard({
+/** One-line summary of the call: the command, the path, or the pattern. */
+function toolPreview(name: string, args: Record<string, unknown>): string {
+  if (name === "bash" && typeof args.command === "string") {
+    return args.command.split("\n")[0];
+  }
+  if (typeof args.path === "string") return args.path;
+  if (typeof args.pattern === "string") return args.pattern;
+  try {
+    return JSON.stringify(args).slice(0, 120);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * ZCode-style compact tool log: one muted line with icon, name, argument
+ * preview and status; details open on click. Replaces the old bordered card.
+ */
+function ToolRow({
   block,
   exec,
   result,
@@ -49,7 +75,8 @@ function ToolCard({
   result?: PiMessage;
   streaming?: boolean;
 }) {
-  const args = block.arguments ?? exec?.args ?? {};
+  const [open, setOpen] = useState(false);
+  const args = (block.arguments ?? exec?.args ?? {}) as Record<string, unknown>;
   const fromMessage = result ? textOf(result.content) : "";
   const output =
     fromMessage ||
@@ -57,51 +84,93 @@ function ToolCard({
       ? exec.result
       : exec?.result
         ? JSON.stringify(exec.result, null, 2)
-        : undefined);
-  const failed = result?.isError || exec?.status === "error";
-  const diff = editsOf(args as Record<string, unknown>);
-  const details = result?.details;
-
-  const state: ToolState = failed
-    ? "output-error"
-    : output !== undefined
-      ? "output-available"
-      : exec || streaming
-        ? "input-available"
-        : "input-streaming";
+        : "");
+  const failed = Boolean(result?.isError || exec?.status === "error");
+  const running = !failed && !output && (exec?.status === "running" || streaming);
+  const diff = editsOf(args);
+  const Icon = TOOL_ICONS[block.name] ?? WrenchIcon;
+  const preview = toolPreview(block.name, args);
 
   return (
-    <Tool defaultOpen={Boolean(diff)}>
-      <ToolHeader title={block.name} type={`tool-${block.name}` as never} state={state} />
-      <ToolContent>
-        {diff ? (
-          <FileDiff path={diff.path} pairs={diff.pairs} created={diff.created} />
+    <div className="group/tool">
+      <button
+        className="flex h-6 w-full items-center gap-1.5 rounded px-1 text-left text-[11px] text-muted-foreground hover:bg-muted/40"
+        onClick={() => setOpen((value) => !value)}
+        type="button"
+      >
+        <Icon className="size-3 shrink-0 opacity-70" />
+        <span className="shrink-0 font-medium text-foreground/75">{block.name}</span>
+        {preview ? (
+          <span className="min-w-0 flex-1 truncate font-mono opacity-60">{preview}</span>
         ) : (
-          <ToolInput input={args} />
+          <span className="flex-1" />
         )}
-        {!diff ? (
-          <ToolOutput output={output} errorText={failed ? (output ?? "执行失败") : undefined} />
-        ) : null}
-        {diff && output ? (
-          <div className="whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">
-            {output.slice(0, 4000)}
-          </div>
-        ) : null}
-        {details ? (
-          <div className="space-y-2 p-4">
-            <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-              详情
-            </h4>
-            <CodeBlock
-              code={typeof details === "string" ? details : JSON.stringify(details, null, 2)}
-              language="json"
-            >
-              <CodeBlockCopyButton />
-            </CodeBlock>
-          </div>
-        ) : null}
-      </ToolContent>
-    </Tool>
+        {failed ? (
+          <XIcon className="size-3 shrink-0 text-rose-500" />
+        ) : running ? (
+          <Loader2Icon className="size-3 shrink-0 animate-spin" />
+        ) : (
+          <CheckIcon className="size-3 shrink-0 text-emerald-600/60" />
+        )}
+        <ChevronDownIcon
+          className={cn(
+            "size-3 shrink-0 opacity-0 transition group-hover/tool:opacity-50",
+            open && "rotate-180 opacity-50",
+          )}
+        />
+      </button>
+      {open ? (
+        <div className="my-1 ml-4 space-y-1.5 border-l pl-3">
+          {diff ? (
+            <FileDiff path={diff.path} pairs={diff.pairs} created={diff.created} />
+          ) : (
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-[10px] text-muted-foreground/80">
+              {JSON.stringify(args, null, 2).slice(0, 4000)}
+            </pre>
+          )}
+          {output ? (
+            <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-all rounded bg-muted/40 p-2 font-mono text-[10px]">
+              {output.slice(0, 8000)}
+            </pre>
+          ) : null}
+          {result?.details ? (
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-[10px] text-muted-foreground/70">
+              {typeof result.details === "string" ? result.details : JSON.stringify(result.details, null, 2)}
+            </pre>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Compact thinking row: a single muted line unless expanded/streaming. */
+function ThinkingRow({
+  block,
+  streaming,
+}: {
+  block: Extract<ContentBlock, { type: "thinking" }>;
+  streaming?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const expanded = open || streaming;
+  return (
+    <div>
+      <button
+        className="flex h-6 items-center gap-1.5 rounded px-1 text-[11px] text-muted-foreground/70 hover:bg-muted/40 hover:text-muted-foreground"
+        onClick={() => setOpen((value) => !value)}
+        type="button"
+      >
+        <BrainIcon className="size-3 shrink-0 opacity-70" />
+        <span>{streaming ? "思考中…" : "思考"}</span>
+        <ChevronDownIcon className={cn("size-3 opacity-40 transition", expanded && "rotate-180")} />
+      </button>
+      {expanded && block.thinking.trim() ? (
+        <div className="my-1 ml-4 max-h-40 overflow-auto whitespace-pre-wrap border-l pl-3 text-[11px] leading-5 text-muted-foreground/80">
+          {block.thinking}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -120,19 +189,10 @@ function Block({
 }) {
   if (block.type === "thinking") {
     if (!block.thinking.trim()) return null;
-    return (
-      <Reasoning isStreaming={streaming} defaultOpen={false}>
-        <ReasoningTrigger
-          getThinkingMessage={(isStreaming, duration) =>
-            isStreaming || !duration ? "思考中…" : `思考了 ${duration} 秒`
-          }
-        />
-        <ReasoningContent>{block.thinking}</ReasoningContent>
-      </Reasoning>
-    );
+    return <ThinkingRow block={block} streaming={streaming} />;
   }
   if (block.type === "toolCall") {
-    return <ToolCard block={block} exec={exec} result={result} streaming={streaming} />;
+    return <ToolRow block={block} exec={exec} result={result} streaming={streaming} />;
   }
   if (block.type === "text") {
     if (!block.text.trim()) return null;
@@ -228,7 +288,7 @@ function AssistantMessageBase({
 
   return (
     <Message from="assistant">
-      <MessageContent className="gap-1.5">
+      <MessageContent className="gap-0.5">
         {blocks.map((block, i) => (
           <Block
             key={i}
@@ -345,7 +405,7 @@ export function Chat(props: { state: State; onFork?: (message: PiMessage) => voi
 
   return (
     <Conversation>
-      <ConversationContent className="mx-auto w-full max-w-3xl gap-3 px-5 py-4">
+      <ConversationContent className="mx-auto w-full max-w-3xl gap-2 px-5 py-4">
         {visible.length === 0 && !state.streaming ? (
           <ConversationEmptyState
             title="开始对话"
