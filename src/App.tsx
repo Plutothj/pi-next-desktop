@@ -279,7 +279,7 @@ function Shell() {
 
         <Chat onFork={handleFork} state={state} />
 
-        <div className="mx-auto w-full max-w-3xl px-6 pb-4">
+        <div className="mx-auto w-full max-w-3xl px-6 pb-4 lg:max-w-4xl xl:max-w-5xl 2xl:max-w-6xl min-[1800px]:max-w-7xl">
           {git?.isRepo || Object.keys(state.statuses).length > 0 || dualChain.phase !== "idle" ? (
             <div className="mb-1.5 flex items-center gap-2 px-1">
               {git?.isRepo ? (

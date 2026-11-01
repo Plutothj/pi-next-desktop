@@ -405,7 +405,7 @@ export function Chat(props: { state: State; onFork?: (message: PiMessage) => voi
 
   return (
     <Conversation>
-      <ConversationContent className="mx-auto w-full max-w-3xl gap-2 px-5 py-4">
+      <ConversationContent className="mx-auto w-full max-w-3xl gap-2 px-5 py-4 lg:max-w-4xl xl:max-w-5xl 2xl:max-w-6xl min-[1800px]:max-w-7xl">
         {visible.length === 0 && !state.streaming ? (
           <ConversationEmptyState
             title="开始对话"
