@@ -6,6 +6,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { APP_HOME, AGENT_DIR, ensureAppHome } from "./app-home.js";
 import { registerConfigHandlers } from "./config-ipc.js";
 import { logLine, recordLine } from "./logs.js";
 import { registerDiagHandlers } from "./diag.js";
@@ -39,7 +40,7 @@ process.on("uncaughtException", (err) => logLine("uncaught", err));
 process.on("unhandledRejection", (err) => logLine("unhandled-rejection", err));
 
 const pendingDialogs = new Set();
-const taskManager = createTaskManager({ userDataDir: app.getPath("userData"), send });
+const taskManager = createTaskManager({ userDataDir: APP_HOME, send });
 
 const pi = new PiProcess({
   onRecord(rec) {
@@ -95,6 +96,8 @@ async function startPi(cwd) {
       // pi-bg must resolve from the agent's bash tool.
       PATH: [taskManager.paths.binDir, path.dirname(rt.node), process.env.PATH ?? ""].join(path.delimiter),
       PI_DESKTOP_TERM_SOCK: taskManager.paths.sock,
+      // Isolated config/sessions/extensions: ~/.pi-desktop/agent
+      PI_CODING_AGENT_DIR: AGENT_DIR,
       ...(rt.installRoot ? { PI_MANAGED_INSTALL_ROOT: rt.installRoot } : {}),
     },
   });
@@ -299,7 +302,7 @@ if (process.env.PI_DEBUG) {
 // ---------------------------------------------------------------- modules
 
 registerSessionHandlers({ pi, dialog, shell });
-registerProjectHandlers({ userDataDir: app.getPath("userData"), scanSessions });
+registerProjectHandlers({ userDataDir: APP_HOME, scanSessions });
 registerGitHandlers();
 registerWorkspaceHandlers();
 registerConfigHandlers({ send });
@@ -320,6 +323,8 @@ registerDiagHandlers({
       };
     } catch {}
     return {
+      appHome: APP_HOME,
+      agentDir: AGENT_DIR,
       runtime: {
         cli: rt.cli,
         node: rt.node,
@@ -355,9 +360,12 @@ app.whenReady().then(() => {
       app.dock.setIcon(path.join(import.meta.dirname, "..", "build", "icon.png"));
     } catch {}
   }
+  // First run: create ~/.pi-desktop and migrate the user's pi config/sessions
+  // so the app is fully self-contained. Must happen before pi starts.
+  ensureAppHome();
   // The bridge and its CLI must exist before pi starts, since pi's bash tool
   // uses the injected PATH / env to reach them.
-  installTermCli(app.getPath("userData"));
+  installTermCli(APP_HOME);
   taskManager.startBridge();
   createWindow();
   app.on("activate", () => {

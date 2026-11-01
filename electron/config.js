@@ -4,8 +4,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { AGENT_DIR } from "./app-home.js";
 
-export const AGENT_DIR = process.env.PI_AGENT_DIR || path.join(os.homedir(), ".pi", "agent");
+export { AGENT_DIR };
 const npmRoot = path.join(AGENT_DIR, "npm", "node_modules");
 
 const readJson = (file, fallback) => {

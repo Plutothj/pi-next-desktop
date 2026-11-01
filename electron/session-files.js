@@ -3,15 +3,15 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { AGENT_DIR } from "./app-home.js";
 
 // pi's session JSONL format version this build understands. File-level forks
 // write that format by hand, so refuse unknown versions loudly instead of
 // producing a file pi cannot load.
 export const SUPPORTED_SESSION_VERSION = 3;
 
-export const sessionsRoot = () => path.join(os.homedir(), ".pi", "agent", "sessions");
+export const sessionsRoot = () => path.join(AGENT_DIR, "sessions");
 
 // Sessions are re-scanned on every refresh; cache parses by (mtime, size) so
 // unchanged files cost one stat each instead of a full read.
