@@ -90,7 +90,8 @@
     "publish": {
       "provider": "github",
       "owner": "Plutothj",
-      "repo": "pi-next-desktop"
+      "repo": "pi-next-desktop",
+      "releaseType": "release"
     }
   },
   "description": "pi coding agent 的桌面客户端",
