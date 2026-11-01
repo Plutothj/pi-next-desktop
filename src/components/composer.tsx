@@ -65,6 +65,7 @@ export function Composer({
   const controller = usePromptInputController();
   const attachments = usePromptInputAttachments();
   const text = controller.textInput.value;
+  const hasText = text.trim().length > 0;
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [active, setActive] = useState(0);
   const requestRef = useRef(0);
@@ -255,29 +256,30 @@ export function Composer({
             >
               <PlusIcon className="size-4" />
             </PromptInputButton>
-            {streaming ? (
-              <PromptInputButton
-                className="gap-1 text-xs text-destructive hover:text-destructive"
-                onClick={onStop}
-                title="停止生成"
-              >
-                <SquareIcon className="size-3" fill="currentColor" />
-                停止
-              </PromptInputButton>
-            ) : null}
           </PromptInputTools>
-          <PromptInputSubmit
-            className={cn("size-8 shrink-0 rounded-full", streaming && "w-auto gap-1 px-3 text-xs")}
-            title={streaming ? "Enter 排队 · Option+Enter 立即插入" : "发送（Enter）"}
-          >
-            {streaming ? (
-              <>
-                <ListPlusIcon className="size-3.5" /> 排队
-              </>
-            ) : (
-              <ArrowUpIcon className="size-4" />
-            )}
-          </PromptInputSubmit>
+          {streaming && !hasText ? (
+            <PromptInputButton
+              className="size-8 shrink-0 rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
+              onClick={onStop}
+              title="停止生成"
+            >
+              <SquareIcon className="size-3.5" fill="currentColor" />
+            </PromptInputButton>
+          ) : (
+            <PromptInputSubmit
+              className={cn("size-8 shrink-0 rounded-full", streaming && "w-auto gap-1 px-3 text-xs")}
+              disabled={!hasText}
+              title={streaming ? "Enter 排队 · Option+Enter 立即插入" : "发送（Enter）"}
+            >
+              {streaming ? (
+                <>
+                  <ListPlusIcon className="size-3.5" /> 排队
+                </>
+              ) : (
+                <ArrowUpIcon className="size-4" />
+              )}
+            </PromptInputSubmit>
+          )}
         </PromptInputFooter>
       </PromptInput>
     </div>
