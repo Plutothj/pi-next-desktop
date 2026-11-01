@@ -35,25 +35,25 @@
 
 .dark {
   --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
+  --foreground: oklch(0.88 0 0);
   --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
+  --card-foreground: oklch(0.9 0 0);
   --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
+  --popover-foreground: oklch(0.9 0 0);
   --primary: oklch(0.922 0 0);
   --primary-foreground: oklch(0.205 0 0);
   --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
+  --secondary-foreground: oklch(0.92 0 0);
   --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
+  --muted-foreground: oklch(0.66 0 0);
   --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --accent-foreground: oklch(0.92 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
   --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.87 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.269 0 0);
@@ -118,3 +118,12 @@
 [data-streamdown] ul, [data-streamdown] ol, .prose ul, .prose ol { margin: 0.35rem 0 0.35rem 1.1rem; }
 [data-streamdown] pre, .prose pre { margin: 0.5rem 0; }
 [data-streamdown] h1, [data-streamdown] h2, [data-streamdown] h3 { margin: 0.6rem 0 0.3rem; }
+
+/* Softer dark theme: body copy is ~0.88 lightness (no pure white), while
+   headings, strong text and table headers stay a bit brighter. */
+.dark :is(h1, h2, h3, h4, h5, h6, th) {
+  color: oklch(0.95 0 0);
+}
+.dark strong {
+  color: oklch(0.94 0 0);
+}
