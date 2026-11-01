@@ -127,3 +127,29 @@
 .dark strong {
   color: oklch(0.94 0 0);
 }
+
+/* Transcript typography: ZCode-like breathing room (14px/1.43 default was
+   too dense). Code blocks keep a slightly tighter rhythm. */
+.chat-md {
+  font-size: 15px;
+  line-height: 1.8;
+}
+.chat-md :is(p, li) {
+  line-height: 1.8;
+}
+.chat-md :is(li) {
+  margin-block: 0.3em;
+}
+.chat-md :is(ul, ol) {
+  margin-block: 0.45em;
+}
+.chat-md :is(h1, h2, h3, h4, h5, h6) {
+  line-height: 1.45;
+  margin-block: 1.1em 0.55em;
+}
+.chat-md pre {
+  line-height: 1.6;
+}
+.chat-md :is(code):not(pre code) {
+  font-size: 0.9em;
+}
