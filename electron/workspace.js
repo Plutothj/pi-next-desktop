@@ -111,6 +111,22 @@ export function registerWorkspaceHandlers() {
     return out;
   });
 
+  // Project-level plan documents (like ZCode's .zcode/plans): dual-model
+  // planning writes the approved plan here so execution can read it back.
+  safeHandle("plans:save", (_e, { cwd, content } = {}) => {
+    const root = resolveRoot(cwd);
+    if (typeof content !== "string" || !content.trim()) {
+      return { ok: false, error: "方案内容为空" };
+    }
+    if (content.length > 1_000_000) return { ok: false, error: "方案过大" };
+    const dir = path.join(root, ".pi", "plans");
+    fs.mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const file = path.join(dir, `plan-${stamp}.md`);
+    fs.writeFileSync(file, `${content.trim()}\n`);
+    return { ok: true, path: file };
+  });
+
   safeHandle("ssh:hosts", () => {
     const file = path.join(os.homedir(), ".ssh", "config");
     let raw = "";

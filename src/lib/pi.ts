@@ -314,6 +314,9 @@ export type PiBridge = {
   debugDialog: (dialog: Omit<UiDialogRequest, "id">) => Promise<{ ok: boolean; id: string }>;
   exportHtml: () => Promise<{ ok: boolean; path?: string; error?: string }>;
   diagExport: () => Promise<{ ok: boolean; path?: string; error?: string }>;
+  plans: {
+    save: (cwd: string, content: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
+  };
   stats: {
     usage: (days?: "all" | 7 | 30) => Promise<UsageReport>;
   };

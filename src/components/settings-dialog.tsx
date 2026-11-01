@@ -154,9 +154,9 @@ const SECTIONS: SSection[] = [
       {
         key: "sessionDir",
         label: "会话目录",
-        hint: "留空使用 ~/.pi/agent/sessions。相对路径从工作目录算起。",
+        hint: "留空使用应用专属目录（~/.pi-desktop/agent/sessions）。相对路径从工作目录算起。",
         type: "text",
-        placeholder: "~/.pi/agent/sessions",
+        placeholder: "~/.pi-desktop/agent/sessions",
       },
       {
         key: "sessionShareDestination",

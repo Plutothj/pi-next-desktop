@@ -378,7 +378,8 @@ submit（enabled && idle && 未流式）
 一轮 settle（agent_settled 之后 isStreaming=false）
   → 若 sessionFile 变了：链条中止（不恢复模型）
   → switchModel(executor) → prompt(【执行阶段】…, followUp)
-执行轮 settle → resetDualChain() → 恢复原模型
+规划轮 settle 后：把规划回复写入 <cwd>/.pi/plans/plan-<时间戳>.md（$plans:save），
+执行指令携带该文件路径；执行轮 settle → resetDualChain() → 恢复原模型
 ```
 
 护栏：`started` 标志避免「尚未开始就判定结束」；停止按钮先中止链条再 `abort`；

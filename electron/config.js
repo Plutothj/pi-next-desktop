@@ -294,7 +294,7 @@ export function listSkills(cwd) {
     all.push(skill);
   };
 
-  walkSkills(path.join(AGENT_DIR, "skills"), "user", "~/.pi/agent/skills").forEach(push);
+  walkSkills(path.join(AGENT_DIR, "skills"), "user", `${AGENT_DIR.replace(os.homedir(), "~")}/skills`).forEach(push);
   walkSkills(path.join(os.homedir(), ".agents", "skills"), "user", "~/.agents/skills").forEach(push);
   if (cwd) {
     walkSkills(path.join(cwd, ".pi", "skills"), "project", ".pi/skills").forEach(push);

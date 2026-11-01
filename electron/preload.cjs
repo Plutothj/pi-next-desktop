@@ -10,6 +10,9 @@ contextBridge.exposeInMainWorld("pi", {
   respondUi: (id, values) => ipcRenderer.invoke("pi:uiRespond", { id, ...values }),
   exportHtml: () => ipcRenderer.invoke("pi:exportHtml"),
   diagExport: () => ipcRenderer.invoke("diag:export"),
+  plans: {
+    save: (cwd, content) => ipcRenderer.invoke("plans:save", { cwd, content }),
+  },
   stats: {
     usage: (days) => ipcRenderer.invoke("stats:usage", { days }),
   },

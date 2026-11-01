@@ -13,6 +13,22 @@ const DUAL_EXEC_PREFIX =
 
 type Phase = "idle" | "planning" | "executing";
 
+/** The planner's final reply — what we persist as the plan document. */
+function lastAssistantText(messages: State["messages"]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message.role !== "assistant") continue;
+    const blocks = Array.isArray(message.content) ? message.content : [];
+    const text = blocks
+      .filter((block): block is { type: "text"; text: string } => block.type === "text")
+      .map((block) => block.text)
+      .join("\n")
+      .trim();
+    if (text) return text;
+  }
+  return null;
+}
+
 type PromptFn = (
   text: string,
   files?: FileUIPart[],
@@ -102,12 +118,24 @@ export function useDualModelChain({
       chain.started = false;
       setPhase("executing");
       void (async () => {
+        // Persist the plan into the project so it survives the session and the
+        // executor works from a stable document (like ZCode's .zcode/plans).
+        const planText = lastAssistantText(state.messages);
+        const saved = planText
+          ? await window.pi.plans
+              .save(state.cwd, `# 执行方案\n\n${planText}\n`)
+              .catch(() => null)
+          : null;
+        const directive =
+          saved?.ok && saved.path
+            ? `${DUAL_EXEC_PREFIX}\n方案文档：${saved.path}（开始前先读取该文件，按它逐项实施）。`
+            : DUAL_EXEC_PREFIX;
         const switched = await switchModel(executor);
         if (!switched) {
           await reset();
           return;
         }
-        const res = await prompt(DUAL_EXEC_PREFIX, undefined, "followUp");
+        const res = await prompt(directive, undefined, "followUp");
         if (!res) await reset();
       })();
     } else {

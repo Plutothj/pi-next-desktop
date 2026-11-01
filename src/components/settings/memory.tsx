@@ -83,7 +83,7 @@ export function CommandsPanel({ cfg }: { cfg: CfgSnapshot }) {
   return (
     <div className="space-y-2">
       <p className="text-xs text-muted-foreground">
-        在 ~/.pi/agent/prompts 或 .pi/prompts 放 .md 文件，输入框里用 /名字 调用。
+        在 ~/.pi-desktop/agent/prompts 或 .pi/prompts 放 .md 文件，输入框里用 /名字 调用。
       </p>
       {cfg.prompts.length === 0 ? (
         <p className="text-xs text-muted-foreground">还没有自定义命令。</p>
