@@ -102,12 +102,13 @@ function locateBundle() {
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pi-npm-"));
   console.log(`no local pi install; fetching ${PI_PACKAGE} from npm…`);
-  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-  execFileSync(
-    npm,
-    ["install", "--no-save", "--prefix", tmp, `${PI_PACKAGE}@latest`, "jiti"],
-    { stdio: "inherit" },
-  );
+  const npmArgs = ["install", "--no-save", "--prefix", tmp, `${PI_PACKAGE}@latest`, "jiti"];
+  if (process.platform === "win32") {
+    // Node refuses to spawn .cmd shims directly (EINVAL); route via cmd.exe.
+    execFileSync("cmd.exe", ["/d", "/s", "/c", "npm", ...npmArgs], { stdio: "inherit" });
+  } else {
+    execFileSync("npm", npmArgs, { stdio: "inherit" });
+  }
   const modules = path.join(tmp, "node_modules");
   const pkgDir = path.join(modules, PI_PACKAGE);
   const version = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf8")).version;
