@@ -197,7 +197,11 @@ function Block({
   if (block.type === "text") {
     if (!block.text.trim()) return null;
     return (
-      <MessageResponse className={cn("chat-md", last && streaming && "after:animate-pulse")} plugins={{ mermaid }}>
+      <MessageResponse
+        className={cn("chat-md", last && streaming && "after:animate-pulse")}
+        plugins={{ mermaid }}
+        shikiTheme={["github-light", "github-dark-dimmed"]}
+      >
         {block.text}
       </MessageResponse>
     );
@@ -225,7 +229,15 @@ const UserMessage = memo(function UserMessage({
   return (
     <Message from="user">
       <MessageContent className="rounded-2xl bg-muted px-4 py-2.5">
-        {text ? <MessageResponse className="chat-md" plugins={{ mermaid }}>{text}</MessageResponse> : null}
+        {text ? (
+          <MessageResponse
+            className="chat-md"
+            plugins={{ mermaid }}
+            shikiTheme={["github-light", "github-dark-dimmed"]}
+          >
+            {text}
+          </MessageResponse>
+        ) : null}
         {images.map((b, j) =>
           b.type === "image" ? (
             <ZoomImage

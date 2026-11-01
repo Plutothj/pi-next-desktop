@@ -34,26 +34,26 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.88 0 0);
+  --background: oklch(0.165 0 0);
+  --foreground: oklch(0.84 0 0);
   --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.9 0 0);
+  --card-foreground: oklch(0.86 0 0);
   --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.9 0 0);
+  --popover-foreground: oklch(0.86 0 0);
   --primary: oklch(0.922 0 0);
   --primary-foreground: oklch(0.205 0 0);
   --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.92 0 0);
+  --secondary-foreground: oklch(0.88 0 0);
   --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.66 0 0);
+  --muted-foreground: oklch(0.62 0 0);
   --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.92 0 0);
+  --accent-foreground: oklch(0.88 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
   --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.87 0 0);
+  --sidebar-foreground: oklch(0.84 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.269 0 0);
@@ -122,10 +122,10 @@
 /* Softer dark theme: body copy is ~0.88 lightness (no pure white), while
    headings, strong text and table headers stay a bit brighter. */
 .dark :is(h1, h2, h3, h4, h5, h6, th) {
-  color: oklch(0.95 0 0);
+  color: oklch(0.9 0 0);
 }
 .dark strong {
-  color: oklch(0.94 0 0);
+  color: oklch(0.87 0 0);
 }
 
 /* Transcript typography: ZCode-like breathing room (14px/1.43 default was

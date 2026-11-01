@@ -66,7 +66,7 @@ export async function highlightCode(
     }),
     codeToHtml(code, {
       lang: language,
-      theme: "one-dark-pro",
+      theme: "github-dark-dimmed",
       transformers,
     }),
   ]);
