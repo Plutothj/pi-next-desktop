@@ -15,6 +15,10 @@ jobs:
   build:
     strategy:
       fail-fast: false
+      # Publishing is not concurrency-safe: parallel jobs each create their own
+      # release for the same tag. Run platforms one after another so every job
+      # finds the existing release and adds its own assets.
+      max-parallel: 1
       matrix:
         os: [macos-latest, windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
