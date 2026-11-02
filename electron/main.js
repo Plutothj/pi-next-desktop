@@ -379,6 +379,12 @@ safeHandle("attachments:parse", async (_e, payload) => {
   return parseAttachment(payload).catch((err) => ({ ok: false, error: err.message }));
 });
 
+// 通知点击唤起窗口（窗口可能正藏在托盘里）
+safeHandle("pi:showWindow", async () => {
+  showWindow();
+  return { ok: true };
+});
+
 safeHandle("pi:pickFolder", async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog(win, {
     properties: ["openDirectory", "createDirectory"],
@@ -496,6 +502,8 @@ app.whenReady().then(() => {
       app.dock.setIcon(path.join(import.meta.dirname, "..", "build", "icon.png"));
     } catch {}
   }
+  // Windows 系统通知需要 AppUserModelID 与开始菜单快捷方式一致
+  if (process.platform === "win32") app.setAppUserModelId("dev.pi.desktop");
   // First run: create ~/.pi-desktop and migrate the user's pi config/sessions
   // so the app is fully self-contained. Must happen before pi starts.
   ensureAppHome();

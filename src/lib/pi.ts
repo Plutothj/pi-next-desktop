@@ -326,7 +326,14 @@ export type PiBridge = {
   send: (payload: Record<string, unknown>) => Promise<unknown>;
   pickFolder: () => Promise<string | null>;
   reveal: (target: string) => Promise<void>;
+  showWindow: () => Promise<{ ok: boolean }>;
   sessions: () => Promise<SessionInfo[]>;
+  searchSessions: (query: string) =>
+    Promise<{
+      hits: { path: string; title: string; cwd: string | null; mtime: number; snippet: string }[];
+      scanned: number;
+      truncated: boolean;
+    }>;
   deleteSession: (filePath: string) => Promise<{ ok: boolean; switched?: boolean; error?: string }>;
   forkSessionAt: (entryId: string) => Promise<{ ok: boolean; sessionFile?: string; error?: string }>;
   respondUi: (

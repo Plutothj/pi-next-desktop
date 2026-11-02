@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld("pi", {
   send: (payload) => ipcRenderer.invoke("pi:send", payload),
   pickFolder: () => ipcRenderer.invoke("pi:pickFolder"),
   sessions: () => ipcRenderer.invoke("pi:sessions"),
+  searchSessions: (query) => ipcRenderer.invoke("pi:searchSessions", { query }),
   deleteSession: (filePath) => ipcRenderer.invoke("pi:deleteSession", { path: filePath }),
   forkSessionAt: (entryId) => ipcRenderer.invoke("pi:forkSessionAt", { entryId }),
   respondUi: (id, values) => ipcRenderer.invoke("pi:uiRespond", { id, ...values }),
@@ -32,6 +33,7 @@ contextBridge.exposeInMainWorld("pi", {
     remove: (dir) => ipcRenderer.invoke("projects:remove", dir),
   },
   reveal: (target) => ipcRenderer.invoke("pi:reveal", target),
+  showWindow: () => ipcRenderer.invoke("pi:showWindow"),
   cfg: {
     read: (cwd) => ipcRenderer.invoke("cfg:read", { cwd }),
     saveProvider: (payload) => ipcRenderer.invoke("cfg:saveProvider", payload),
