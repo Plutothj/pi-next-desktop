@@ -124,6 +124,78 @@ export function deleteProvider(name) {
   }
 }
 
+// ------------------------------------------------------------- model catalog
+
+const API_DEFAULT_BASE = {
+  "openai-completions": "https://api.openai.com/v1",
+  "openai-responses": "https://api.openai.com/v1",
+  "anthropic-messages": "https://api.anthropic.com/v1",
+  "google-generative-ai": "https://generativelanguage.googleapis.com/v1beta",
+  "mistral-conversations": "https://api.mistral.ai/v1",
+};
+
+// 已存过的密钥（models.json 或 auth.json），编辑供应商时留空即复用。
+const storedKey = (name) => {
+  if (!name) return null;
+  return (
+    readModelsJson().providers?.[name]?.apiKey ?? readAuth()[name]?.key ?? null
+  );
+};
+
+// 用户可能粘成完整端点，剥掉尾部的 /models、/chat/completions。
+const normalizeBase = (raw) => {
+  let base = String(raw ?? "").trim().replace(/\/+$/, "");
+  base = base.replace(/\/(models|chat\/completions|messages)$/, "");
+  return base;
+};
+
+// 拉取供应商的模型列表（/models 端点），让用户勾选而不是手写模型 id。
+export async function fetchProviderModels({ name, api, baseUrl, apiKey } = {}) {
+  if (api === "bedrock-converse-stream") {
+    throw new Error("Bedrock 需要 AWS 凭证，无法直接拉取，请手动添加模型");
+  }
+  const key = apiKey || storedKey(name);
+  if (!key) throw new Error("请先填写 API Key（或保存过密钥后留空）");
+  const base = normalizeBase(baseUrl) || normalizeBase(API_DEFAULT_BASE[api]);
+  if (!base) throw new Error("无法确定 Base URL，请先填写");
+
+  let url = `${base}/models`;
+  const headers = {};
+  let pick = (data) =>
+    (data.data ?? []).map((m) => ({ id: m.id, name: m.name ?? m.id }));
+
+  if (api === "anthropic-messages") {
+    headers["x-api-key"] = key;
+    headers["anthropic-version"] = "2023-06-01";
+    pick = (data) =>
+      (data.data ?? []).map((m) => ({
+        id: m.id,
+        name: m.display_name ?? m.id,
+      }));
+  } else if (api === "google-generative-ai") {
+    url = `${base}/models?key=${encodeURIComponent(key)}`;
+    pick = (data) =>
+      (data.models ?? [])
+        .filter((m) => (m.supportedGenerationMethods ?? []).includes("generateContent"))
+        .map((m) => ({
+          id: String(m.name ?? "").replace(/^models\//, ""),
+          name: m.displayName ?? m.name,
+        }));
+  } else {
+    // openai 兼容（含 mistral）：统一 Bearer
+    headers.Authorization = `Bearer ${key}`;
+  }
+
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
+  if (!res.ok) {
+    const body = (await res.text()).slice(0, 200);
+    throw new Error(`获取模型列表失败 (${res.status})${body ? `: ${body}` : ""}`);
+  }
+  const list = pick(await res.json()).filter((m) => m.id);
+  if (!list.length) throw new Error("该端点未返回任何模型");
+  return list;
+}
+
 // --------------------------------------------------------------- packages
 
 const packagePath = (source) => {

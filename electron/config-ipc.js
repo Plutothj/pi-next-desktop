@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import * as config from "./config.js";
 import { safeHandle } from "./ipc.js";
+import { requireObject } from "./ipc-helpers.js";
 import { resolveRuntime } from "./pi-process.js";
 
 const afterChange = () => ({ ok: true, restart: true });
@@ -79,6 +80,17 @@ export function registerConfigHandlers({ send }) {
   safeHandle("cfg:deleteProvider", (_e, name) => {
     config.deleteProvider(name);
     return afterChange();
+  });
+
+  // 从供应商 /models 端点拉取可勾选的模型列表；密钥留空时回退已存密钥。
+  // 预期内的失败（密钥错误、网络不通）返回 {ok:false}，不打错误日志。
+  safeHandle("cfg:fetchModels", async (_e, payload) => {
+    try {
+      const models = await config.fetchProviderModels(requireObject(payload, "payload"));
+      return { ok: true, models };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   });
 
   safeHandle("cfg:setSetting", (_e, patch) => {

@@ -3,6 +3,7 @@ import {
   CheckIcon,
   Loader2Icon,
   PlusIcon,
+  RefreshCwIcon,
   Trash2Icon,
 } from "lucide-react";
 import {
@@ -15,8 +16,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import type { CfgSnapshot, ProviderInfo } from "@/lib/pi";
+import { cn } from "@/lib/utils";
+import type { CfgSnapshot, ProviderInfo, ProviderModel } from "@/lib/pi";
 import type { ApplyFn } from "./shared";
 
 // extracted from settings-dialog.tsx
@@ -116,6 +117,17 @@ export function ProvidersPanel({
 }
 
 
+// 每个模型一行的结构化草稿；显示名与 ID 相同时留空。
+type ModelDraft = { id: string; name: string; reasoning: boolean; image: boolean };
+
+const toDrafts = (models: ProviderModel[] | undefined): ModelDraft[] =>
+  (models ?? []).map((m) => ({
+    id: m.id,
+    name: m.name && m.name !== m.id ? m.name : "",
+    reasoning: Boolean(m.reasoning),
+    image: (m.input ?? ["text"]).includes("image"),
+  }));
+
 function ProviderForm({
   initial,
   apiKinds,
@@ -139,27 +151,108 @@ function ProviderForm({
   const [apiKey, setApiKey] = useState("");
   const [api, setApi] = useState(initial?.api ?? "openai-completions");
   const [saving, setSaving] = useState(false);
-  const [models, setModels] = useState(
-    (initial?.models ?? []).map((m) => m.id).join("\n"),
-  );
+  const [rows, setRows] = useState<ModelDraft[]>(() => toDrafts(initial?.models));
+  // 「获取模型列表」的结果与勾选状态
+  const [available, setAvailable] = useState<{ id: string; name: string }[] | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useState("");
+  const [fetching, setFetching] = useState(false);
+
+  const updateRow = (index: number, patch: Partial<ModelDraft>) =>
+    setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+
+  const fetchList = async () => {
+    setFetching(true);
+    setLog(null);
+    const res = await window.pi.cfg.fetchModels({
+      name: name.trim(),
+      api,
+      baseUrl: baseUrl.trim(),
+      apiKey: apiKey.trim() || undefined,
+    });
+    setFetching(false);
+    if (!res.ok || !res.models?.length) {
+      setLog(res.error ?? "未获取到模型");
+      return;
+    }
+    setAvailable(res.models);
+    // 默认勾选本地还没有的模型
+    setPicked(
+      new Set(
+        res.models
+          .map((m) => m.id)
+          .filter((id) => !rows.some((r) => r.id === id)),
+      ),
+    );
+    setFilter("");
+    setLog(`获取到 ${res.models.length} 个模型，勾选后添加`);
+  };
+
+  const visible = (available ?? []).filter((m) => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return true;
+    return m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q);
+  });
+  const visibleIds = visible.map((m) => m.id);
+  const allVisiblePicked = visibleIds.length > 0 && visibleIds.every((id) => picked.has(id));
+
+  const togglePick = (id: string) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const toggleAllVisible = () =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      for (const id of visibleIds) {
+        if (allVisiblePicked) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+
+  const addPicked = () => {
+    const chosen = (available ?? []).filter(
+      (m) => picked.has(m.id) && !rows.some((r) => r.id === m.id),
+    );
+    if (chosen.length) {
+      setRows((prev) => [
+        ...prev,
+        ...chosen.map((m) => ({
+          id: m.id,
+          name: m.name && m.name !== m.id ? m.name : "",
+          reasoning: false,
+          image: false,
+        })),
+      ]);
+    }
+    setAvailable(null);
+    setPicked(new Set());
+    setFilter("");
+  };
 
   const save = async () => {
     setSaving(true);
     setBusy(true);
     setLog(null);
-    const list = models
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => {
-        const [id, label, ...flags] = line.split(/[|,]/).map((s) => s.trim());
-        return {
+    // 同 ID 去重，空行忽略
+    const seen = new Set<string>();
+    const list = rows.flatMap((r) => {
+      const id = r.id.trim();
+      if (!id || seen.has(id)) return [];
+      seen.add(id);
+      return [
+        {
           id,
-          name: label || id,
-          reasoning: flags.includes("reasoning"),
-          input: flags.includes("image") ? ["text", "image"] : ["text"],
-        };
-      });
+          name: r.name.trim() || id,
+          reasoning: r.reasoning,
+          input: r.image ? ["text", "image"] : ["text"],
+        },
+      ];
+    });
 
     const res = await window.pi.cfg.saveProvider({
       name: name.trim(),
@@ -178,6 +271,8 @@ function ProviderForm({
     onStatus(`已保存 ${name}`, false);
     await onSaved();
   };
+
+  const canSave = Boolean(name.trim()) && (Boolean(initial) || rows.some((r) => r.id.trim()));
 
   return (
     <div className="space-y-4 rounded-md border bg-muted/20 p-3">
@@ -232,25 +327,174 @@ function ProviderForm({
         />
       </Field>
 
-      <Field label="模型（每行一个：id | 名称 | reasoning,image）">
-        <Textarea
-          className="min-h-20 font-mono text-xs"
-          onChange={(e) => setModels(e.target.value)}
-          placeholder={"deepseek-chat\n deepseek-reasoner | DeepSeek R1 | reasoning"}
-          value={models}
-        />
-      </Field>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">模型（{rows.length}）</span>
+          <div className="flex gap-1">
+            <Button
+              className="h-7 gap-1 text-xs"
+              disabled={fetching}
+              onClick={fetchList}
+              size="sm"
+              variant="ghost"
+            >
+              {fetching ? (
+                <Loader2Icon className="size-3 animate-spin" />
+              ) : (
+                <RefreshCwIcon className="size-3" />
+              )}
+              获取模型列表
+            </Button>
+            <Button
+              className="h-7 gap-1 text-xs"
+              onClick={() => setRows((prev) => [...prev, { id: "", name: "", reasoning: false, image: false }])}
+              size="sm"
+              variant="ghost"
+            >
+              <PlusIcon className="size-3" /> 手动添加
+            </Button>
+          </div>
+        </div>
+
+        {available ? (
+          <div className="rounded-md border bg-background/60 p-2">
+            <div className="mb-1.5 flex items-center gap-1.5">
+              <Input
+                className="h-7 flex-1 text-xs"
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder={`筛选（共 ${available.length} 个）`}
+                value={filter}
+              />
+              <Button className="h-7 text-xs" onClick={toggleAllVisible} size="sm" variant="ghost">
+                {allVisiblePicked ? "全不选" : "全选"}
+              </Button>
+              <Button className="h-7 text-xs" disabled={!picked.size} onClick={addPicked} size="sm">
+                添加所选（{picked.size}）
+              </Button>
+              <Button
+                aria-label="关闭"
+                className="h-7 px-2 text-xs"
+                onClick={() => {
+                  setAvailable(null);
+                  setPicked(new Set());
+                }}
+                size="sm"
+                variant="ghost"
+              >
+                ✕
+              </Button>
+            </div>
+            <div className="max-h-44 space-y-0.5 overflow-auto">
+              {visible.map((m) => (
+                <label
+                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs hover:bg-accent/60"
+                  key={m.id}
+                >
+                  <input
+                    checked={picked.has(m.id)}
+                    className="accent-primary size-3.5"
+                    onChange={() => togglePick(m.id)}
+                    type="checkbox"
+                  />
+                  <span className="truncate font-mono">{m.id}</span>
+                  {m.name && m.name !== m.id ? (
+                    <span className="ml-auto shrink-0 truncate pl-2 text-muted-foreground">
+                      {m.name}
+                    </span>
+                  ) : null}
+                </label>
+              ))}
+              {!visible.length ? (
+                <p className="px-2 py-3 text-center text-xs text-muted-foreground">无匹配模型</p>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        {rows.length ? (
+          <div className="space-y-1.5">
+            {rows.map((row, i) => (
+              <div className="flex items-center gap-1.5" key={i}>
+                <Input
+                  aria-label="模型 ID"
+                  className="h-8 flex-1 font-mono text-xs"
+                  onChange={(e) => updateRow(i, { id: e.target.value })}
+                  placeholder="模型 ID，如 deepseek-chat"
+                  value={row.id}
+                />
+                <Input
+                  aria-label="显示名"
+                  className="h-8 w-28 shrink-0 text-xs"
+                  onChange={(e) => updateRow(i, { name: e.target.value })}
+                  placeholder="显示名（可选）"
+                  value={row.name}
+                />
+                <FlagChip
+                  active={row.reasoning}
+                  label="推理"
+                  onClick={() => updateRow(i, { reasoning: !row.reasoning })}
+                />
+                <FlagChip
+                  active={row.image}
+                  label="图片"
+                  onClick={() => updateRow(i, { image: !row.image })}
+                />
+                <Button
+                  aria-label="删除模型"
+                  className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                  onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))}
+                  size="icon"
+                  variant="ghost"
+                >
+                  <Trash2Icon className="size-3.5" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-md border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">
+            尚未添加模型：点「获取模型列表」从供应商拉取，或「手动添加」。
+          </p>
+        )}
+      </div>
 
       <div className="flex justify-end gap-2">
         <Button className="h-7 text-xs" onClick={onCancel} size="sm" variant="ghost">
           取消
         </Button>
-        <Button className="h-7 text-xs" disabled={saving || !name.trim()} onClick={save} size="sm">
+        <Button className="h-7 text-xs" disabled={saving || !canSave} onClick={save} size="sm">
           {saving ? <Loader2Icon className="mr-1 size-3 animate-spin" /> : null}
           保存
         </Button>
       </div>
     </div>
+  );
+}
+
+// 模型能力开关：推理 / 图片
+function FlagChip({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={cn(
+        "h-8 w-10 shrink-0 rounded-md border text-[11px] transition-colors",
+        active
+          ? "border-primary/40 bg-primary/10 text-primary"
+          : "text-muted-foreground hover:bg-accent/60",
+      )}
+      onClick={onClick}
+      title={active ? `已启用${label}输入，点击关闭` : `启用${label}输入`}
+      type="button"
+    >
+      {label}
+    </button>
   );
 }
 

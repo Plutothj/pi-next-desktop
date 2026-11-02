@@ -355,6 +355,12 @@ export type PiBridge = {
     read: (cwd?: string) => Promise<CfgSnapshot>;
     saveProvider: (payload: Record<string, unknown>) => Promise<{ ok: boolean; error?: string; restart?: boolean }>;
     deleteProvider: (name: string) => Promise<{ ok: boolean; restart?: boolean }>;
+    fetchModels: (payload: {
+      name?: string;
+      api?: string;
+      baseUrl?: string;
+      apiKey?: string;
+    }) => Promise<{ ok: boolean; models?: { id: string; name: string }[]; error?: string }>;
     setSetting: (patch: Record<string, unknown>) => Promise<{ ok: boolean; restart?: boolean }>;
     gallery: (query?: string) => Promise<GalleryPackage[] | { error: string }>;
     readSkill: (file: string, cwd?: string) => Promise<string>;

@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld("pi", {
     read: (cwd) => ipcRenderer.invoke("cfg:read", { cwd }),
     saveProvider: (payload) => ipcRenderer.invoke("cfg:saveProvider", payload),
     deleteProvider: (name) => ipcRenderer.invoke("cfg:deleteProvider", name),
+    fetchModels: (payload) => ipcRenderer.invoke("cfg:fetchModels", payload),
     setSetting: (patch) => ipcRenderer.invoke("cfg:setSetting", patch),
     gallery: (query) => ipcRenderer.invoke("cfg:gallery", query),
     readSkill: (file, cwd) => ipcRenderer.invoke("cfg:readSkill", { file, cwd }),
