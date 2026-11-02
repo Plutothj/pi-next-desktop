@@ -2,7 +2,7 @@
 // between pi's extension UI protocol and the renderer. Feature areas live in
 // their own modules (sessions, projects, git, tasks, workspace, config, diag).
 
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -353,6 +353,9 @@ safeHandle("term:remove", (_e, id) => taskManager.removeTask(id));
 // ---------------------------------------------------------------- lifecycle
 
 app.whenReady().then(() => {
+  // Windows/Linux 默认带 File/Edit/View 菜单栏，与自绘标题栏冲突；macOS 的
+  // 系统菜单（cmd+Q、复制粘贴加速键）不在窗口内，保留。
+  if (process.platform !== "darwin") Menu.setApplicationMenu(null);
   // In dev the process is Electron itself, so the Dock would show Electron's
   // icon; packaged builds get theirs from the bundle (.icns).
   if (!app.isPackaged && process.platform === "darwin") {
