@@ -201,6 +201,7 @@ export type ProviderInfo = {
   displayName: string;
   api: string | null;
   baseUrl: string | null;
+  headers?: Record<string, string> | null;
   hasKey: boolean;
   keyHint: string | null;
   custom: boolean;

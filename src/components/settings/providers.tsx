@@ -26,6 +26,16 @@ import type {
 } from "@/lib/pi";
 import type { ApplyFn } from "./shared";
 
+// 常用供应商预设：一键填 id / baseUrl / 协议，配合「获取模型列表」即点即用
+const PROVIDER_PRESETS = [
+  { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", api: "openai-completions" },
+  { id: "zhipu", label: "智谱 GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", api: "openai-completions" },
+  { id: "moonshot", label: "Kimi", baseUrl: "https://api.moonshot.cn/v1", api: "openai-completions" },
+  { id: "dashscope", label: "通义千问", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", api: "openai-completions" },
+  { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1", api: "openai-completions" },
+  { id: "ollama", label: "Ollama（本地）", baseUrl: "http://localhost:11434/v1", api: "openai-completions" },
+];
+
 // extracted from settings-dialog.tsx
 export function ProvidersPanel({
   cfg,
@@ -154,6 +164,18 @@ const fmtTokens = (n?: number) => {
 
 const fmtCost = (c?: ProviderModelCost) => (c ? `$${c.input}/$${c.output}` : "");
 
+// 键值对 → headers 对象；空键忽略，全部为空时返回 undefined（表示不设置/清除）
+const headersFromDrafts = (
+  rows: { k: string; v: string }[],
+): Record<string, string> | undefined => {
+  const out: Record<string, string> = {};
+  for (const r of rows) {
+    const k = r.k.trim();
+    if (k) out[k] = r.v;
+  }
+  return Object.keys(out).length ? out : undefined;
+};
+
 // 行悬浮提示：上下文 / 输出上限 / 价格 / 推理档位
 const draftTip = (r: ModelDraft) =>
   [
@@ -189,6 +211,10 @@ function ProviderForm({
   const [api, setApi] = useState(initial?.api ?? "openai-completions");
   const [saving, setSaving] = useState(false);
   const [rows, setRows] = useState<ModelDraft[]>(() => toDrafts(initial?.models));
+  // 自定义请求头草稿（键值对）
+  const [headerRows, setHeaderRows] = useState<{ k: string; v: string }[]>(() =>
+    Object.entries(initial?.headers ?? {}).map(([k, v]) => ({ k, v })),
+  );
   // 「获取模型列表」的结果与勾选状态
   const [available, setAvailable] = useState<FetchedModel[] | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -309,6 +335,7 @@ function ProviderForm({
       api,
       baseUrl: baseUrl.trim(),
       apiKey: apiKey.trim() || undefined,
+      headers: headersFromDrafts(headerRows),
       models: list,
     });
     setSaving(false);
@@ -325,6 +352,27 @@ function ProviderForm({
 
   return (
     <div className="space-y-4 rounded-md border bg-muted/20 p-3">
+      {!initial ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-muted-foreground">预设：</span>
+          {PROVIDER_PRESETS.map((p) => (
+            <button
+              className="rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
+              key={p.id}
+              onClick={() => {
+                setName(p.id);
+                setDisplayName(p.label);
+                setBaseUrl(p.baseUrl);
+                setApi(p.api);
+              }}
+              title={`填入 ${p.baseUrl}`}
+              type="button"
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="grid grid-cols-2 gap-2">
         <Field label="供应商 ID">
           <Input
@@ -375,6 +423,53 @@ function ProviderForm({
           value={apiKey}
         />
       </Field>
+
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">
+            自定义请求头（可选，值支持 $ENV 环境变量引用）
+          </span>
+          <Button
+            className="h-7 gap-1 text-xs"
+            onClick={() => setHeaderRows((prev) => [...prev, { k: "", v: "" }])}
+            size="sm"
+            variant="ghost"
+          >
+            <PlusIcon className="size-3" /> 添加请求头
+          </Button>
+        </div>
+        {headerRows.map((h, i) => (
+          <div className="flex items-center gap-1.5" key={i}>
+            <Input
+              aria-label="请求头名称"
+              className="h-8 w-40 shrink-0 font-mono text-xs"
+              onChange={(e) =>
+                setHeaderRows((prev) => prev.map((r, j) => (j === i ? { ...r, k: e.target.value } : r)))
+              }
+              placeholder="Header 名称，如 X-Api-Key"
+              value={h.k}
+            />
+            <Input
+              aria-label="请求头值"
+              className="h-8 flex-1 font-mono text-xs"
+              onChange={(e) =>
+                setHeaderRows((prev) => prev.map((r, j) => (j === i ? { ...r, v: e.target.value } : r)))
+              }
+              placeholder="值（支持 $ENV / ${ENV} / !command）"
+              value={h.v}
+            />
+            <Button
+              aria-label="删除请求头"
+              className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+              onClick={() => setHeaderRows((prev) => prev.filter((_, j) => j !== i))}
+              size="icon"
+              variant="ghost"
+            >
+              <Trash2Icon className="size-3.5" />
+            </Button>
+          </div>
+        ))}
+      </div>
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">

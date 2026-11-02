@@ -58,6 +58,7 @@ export function listProviders() {
       displayName: customProvider?.name ?? name,
       api: customProvider?.api ?? legacy?.api ?? null,
       baseUrl: customProvider?.baseUrl ?? legacy?.baseUrl ?? null,
+      headers: customProvider?.headers ?? null,
       hasKey: Boolean(auth[name]?.key || customProvider?.apiKey),
       keyHint: maskKey(auth[name]?.key ?? customProvider?.apiKey),
       custom: Boolean(customProvider),
@@ -81,7 +82,7 @@ const maskKey = (key) => {
   return `${key.slice(0, 6)}…${key.slice(-4)}`;
 };
 
-export function saveProvider({ name, displayName, api, baseUrl, apiKey, models }) {
+export function saveProvider({ name, displayName, api, baseUrl, apiKey, headers, models }) {
   if (!name) throw new Error("provider 名字不能为空");
   const config = readModelsJson();
   config.providers ??= {};
@@ -89,6 +90,9 @@ export function saveProvider({ name, displayName, api, baseUrl, apiKey, models }
   const existing = config.providers[name] ?? {};
   const next = { ...existing, name: displayName || name, api, baseUrl };
   if (apiKey) next.apiKey = apiKey;
+  // 请求头：值为字符串原样写入，pi 侧支持 $ENV / ${ENV} / !command 解析
+  if (headers && Object.keys(headers).length) next.headers = headers;
+  else delete next.headers;
 
   // An entry without id is invalid and makes pi drop the whole provider.
   const list = (models ?? []).filter((m) => m && m.id);
