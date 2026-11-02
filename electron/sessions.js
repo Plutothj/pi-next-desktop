@@ -6,10 +6,11 @@ import path from "node:path";
 import { requireString } from "./ipc-helpers.js";
 import { safeHandle } from "./ipc.js";
 import { logLine } from "./logs.js";
-import { buildForkLines, scanSessions, sessionsRoot } from "./session-files.js";
+import { buildForkLines, scanSessions, searchSessions, sessionsRoot } from "./session-files.js";
 
 export function registerSessionHandlers({ pi, dialog, shell }) {
   safeHandle("pi:sessions", () => scanSessions());
+  safeHandle("pi:searchSessions", (_e, { query } = {}) => searchSessions(query));
 
   // pi's RPC fork only branches *before a user message*. For forking at an
   // arbitrary entry (e.g. an assistant reply) we build the new session file

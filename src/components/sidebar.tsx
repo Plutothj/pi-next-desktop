@@ -265,6 +265,29 @@ export function SessionSidebar({
   const [view, setView] = useState<"grouped" | "workspace" | "timeline">("workspace");
   const [sort, setSort] = useState<"updated" | "created">("updated");
   const [renaming, setRenaming] = useState<string | null>(null);
+  // 会话搜索：标题即时过滤 + 全文 grep（防抖 350ms，主进程扫最近 200 个文件）
+  const [search, setSearch] = useState("");
+  const [hits, setHits] = useState<
+    { path: string; title: string; cwd: string | null; mtime: number; snippet: string }[] | null
+  >(null);
+  const [scanned, setScanned] = useState(0);
+  const [truncated, setTruncated] = useState(false);
+  // 全文搜索防抖；标题过滤在渲染时即时做
+  useEffect(() => {
+    const q = search.trim();
+    if (q.length < 2) {
+      setHits(null);
+      return;
+    }
+    const id = setTimeout(() => {
+      window.pi.searchSessions(q).then((r) => {
+        setHits(r.hits);
+        setScanned(r.scanned);
+        setTruncated(r.truncated);
+      }).catch(() => setHits(null));
+    }, 350);
+    return () => clearTimeout(id);
+  }, [search]);
   // Groups collapse to the newest few sessions; expanded groups show all.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleGroup = (label: string) =>
@@ -376,6 +399,15 @@ export function SessionSidebar({
         </DropdownMenuContent>
       </DropdownMenu>
 
+      <div className="px-2 pb-1">
+        <Input
+          className="h-7 text-xs"
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="搜索会话（标题与全文）"
+          value={search}
+        />
+      </div>
+
       <div className="flex items-center gap-0.5 px-2 pb-1">
         {(["grouped", "workspace", "timeline"] as const).map((v) => (
           <button
@@ -400,11 +432,42 @@ export function SessionSidebar({
       </div>
 
       <ScrollArea className="flex-1">
+        {hits !== null ? (
+          <div className="flex flex-col gap-px px-2 pb-2">
+            {truncated ? (
+              <p className="px-2 pt-2 pb-1 text-[10px] text-muted-foreground/60">结果较多，仅显示前 30 条</p>
+            ) : null}
+            {hits.length === 0 ? (
+              <p className="px-2 py-6 text-center text-muted-foreground text-xs">
+                无匹配会话{scanned ? `（已扫 ${scanned} 个）` : ""}
+              </p>
+            ) : null}
+            {hits.map((h) => (
+              <button
+                className="rounded-lg px-2 py-1.5 text-left hover:bg-sidebar-accent"
+                key={h.path}
+                onClick={() => openSession(h.path, h.cwd ?? undefined)}
+                type="button"
+              >
+                <p className="truncate text-xs">{h.title}</p>
+                <p className="line-clamp-2 text-[10px] text-muted-foreground/80">{h.snippet}</p>
+              </button>
+            ))}
+          </div>
+        ) : (
         <div className="flex flex-col gap-px px-2 pb-2">
-          {state.sessions.length === 0 ? (
-            <p className="px-2 py-6 text-center text-muted-foreground text-xs">暂无任务</p>
-          ) : null}
-          {groupSessions(state.sessions, state.projects, view, sort).map(([label, items]) => {
+          {(() => {
+            const q = search.trim().toLowerCase();
+            const visibleSessions =
+              q && state.sessions.length
+                ? state.sessions.filter((s) => s.title.toLowerCase().includes(q))
+                : state.sessions;
+            return (
+              <>
+                {visibleSessions.length === 0 ? (
+                  <p className="px-2 py-6 text-center text-muted-foreground text-xs">暂无任务</p>
+                ) : null}
+                {groupSessions(visibleSessions, state.projects, view, sort).map(([label, items]) => {
             const open = view === "timeline" || expanded.has(label);
             const visible = open ? items : items.slice(0, COLLAPSED_COUNT);
             return (
@@ -453,7 +516,11 @@ export function SessionSidebar({
             </div>
             );
           })}
+              </>
+            );
+          })()}
         </div>
+        )}
       </ScrollArea>
 
       <div className="flex shrink-0 items-center gap-1 border-t p-2">

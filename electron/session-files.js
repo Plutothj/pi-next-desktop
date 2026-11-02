@@ -135,6 +135,48 @@ export function scanSessions(root = sessionsRoot()) {
   return out.sort((a, b) => b.mtime - a.mtime);
 }
 
+// 会话全文搜索：显式动作才触发（O(总字节)，与 scanSessions 同源已知代价）。
+// 上限：最近 200 个文件、单文件 20MB、命中 30 条即止。
+export function searchSessions(query, root = sessionsRoot()) {
+  const needle = String(query ?? "").trim().toLowerCase();
+  if (!needle) return { hits: [], scanned: 0, truncated: false };
+  const sessions = scanSessions(root).slice(0, 200);
+  const hits = [];
+  let truncated = false;
+
+  for (const session of sessions) {
+    if (hits.length >= 30) {
+      truncated = true;
+      break;
+    }
+    let content;
+    try {
+      if (fs.statSync(session.path).size > 20 * 1024 * 1024) continue;
+      content = fs.readFileSync(session.path, "utf8");
+    } catch {
+      continue;
+    }
+    const at = content.toLowerCase().indexOf(needle);
+    if (at === -1) continue;
+    // 命中点上下文：剥掉 JSON 结构噪音，给一段可读片段
+    const snippet = content
+      .slice(Math.max(0, at - 120), at + 240)
+      .replace(/\\n/g, " ")
+      .replace(/[{}"[\]]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 260);
+    hits.push({
+      path: session.path,
+      title: session.title ?? "新会话",
+      cwd: session.cwd ?? null,
+      mtime: session.mtime,
+      snippet,
+    });
+  }
+  return { hits, scanned: sessions.length, truncated };
+}
+
 /**
  * Builds the contents of a file-level fork: new header (parentSession points
  * at the source session) plus the ancestor chain of the target entry.
