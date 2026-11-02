@@ -333,6 +333,12 @@ export type PiBridge = {
     id: string,
     values: { value?: string; cancelled?: boolean; confirmed?: boolean },
   ) => Promise<{ ok: boolean; error?: string }>;
+  parseAttachment: (payload: { name: string; dataBase64: string }) =>
+    Promise<
+      | { ok: true; kind: "text"; text: string }
+      | { ok: true; kind: "zip"; dir: string; files: string[]; count: number }
+      | { ok: false; error: string }
+    >;
   debugDialog: (dialog: Omit<UiDialogRequest, "id">) => Promise<{ ok: boolean; id: string }>;
   exportHtml: () => Promise<{ ok: boolean; path?: string; error?: string }>;
   diagExport: () => Promise<{ ok: boolean; path?: string; error?: string }>;

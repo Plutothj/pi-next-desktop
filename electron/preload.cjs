@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld("pi", {
   deleteSession: (filePath) => ipcRenderer.invoke("pi:deleteSession", { path: filePath }),
   forkSessionAt: (entryId) => ipcRenderer.invoke("pi:forkSessionAt", { entryId }),
   respondUi: (id, values) => ipcRenderer.invoke("pi:uiRespond", { id, ...values }),
+  parseAttachment: (payload) => ipcRenderer.invoke("attachments:parse", payload),
   exportHtml: () => ipcRenderer.invoke("pi:exportHtml"),
   diagExport: () => ipcRenderer.invoke("diag:export"),
   plans: {

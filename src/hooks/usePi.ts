@@ -283,12 +283,21 @@ export function usePi() {
       if (behavior) payload.streamingBehavior = behavior;
       if (images?.length) {
         payload.images = await Promise.all(
-          images.map(async (file) => ({
-            type: "image" as const,
-            // FileUIPart.url is a data URL for local files.
-            data: file.url.slice(file.url.indexOf(",") + 1),
-            mimeType: file.mediaType ?? "image/png",
-          })),
+          images.map(async (file) => {
+            // url 可能是 blob: 或 data:——统一取真实字节转 base64
+            // （旧实现对 blob: URL 做 slice(indexOf(",")) 会把 blob 字符串当数据发出去）
+            const blob = await (await fetch(file.url)).blob();
+            const bytes = new Uint8Array(await blob.arrayBuffer());
+            let binary = "";
+            for (let i = 0; i < bytes.length; i += 0x8000) {
+              binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+            }
+            return {
+              type: "image" as const,
+              data: btoa(binary),
+              mimeType: file.mediaType?.split(";")[0] || blob.type || "image/png",
+            };
+          }),
         );
       }
       return send(payload);

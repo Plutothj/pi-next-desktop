@@ -37,6 +37,7 @@ import { ModelPicker } from "@/components/model-picker";
 import { SessionSidebar } from "@/components/sidebar";
 import { SettingsDialog, type SettingsTab } from "@/components/settings-dialog";
 import { UpdateDialog } from "@/components/update-dialog";
+import { expandAttachments } from "@/lib/attachments";
 import { TerminalPanel } from "@/components/terminal-panel";
 import { FilesPanel } from "@/components/files-panel";
 import { AgentsPanel } from "@/components/agents-panel";
@@ -175,15 +176,17 @@ function Shell() {
     return () => window.removeEventListener("keydown", onKey);
   }, [newSession]);
 
-  const submit = (message: PromptInputMessage, behavior?: "steer" | "followUp") => {
+  const submit = async (message: PromptInputMessage, behavior?: "steer" | "followUp") => {
     const text = message.text.trim();
     if (!text) return;
+    // 附件分流：图片走原生 image part，其余解析为文本块内联进 prompt
+    const { images, extraText } = await expandAttachments(message.files);
     // A fresh task with dual-model enabled starts the planning turn.
     if (dual.config.enabled && dualChain.phase === "idle" && !state.isStreaming) {
       const planner = dual.find(state.models, dual.config.planner);
       const executor = dual.find(state.models, dual.config.executor);
       if (planner && executor) {
-        dualChain.start(text, message.files, planner);
+        dualChain.start(text, images, planner);
         return;
       }
     }
@@ -191,7 +194,7 @@ function Shell() {
     // Always name a streamingBehavior: it only matters while pi is mid-run
     // (where a missing one is rejected outright), and is ignored when idle.
     // This keeps sends working even if our isStreaming flag lags reality.
-    prompt(body, message.files, behavior ?? "followUp");
+    prompt(extraText ? `${body}\n\n${extraText}` : body, images, behavior ?? "followUp");
   };
 
   const localCommand = (name: string) => {

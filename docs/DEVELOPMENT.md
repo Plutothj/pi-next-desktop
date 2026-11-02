@@ -257,6 +257,7 @@ reject（调用方 `.catch` 语义不变）。启动期预期错误（`pi 未运
 | `cfg:install` / `cfg:uninstall` | shell out `pi install/remove`，输出经 `cfg_progress` 流式回传 |
 | `diag:export` | 保存诊断 txt（版本/平台/运行时/会话/任务/日志），完成后可显示于 Finder |
 | `pi:debugDialog` | **仅 `PI_DEBUG=1`**：注入一个假的扩展对话框用于调试 |
+| `attachments:parse` | 附件解析：pdf/docx 提取纯文本（unpdf/mammoth），zip 解压到临时目录并返回清单（防 zip-slip/超限）；渲染层将结果内联进 prompt |
 
 ---
 

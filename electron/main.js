@@ -3,6 +3,8 @@
 // their own modules (sessions, projects, git, tasks, workspace, config, diag).
 
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Tray, shell } from "electron";
+import { parseAttachment } from "./attachments.js";
+import { requireObject } from "./ipc-helpers.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -369,6 +371,12 @@ safeHandle("pi:start", async (_e, { cwd } = {}) => {
 safeHandle("pi:send", async (_e, payload) => {
   const res = await pi.command(payload);
   return res.data ?? null;
+});
+
+// 附件解析：pdf/docx 提取文本、zip 解压到临时目录（渲染层把结果内联进 prompt）
+safeHandle("attachments:parse", async (_e, payload) => {
+  requireObject(payload, "payload");
+  return parseAttachment(payload).catch((err) => ({ ok: false, error: err.message }));
 });
 
 safeHandle("pi:pickFolder", async () => {
