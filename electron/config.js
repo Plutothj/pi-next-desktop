@@ -534,8 +534,8 @@ export function setMcpEnabled(name, enabled) {
 
 export function listPrompts(cwd) {
   const dirs = [
-    { dir: path.join(AGENT_DIR, "prompts"), scope: "user" },
-    { dir: path.join(cwd ?? os.homedir(), ".pi", "prompts"), scope: "project" },
+    { dir: promptDir("user"), scope: "user" },
+    { dir: promptDir("project", cwd), scope: "project" },
   ];
   const out = [];
   for (const { dir, scope } of dirs) {
@@ -556,6 +556,49 @@ export function listPrompts(cwd) {
     }
   }
   return out;
+}
+
+// ------------------------------------------------------- prompts: 读写/删除
+
+const PROMPT_NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
+
+const promptDir = (scope, cwd) =>
+  scope === "project"
+    ? path.join(cwd ?? os.homedir(), ".pi", "prompts")
+    : path.join(AGENT_DIR, "prompts");
+
+// 文件名 stem 校验 + 落点守卫，供保存/读取/删除共用
+const resolvePromptFile = (scope, name, cwd) => {
+  const stem = String(name ?? "").trim();
+  if (!PROMPT_NAME.test(stem)) throw new Error("命令名只能含字母/数字/中划线/下划线");
+  const allowed = [promptDir("user"), promptDir("project", cwd)];
+  const resolved = path.resolve(promptDir(scope, cwd), `${stem}.md`);
+  if (!allowed.some((root) => resolved.startsWith(path.resolve(root) + path.sep))) {
+    throw new Error("路径不在 prompts 目录内");
+  }
+  return resolved;
+};
+
+export function savePrompt({ scope, name, content, cwd } = {}) {
+  if (scope !== "user" && scope !== "project") throw new Error("scope 必须是 user 或 project");
+  if (typeof content !== "string" || !content.trim()) throw new Error("内容不能为空");
+  const file = resolvePromptFile(scope, name, cwd);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, content, "utf8");
+  return { ok: true, path: file };
+}
+
+export function deletePrompt({ scope, name, cwd } = {}) {
+  const file = resolvePromptFile(scope, name, cwd);
+  fs.rmSync(file, { force: true });
+  return { ok: true };
+}
+
+export function readPrompt({ scope, name, cwd } = {}) {
+  const file = resolvePromptFile(scope, name, cwd);
+  const stat = fs.statSync(file);
+  if (stat.size > 1_000_000) throw new Error("文件过大");
+  return fs.readFileSync(file, "utf8");
 }
 
 export function listMemory() {

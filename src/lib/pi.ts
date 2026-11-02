@@ -390,6 +390,11 @@ export type PiBridge = {
     setResources: (source: string, disabled: Record<string, boolean>) => Promise<{ ok: boolean; restart?: boolean }>;
     setMcp: (name: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>;
     savePersona: (payload: { scope: string; field: string; content: string }) => Promise<{ ok: boolean; error?: string }>;
+    savePrompt: (payload: { scope: "user" | "project"; name: string; content: string; cwd?: string }) =>
+      Promise<{ ok: boolean; error?: string; restart?: boolean }>;
+    deletePrompt: (payload: { scope: "user" | "project"; name: string; cwd?: string }) =>
+      Promise<{ ok: boolean; error?: string; restart?: boolean }>;
+    readPrompt: (payload: { scope: "user" | "project"; name: string; cwd?: string }) => Promise<string>;
     install: (source: string) => Promise<{ ok: boolean; log?: string; error?: string }>;
     uninstall: (source: string) => Promise<{ ok: boolean; log?: string; error?: string }>;
   };

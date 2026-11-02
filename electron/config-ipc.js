@@ -71,6 +71,27 @@ export function registerConfigHandlers({ send }) {
     }
   });
 
+  // 自定义命令（prompts .md）：保存/删除后重启 pi 注册 /命令
+  safeHandle("cfg:savePrompt", (_e, payload) => {
+    try {
+      config.savePrompt(requireObject(payload, "payload"));
+      return afterChange();
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  safeHandle("cfg:deletePrompt", (_e, payload) => {
+    try {
+      config.deletePrompt(requireObject(payload, "payload"));
+      return afterChange();
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  safeHandle("cfg:readPrompt", (_e, payload) => config.readPrompt(requireObject(payload, "payload")));
+
   safeHandle("cfg:saveProvider", (_e, payload) => {
     try {
       config.saveProvider(payload);

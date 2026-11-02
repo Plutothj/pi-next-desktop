@@ -623,7 +623,15 @@ export function SettingsDialog({
               {tab === "memory" ? <MemoryPanel cfg={cfg} /> : null}
               {tab === "agents" ? <AgentsPanel cfg={cfg} cwd={cwd} onChanged={onChanged} /> : null}
               {tab === "mcp" ? <McpPanel cfg={cfg} onApply={apply} /> : null}
-              {tab === "commands" ? <CommandsPanel cfg={cfg} /> : null}
+              {tab === "commands" ? (
+                <CommandsPanel
+                  cfg={cfg}
+                  cwd={cwd}
+                  onApply={apply}
+                  setBusy={setBusy}
+                  setLog={setLog}
+                />
+              ) : null}
               {tab === "stats" ? <UsagePanel /> : null}
               {tab === "projects" ? <ProjectsPanel cwd={cwd} /> : null}
             </div>
