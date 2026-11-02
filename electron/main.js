@@ -279,23 +279,41 @@ function createWindow() {
   // 4K 适配：Windows 缩放 100% 的大屏（物理宽 ≥3000 且系统缩放 <125%）上
   // 1x 渲染的 UI 会小得不可用，按有效宽度给一个默认缩放；用户手动缩放后以
   // 持久化值为准。
-  win.webContents.on("did-finish-load", () => {
-    const prefs = readUiPrefs();
-    if (prefs.zoom) {
-      win.webContents.setZoomFactor(prefs.zoom);
-      return;
-    }
-    try {
-      const display = screen.getPrimaryDisplay();
-      if (display.scaleFactor < 1.25 && display.size.width >= 3000) {
-        const cssWidth = display.size.width / (display.scaleFactor || 1);
-        const zoom = Math.min(2, Math.max(1, Math.round((cssWidth / 1600) * 100) / 100));
-        win.webContents.setZoomFactor(zoom);
-      }
-    } catch {}
+  win.webContents.on("did-finish-load", () => applyDisplayZoom());
+  // 拖到另一台分辨率不同的显示器/改缩放比例时跟随（move 抖动，防抖）
+  let moveTimer = null;
+  win.on("move", () => {
+    clearTimeout(moveTimer);
+    moveTimer = setTimeout(applyDisplayZoom, 400);
   });
+  screen.on("display-metrics-changed", () => applyDisplayZoom());
 
   win.webContents.setWindowOpenHandler(({ url }) => openExternal(url));
+}
+
+// ------------------------------------------------------------ 4K / 显示缩放
+
+// 大屏动态缩放：窗口所在显示器的 CSS 宽度超过 2600（4K-100%→3840、4K-125%→3072
+// 都命中；4K-150%→2560 原生已够大不干预）时，把 UI 缩放到约 1800 CSS 宽。
+// 手动缩放（Ctrl+=/-）以 zoomManual 持久化并优先；Ctrl+0 清除手动值回到自动。
+function displayZoomFor(display) {
+  const cssWidth = display.size.width;
+  if (cssWidth < 2600) return 1;
+  return Math.min(2.5, Math.max(1, Math.round((cssWidth / 1800) * 100) / 100));
+}
+
+function applyDisplayZoom() {
+  if (!win || win.isDestroyed()) return;
+  try {
+    const prefs = readUiPrefs();
+    if (prefs.zoomManual) {
+      win.webContents.setZoomFactor(prefs.zoomManual);
+      return;
+    }
+    const display = screen.getDisplayMatching(win.getBounds());
+    const zoom = displayZoomFor(display);
+    win.webContents.setZoomFactor(zoom);
+  } catch {}
 }
 
 // ------------------------------------------------------------ ui prefs (zoom)
@@ -322,7 +340,8 @@ const writeUiPrefs = (patch) => {
 function setZoomLevel(level) {
   if (!win || win.isDestroyed()) return;
   win.webContents.setZoomLevel(level);
-  writeUiPrefs({ zoom: win.webContents.getZoomFactor() });
+  // 手动缩放持久化（优先于显示器自适应）；Ctrl+0 清除手动值回到自动
+  writeUiPrefs({ zoomManual: win.webContents.getZoomFactor(), zoom: null });
 }
 
 safeHandle("ui:zoom", (_e, { delta } = {}) => {
@@ -333,8 +352,9 @@ safeHandle("ui:zoom", (_e, { delta } = {}) => {
 
 safeHandle("ui:zoomReset", () => {
   if (!win || win.isDestroyed()) return { ok: false };
-  setZoomLevel(0);
-  return { ok: true, factor: 1 };
+  writeUiPrefs({ zoomManual: null });
+  applyDisplayZoom();
+  return { ok: true };
 });
 
 // Only http(s) may leave the app; file:// or custom schemes stay local.
