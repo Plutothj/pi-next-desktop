@@ -163,20 +163,27 @@ function Shell() {
     state.isStreaming,
   );
 
-  // 界面缩放快捷键（Ctrl/Cmd + = - 0）；4K 100% 缩放屏另有主进程默认放大
+  // 界面缩放快捷键（Ctrl/Cmd + = - 0，10% 步进），反馈气泡显示当前倍率
+  const [zoomPill, setZoomPill] = useState<number | null>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
-      if (e.key === "=" || e.key === "+") {
-        e.preventDefault();
-        void window.pi.zoom(0.5);
-      } else if (e.key === "-") {
-        e.preventDefault();
-        void window.pi.zoom(-0.5);
-      } else if (e.key === "0") {
-        e.preventDefault();
-        void window.pi.zoomReset();
-      }
+      const act =
+        e.key === "=" || e.key === "+"
+          ? () => window.pi.zoom(0.1)
+          : e.key === "-"
+            ? () => window.pi.zoom(-0.1)
+            : e.key === "0"
+              ? () => window.pi.zoomReset()
+              : null;
+      if (!act) return;
+      e.preventDefault();
+      void act().then((res) => {
+        if (res?.ok && res.factor) {
+          setZoomPill(res.factor);
+          setTimeout(() => setZoomPill(null), 1600);
+        }
+      });
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
@@ -492,6 +499,12 @@ function Shell() {
         open={paletteOpen}
         sessions={state.sessions}
       />
+
+      {zoomPill ? (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full border bg-card px-3.5 py-1.5 text-xs shadow-lg">
+          界面缩放 {Math.round(zoomPill * 100)}%
+        </div>
+      ) : null}
 
       {planSavedPath ? (
         <div className="fixed right-6 bottom-6 z-50 max-w-md rounded-lg border bg-card px-4 py-2.5 text-xs shadow-lg">

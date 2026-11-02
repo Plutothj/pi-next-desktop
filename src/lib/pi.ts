@@ -329,6 +329,8 @@ export type PiBridge = {
   showWindow: () => Promise<{ ok: boolean }>;
   zoom: (delta: number) => Promise<{ ok: boolean; factor?: number }>;
   zoomReset: () => Promise<{ ok: boolean; factor?: number }>;
+  zoomSet: (factor: number) => Promise<{ ok: boolean; factor?: number; error?: string }>;
+  zoomGet: () => Promise<number>;
   sessions: () => Promise<SessionInfo[]>;
   searchSessions: (query: string) =>
     Promise<{

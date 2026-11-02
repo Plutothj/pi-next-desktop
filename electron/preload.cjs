@@ -36,6 +36,8 @@ contextBridge.exposeInMainWorld("pi", {
   showWindow: () => ipcRenderer.invoke("pi:showWindow"),
   zoom: (delta) => ipcRenderer.invoke("ui:zoom", { delta }),
   zoomReset: () => ipcRenderer.invoke("ui:zoomReset"),
+  zoomSet: (factor) => ipcRenderer.invoke("ui:zoomSet", { factor }),
+  zoomGet: () => ipcRenderer.invoke("ui:zoomGet"),
   cfg: {
     read: (cwd) => ipcRenderer.invoke("cfg:read", { cwd }),
     saveProvider: (payload) => ipcRenderer.invoke("cfg:saveProvider", payload),

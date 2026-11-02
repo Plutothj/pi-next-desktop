@@ -2,7 +2,7 @@
 // between pi's extension UI protocol and the renderer. Feature areas live in
 // their own modules (sessions, projects, git, tasks, workspace, config, diag).
 
-import { app, BrowserWindow, dialog, Menu, nativeImage, screen, Tray, shell } from "electron";
+import { app, BrowserWindow, dialog, Menu, nativeImage, Tray, shell } from "electron";
 import { parseAttachment } from "./attachments.js";
 import { requireObject } from "./ipc-helpers.js";
 import fs from "node:fs";
@@ -279,42 +279,54 @@ function createWindow() {
   // 4K 适配：Windows 缩放 100% 的大屏（物理宽 ≥3000 且系统缩放 <125%）上
   // 1x 渲染的 UI 会小得不可用，按有效宽度给一个默认缩放；用户手动缩放后以
   // 持久化值为准。
-  win.webContents.on("did-finish-load", () => applyDisplayZoom());
-  // 拖到另一台分辨率不同的显示器/改缩放比例时跟随（move 抖动，防抖）
-  let moveTimer = null;
-  win.on("move", () => {
-    clearTimeout(moveTimer);
-    moveTimer = setTimeout(applyDisplayZoom, 400);
-  });
-  screen.on("display-metrics-changed", () => applyDisplayZoom());
+  win.webContents.on("did-finish-load", () => applyStoredZoom());
 
   win.webContents.setWindowOpenHandler(({ url }) => openExternal(url));
 }
 
-// ------------------------------------------------------------ 4K / 显示缩放
+// ------------------------------------------------------------- 界面缩放
 
-// 大屏动态缩放：窗口所在显示器的 CSS 宽度超过 2600（4K-100%→3840、4K-125%→3072
-// 都命中；4K-150%→2560 原生已够大不干预）时，把 UI 缩放到约 1800 CSS 宽。
-// 手动缩放（Ctrl+=/-）以 zoomManual 持久化并优先；Ctrl+0 清除手动值回到自动。
-function displayZoomFor(display) {
-  const cssWidth = display.size.width;
-  if (cssWidth < 2600) return 1;
-  return Math.min(2.5, Math.max(1, Math.round((cssWidth / 1800) * 100) / 100));
-}
+// 对齐 ZCode / opencode：不做按屏幕自动推断（猜不准且与系统缩放打架），
+// 缩放是显式的用户设置——持久化于 ui.json，Ctrl+=/- 步进 10%，Ctrl+0 复位，
+// 设置页提供档位。参考：ZCode 按 zoomLevel 持久化默认 0；opencode wireZoom。
+const ZOOM_MIN = 0.8;
+const ZOOM_MAX = 2.5;
 
-function applyDisplayZoom() {
+const clampZoom = (value) =>
+  Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(Number(value) * 100) / 100));
+
+function applyStoredZoom() {
   if (!win || win.isDestroyed()) return;
-  try {
-    const prefs = readUiPrefs();
-    if (prefs.zoomManual) {
-      win.webContents.setZoomFactor(prefs.zoomManual);
-      return;
-    }
-    const display = screen.getDisplayMatching(win.getBounds());
-    const zoom = displayZoomFor(display);
-    win.webContents.setZoomFactor(zoom);
-  } catch {}
+  win.webContents.setZoomFactor(clampZoom(readUiPrefs().zoomFactor ?? 1));
 }
+
+function setZoomFactorPersisted(factor) {
+  if (!win || win.isDestroyed()) return null;
+  const next = clampZoom(factor);
+  win.webContents.setZoomFactor(next);
+  writeUiPrefs({ zoomFactor: next });
+  return next;
+}
+
+safeHandle("ui:zoomGet", () => clampZoom(readUiPrefs().zoomFactor ?? 1));
+
+safeHandle("ui:zoom", (_e, { delta } = {}) => {
+  if (!win || win.isDestroyed()) return { ok: false };
+  const current = win.webContents.getZoomFactor();
+  return { ok: true, factor: setZoomFactorPersisted(current + Number(delta ?? 0.1)) };
+});
+
+safeHandle("ui:zoomReset", () => {
+  const factor = setZoomFactorPersisted(1);
+  return factor === null ? { ok: false } : { ok: true, factor };
+});
+
+safeHandle("ui:zoomSet", (_e, { factor } = {}) => {
+  const value = Number(factor);
+  if (!Number.isFinite(value)) return { ok: false, error: "无效缩放值" };
+  const next = setZoomFactorPersisted(value);
+  return next === null ? { ok: false } : { ok: true, factor: next };
+});
 
 // ------------------------------------------------------------ ui prefs (zoom)
 
@@ -336,26 +348,6 @@ const writeUiPrefs = (patch) => {
     );
   } catch {}
 };
-
-function setZoomLevel(level) {
-  if (!win || win.isDestroyed()) return;
-  win.webContents.setZoomLevel(level);
-  // 手动缩放持久化（优先于显示器自适应）；Ctrl+0 清除手动值回到自动
-  writeUiPrefs({ zoomManual: win.webContents.getZoomFactor(), zoom: null });
-}
-
-safeHandle("ui:zoom", (_e, { delta } = {}) => {
-  if (!win || win.isDestroyed()) return { ok: false };
-  setZoomLevel(win.webContents.getZoomLevel() + Number(delta ?? 0.5));
-  return { ok: true, factor: win.webContents.getZoomFactor() };
-});
-
-safeHandle("ui:zoomReset", () => {
-  if (!win || win.isDestroyed()) return { ok: false };
-  writeUiPrefs({ zoomManual: null });
-  applyDisplayZoom();
-  return { ok: true };
-});
 
 // Only http(s) may leave the app; file:// or custom schemes stay local.
 function openExternal(url) {
