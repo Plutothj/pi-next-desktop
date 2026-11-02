@@ -203,7 +203,6 @@ export type ProviderInfo = {
   baseUrl: string | null;
   headers?: Record<string, string> | null;
   hasKey: boolean;
-  keyHint: string | null;
   custom: boolean;
   models: ProviderModel[];
 };

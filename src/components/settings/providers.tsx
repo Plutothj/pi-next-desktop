@@ -84,7 +84,7 @@ export function ProvidersPanel({
                 {p.hasKey ? (
                   <Badge className="text-[11px]" variant="outline">
                     <CheckIcon className="mr-1 size-2.5" />
-                    {p.keyHint ?? "已配置"}
+                    已配置
                   </Badge>
                 ) : (
                   <Badge className="text-[11px] text-destructive" variant="outline">
@@ -239,6 +239,25 @@ function ProviderForm({
       return;
     }
     setAvailable(res.models);
+    const models = res.models;
+    // 目录是元数据的权威来源：同步回填已有行（旧行/手动行的 200k 之类默认值在此纠正）。
+    // 推理/图片开关仅在行没有元数据时才按目录纠正，不覆盖用户手动设置。
+    setRows((prev) =>
+      prev.map((r) => {
+        const meta = models.find((m) => m.id === r.id.trim());
+        if (!meta) return r;
+        const enriched = r.contextWindow == null;
+        return {
+          ...r,
+          contextWindow: meta.contextWindow ?? r.contextWindow,
+          maxTokens: meta.maxTokens ?? r.maxTokens,
+          cost: meta.cost ?? r.cost,
+          effort: meta.reasoningEffort ?? r.effort,
+          reasoning: enriched && meta.reasoning != null ? meta.reasoning : r.reasoning,
+          image: enriched && meta.image != null ? meta.image : r.image,
+        };
+      }),
+    );
     // 默认勾选本地还没有的模型
     setPicked(
       new Set(

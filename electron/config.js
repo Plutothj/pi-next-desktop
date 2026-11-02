@@ -60,7 +60,7 @@ export function listProviders() {
       baseUrl: customProvider?.baseUrl ?? legacy?.baseUrl ?? null,
       headers: customProvider?.headers ?? null,
       hasKey: Boolean(auth[name]?.key || customProvider?.apiKey),
-      keyHint: maskKey(auth[name]?.key ?? customProvider?.apiKey),
+      keyHint: null,
       custom: Boolean(customProvider),
       models: (customModels.length ? customModels : storeModels).map((m) => ({
         id: m.id,
@@ -76,11 +76,7 @@ export function listProviders() {
   });
 }
 
-const maskKey = (key) => {
-  if (!key) return null;
-  if (key.startsWith("$") || key.startsWith("!")) return key;
-  return `${key.slice(0, 6)}…${key.slice(-4)}`;
-};
+// 密钥内容（含掩码片段）不再回传渲染层，列表只标 hasKey。
 
 export function saveProvider({ name, displayName, api, baseUrl, apiKey, headers, models }) {
   if (!name) throw new Error("provider 名字不能为空");
