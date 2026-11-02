@@ -11,7 +11,7 @@ const uuid = () => crypto.randomUUID();
 
 function makeSession(dir, lines) {
   const file = path.join(dir, `${uuid()}.jsonl`);
-  fs.writeFileSync(file, lines.join("\n") + "\n");
+  fs.writeFileSync(file, `${lines.join("\n")}\n`);
   return file;
 }
 
@@ -66,7 +66,7 @@ test("scanSessions lists and sorts by mtime", () => {
     JSON.stringify({ type: "session", version: 3, id: uuid(), timestamp: "t", cwd: "/tmp/proj" }),
     JSON.stringify({ type: "message", id: uuid(), parentId: null, message: { role: "user", content: "old" } }),
   ]);
-  const newer = makeSession(dir, [
+  const _newer = makeSession(dir, [
     JSON.stringify({ type: "session", version: 3, id: uuid(), timestamp: "t", cwd: "/tmp/proj" }),
     JSON.stringify({ type: "message", id: uuid(), parentId: null, message: { role: "user", content: "newer" } }),
   ]);

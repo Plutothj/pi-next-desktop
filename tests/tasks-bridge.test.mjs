@@ -32,7 +32,7 @@ function bridgeRequest(sockPath, payload) {
   return new Promise((resolve, reject) => {
     const socket = net.connect(sockPath);
     let buf = "";
-    socket.on("connect", () => socket.write(JSON.stringify(payload) + "\n"));
+    socket.on("connect", () => socket.write(`${JSON.stringify(payload)}\n`));
     socket.on("data", (d) => { buf += d.toString(); });
     socket.on("end", () => resolve(JSON.parse(buf)));
     socket.on("error", reject);
