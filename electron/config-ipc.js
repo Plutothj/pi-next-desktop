@@ -22,6 +22,9 @@ function runPi(args, send) {
         ...rt.env,
         PATH: [path.dirname(rt.node), process.env.PATH ?? ""].join(path.delimiter),
         ...(rt.installRoot ? { PI_MANAGED_INSTALL_ROOT: rt.installRoot } : {}),
+        // 与 RPC 子进程一致：安装必须落到隔离的 agent 目录，
+        // 否则 pi 会写进默认的 ~/.pi/agent，而已安装列表读的是 AGENT_DIR。
+        PI_CODING_AGENT_DIR: config.AGENT_DIR,
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
