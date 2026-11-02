@@ -291,10 +291,36 @@ app.on("web-contents-created", (_event, contents) => {
 
 // ---------------------------------------------------------------- ipc
 
+// 上次使用的工作区：启动无参时恢复，而不是退回用户根目录。
+const lastWorkspaceFile = () => path.join(app.getPath("userData"), "last-workspace.json");
+
+const readLastWorkspace = () => {
+  try {
+    const data = JSON.parse(fs.readFileSync(lastWorkspaceFile(), "utf8"));
+    return typeof data.cwd === "string" && data.cwd ? data.cwd : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeLastWorkspace = (cwd) => {
+  try {
+    fs.mkdirSync(app.getPath("userData"), { recursive: true });
+    fs.writeFileSync(lastWorkspaceFile(), `${JSON.stringify({ cwd, at: Date.now() }, null, 2)}\n`);
+  } catch {}
+};
+
 safeHandle("pi:start", async (_e, { cwd } = {}) => {
-  const resolved = cwd && fs.existsSync(cwd) ? cwd : os.homedir();
+  const saved = readLastWorkspace();
+  const resolved =
+    cwd && fs.existsSync(cwd)
+      ? cwd
+      : saved && fs.existsSync(saved)
+        ? saved
+        : os.homedir();
   const run = async () => {
     await startPi(resolved);
+    writeLastWorkspace(resolved);
     // Cold start: get_state can answer before the session/model exist, so poll.
     let state = null;
     for (let i = 0; i < 40; i++) {

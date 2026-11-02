@@ -36,6 +36,7 @@ import { ContextUsage } from "@/components/context-usage";
 import { ModelPicker } from "@/components/model-picker";
 import { SessionSidebar } from "@/components/sidebar";
 import { SettingsDialog, type SettingsTab } from "@/components/settings-dialog";
+import { UpdateDialog } from "@/components/update-dialog";
 import { TerminalPanel } from "@/components/terminal-panel";
 import { FilesPanel } from "@/components/files-panel";
 import { AgentsPanel } from "@/components/agents-panel";
@@ -102,24 +103,35 @@ function Shell() {
   const updater = useUpdater();
   const { theme, toggle: toggleTheme } = useTheme();
   const [restartDismissed, setRestartDismissed] = useState<string | null>(null);
+  const [updateOpen, setUpdateOpen] = useState(false);
+  const [availableDismissed, setAvailableDismissed] = useState<string | null>(null);
   const showRestart =
     updater.state.status === "ready" &&
     updater.state.version !== null &&
+    !updateOpen &&
     restartDismissed !== updater.state.version;
+  // 后台检查发现新版：toast 提醒（下载中的进度走按钮与弹窗）
+  const showAvailable =
+    updater.state.status === "available" &&
+    updater.state.version !== null &&
+    !updateOpen &&
+    availableDismissed !== updater.state.version;
 
-  // One silent update check shortly after startup.
+  // 静默检查：启动 8 秒后一次，此后每 4 小时一次
   useEffect(() => {
-    const timer = setTimeout(() => updater.check(), 8000);
-    return () => clearTimeout(timer);
+    const first = setTimeout(() => updater.check(), 8000);
+    const interval = setInterval(() => updater.check(), 4 * 60 * 60 * 1000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(interval);
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- run once
 
   const onUpdateAction = () => {
+    setUpdateOpen(true);
     const { status } = updater.state;
-    if (status === "idle" || status === "dev" || status === "up-to-date") updater.check();
-    else if (status === "available") updater.download();
-    else if (status === "ready") setRestartDismissed(null);
-    else if (status === "error") updater.openReleases();
-    // checking/downloading: no-op, progress shows on the button
+    if (status === "idle" || status === "up-to-date") updater.check();
+    // available/downloading/ready/error/dev：弹窗按当前状态渲染，无需重复动作
   };
   const [panel, setPanel] = useState<PanelTab | null>(null);
   const { tasks, run: runTask, kill: killTask, remove: removeTask, hosts } = useTasks();
@@ -428,7 +440,7 @@ function Shell() {
           panel: (tab) => setPanel(tab),
           openSession: (path, cwd) => openSession(path, cwd),
           shortcuts: () => setShortcutsOpen(true),
-          checkUpdate: () => updater.check(),
+          checkUpdate: () => onUpdateAction(),
           diagnostics: () => {
             window.pi.diagExport();
           },
@@ -439,6 +451,41 @@ function Shell() {
       />
 
       <ShortcutsDialog onOpenChange={setShortcutsOpen} open={shortcutsOpen} />
+
+      <UpdateDialog
+        onOpenChange={setUpdateOpen}
+        open={updateOpen}
+        updater={updater}
+      />
+
+      {/* 后台检查发现新版本：不打断，可稍后 */}
+      <Dialog
+        onOpenChange={(open) => {
+          if (!open) setAvailableDismissed(updater.state.version ?? null);
+        }}
+        open={showAvailable}
+      >
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-sm">发现新版本 v{updater.state.version ?? ""}</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground">
+            当前 v{updater.state.current}，可以更新到新版本。
+          </p>
+          <DialogFooter className="gap-2">
+            <Button
+              onClick={() => setAvailableDismissed(updater.state.version ?? null)}
+              size="sm"
+              variant="ghost"
+            >
+              稍后
+            </Button>
+            <Button onClick={() => setUpdateOpen(true)} size="sm">
+              去更新
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         onOpenChange={(open) => {
