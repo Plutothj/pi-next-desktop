@@ -17,6 +17,17 @@ npx tsc --noEmit # 类型检查（当前 0 错误，务必保持）
 
 测试 `npm test`（node --test tests/）；CI `.github/workflows/ci.yml`（tsc --noEmit + build + test）。Electron 下载失败（网络原因）用 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ node node_modules/electron/install.js`。
 
+## 发版
+
+```bash
+npm version patch -m "Bump version to %s"   # 一条命令：改 package.json + package-lock.json、自动提交、打 tag
+git push --follow-tags                       # 推提交和 tag；release.yml 只认 v* tag，自动多平台打包
+```
+
+- **不要手改 package.json 版本号**——lockfile 不会跟着同步（历史上 package-lock.json 的 version 曾因此停留在旧版本）。
+- bump 提交由 `npm version` 自动生成且独立；它默认拒绝脏工作区，所以先提交完代码改动再发版，天然不会混提交。
+- 日常功能更新用 patch（现状惯例），破坏性改动用 minor。
+
 ## 目录与分层
 
 - `electron/` 主进程，**纯 JS ESM**（`preload.cjs` 除外）。按职责拆模块：`main.js`（窗口/生命周期/扩展 UI 桥）、`pi-process.js`（运行时解析 + RPC 子进程）、`sessions.js`（扫描/标题/fork/导出）、`git.js`、`tasks.js`（后台任务桥 + pi-bg）、`workspace.js`、`projects.js`、`config-ipc.js` + `config.js`、`diag.js`、`ipc.js`。新功能进对应模块，不要往 `main.js` 里堆。
