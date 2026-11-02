@@ -62,6 +62,10 @@
       {
         "from": "runtime",
         "to": "runtime"
+      },
+      {
+        "from": "build/icon.png",
+        "to": "pi.png"
       }
     ],
     "mac": {

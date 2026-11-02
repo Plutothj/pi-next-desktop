@@ -2,7 +2,7 @@
 // between pi's extension UI protocol and the renderer. Feature areas live in
 // their own modules (sessions, projects, git, tasks, workspace, config, diag).
 
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Tray, shell } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -173,6 +173,50 @@ function handleExtensionUi(req) {
 
 // ---------------------------------------------------------------- window
 
+// 关闭到托盘（Windows/Linux）：点 X 隐藏进后台，托盘右键退出。macOS 保持
+// 惯例（红叉只关窗口，Dock 常驻）。
+let tray = null;
+let quitting = false;
+let trayNotified = false;
+
+function trayIcon() {
+  const file = app.isPackaged
+    ? path.join(process.resourcesPath ?? "", "pi.png")
+    : path.join(import.meta.dirname, "..", "build", "icon.png");
+  // Windows 托盘按 16px 显示，大图直接缩会有锯齿，先缩成小图
+  const img = nativeImage.createFromPath(file);
+  return img.isEmpty() ? img : img.resize({ width: 16, height: 16 });
+}
+
+function showWindow() {
+  if (!win || win.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+function createTray() {
+  tray = new Tray(trayIcon());
+  tray.setToolTip("Pi");
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: "显示主界面", click: showWindow },
+      { type: "separator" },
+      {
+        label: "退出",
+        click: () => {
+          quitting = true;
+          app.quit();
+        },
+      },
+    ]),
+  );
+  tray.on("click", showWindow);
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1100,
@@ -188,6 +232,25 @@ function createWindow() {
       webviewTag: true,
     },
   });
+  // 点 X 不退出：隐藏到托盘，pi 子进程继续在后台跑
+  if (process.platform !== "darwin") {
+    win.on("close", (event) => {
+      if (quitting) return;
+      event.preventDefault();
+      win.hide();
+      if (!trayNotified) {
+        trayNotified = true;
+        // Windows 气泡：告知程序仍在运行、如何退出
+        if (process.platform === "win32" && typeof tray?.displayBalloon === "function") {
+          tray.displayBalloon({
+            iconType: "info",
+            title: "Pi 仍在运行",
+            content: "已最小化到系统托盘。点击托盘图标恢复窗口，右键托盘图标可退出。",
+          });
+        }
+      }
+    });
+  }
   if (process.env.PI_DEV_URL) {
     win.loadURL(process.env.PI_DEV_URL);
   } else {
@@ -352,6 +415,11 @@ safeHandle("term:remove", (_e, id) => taskManager.removeTask(id));
 
 // ---------------------------------------------------------------- lifecycle
 
+// dev 与打包版共用 app name "pi-desktop"，默认会共用 %APPDATA%/pi-desktop：
+// 缓存互斥报错，单实例锁也会被对方进程占住。dev 指到独立目录。
+if (!app.isPackaged) {
+  app.setPath("userData", path.join(app.getPath("appData"), "pi-desktop-dev"));
+}
 // 单实例（按 userData 目录隔离：dev 与打包版互不冲突）。二次启动时唤起已有
 // 窗口，避免跑出第二个 pi 子进程、抢同一个任务桥管道。
 if (!app.requestSingleInstanceLock()) {
@@ -385,6 +453,7 @@ app.whenReady().then(() => {
   installTermCli(APP_HOME);
   taskManager.startBridge();
   createWindow();
+  if (process.platform !== "darwin") createTray();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -396,6 +465,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  quitting = true;
   pi.stop();
   taskManager.stopBridge();
 });
