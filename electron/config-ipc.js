@@ -115,7 +115,13 @@ export function registerConfigHandlers({ send }) {
     return { ok: true, restart: true };
   });
 
-  safeHandle("cfg:gallery", (_e, query) => config.searchGallery(query).catch((err) => ({ error: err.message })));
+  safeHandle("cfg:gallery", async (_e, payload) => {
+    const { query = "", from = 0 } = requireObject(payload ?? {}, "payload");
+    return config
+      .searchGallery({ query, from })
+      .then((r) => ({ ok: true, ...r }))
+      .catch((err) => ({ ok: false, error: err.message }));
+  });
 
   safeHandle("cfg:readSkill", (_e, { file, cwd } = {}) => {
     if (typeof file !== "string" || !file) throw new Error("缺少文件路径");

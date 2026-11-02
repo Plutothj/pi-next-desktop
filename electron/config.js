@@ -480,10 +480,10 @@ export function deleteSkill(dir) {
 
 // --------------------------------------------------------------- gallery
 
-export async function searchGallery(query) {
+export async function searchGallery({ query, from = 0 } = {}) {
   const text = query?.trim() ? `${query} keywords:pi-package` : "keywords:pi-package";
   const res = await fetch(
-    `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(text)}&size=30`,
+    `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(text)}&size=30&from=${Number(from) || 0}`,
   );
   if (!res.ok) throw new Error(`npm 搜索失败: ${res.status}`);
   const data = await res.json();
@@ -491,7 +491,7 @@ export async function searchGallery(query) {
     (readSettings().packages ?? []).map((p) => (typeof p === "string" ? p : p.source)),
   );
 
-  return data.objects
+  const items = data.objects
     .map(({ package: p }) => ({
       name: p.name,
       version: p.version,
@@ -504,6 +504,7 @@ export async function searchGallery(query) {
     }))
     .filter((p) => p.keywords.includes("pi-package") || query?.trim())
     .map((p) => ({ ...p, installed: installed.has(p.source) }));
+  return { items, total: data.total ?? items.length };
 }
 
 

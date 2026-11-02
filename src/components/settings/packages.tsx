@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { cn } from "@/lib/utils";
 import {
   BoxesIcon,
@@ -29,24 +29,68 @@ export function PackagesPanel({
 }) {
   const [query, setQuery] = useState("");
   const [gallery, setGallery] = useState<GalleryPackage[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [exhausted, setExhausted] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [searching, setSearching] = useState(false);
   const [installing, setInstalling] = useState<string | null>(null);
   const [view, setView] = useState<"installed" | "market">("installed");
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   const search = async (text: string) => {
     setSearching(true);
-    const res = await window.pi.cfg.gallery(text);
+    const res = await window.pi.cfg.gallery(text, 0);
     setSearching(false);
-    if (Array.isArray(res)) setGallery(res);
-    else {
+    if (res?.ok) {
+      setGallery(res.items);
+      setTotal(res.total);
+      setExhausted(false);
+    } else {
       setGallery([]);
-      setLog(res.error);
+      setTotal(0);
+      setExhausted(true);
+      setLog(res?.error ?? "搜索失败");
     }
   };
+
+  // 无限加载：npm 搜索每次 30 条，滚到底部继续取，直到没有新结果
+  const loadMore = useCallback(
+    async (text: string, current: GalleryPackage[]) => {
+      if (loadingMore || exhausted) return;
+      setLoadingMore(true);
+      const res = await window.pi.cfg.gallery(text, current.length);
+      if (res?.ok) {
+        const seen = new Set(current.map((g) => g.name));
+        const fresh = res.items.filter((g) => !seen.has(g.name));
+        setGallery([...current, ...fresh]);
+        setTotal(res.total);
+        if (!fresh.length) setExhausted(true);
+      } else {
+        setExhausted(true);
+        setLog(res?.error ?? "加载更多失败");
+      }
+      setLoadingMore(false);
+    },
+    [loadingMore, exhausted],
+  );
 
   useEffect(() => {
     search("");
   }, []);
+
+  // 哨兵进入视口（外层滚动容器接近底部）时加载下一页
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (view !== "market" || !el || gallery === null) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) loadMore(query, gallery);
+      },
+      { rootMargin: "400px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [view, gallery, query, loadMore]);
 
   const install = async (source: string) => {
     setInstalling(source);
@@ -58,7 +102,10 @@ export function PackagesPanel({
     if (!res.ok) setLog(res.log ?? res.error ?? "安装失败");
     else setLog(`已安装 ${source}`);
     await onApply({ ok: true });
-    search(query);
+    // 原地更新安装状态，避免整页搜索重置滚动位置和分页
+    setGallery(
+      (prev) => prev?.map((g) => (g.source === source ? { ...g, installed: true } : g)) ?? prev,
+    );
   };
 
   const uninstall = async (source: string) => {
@@ -220,6 +267,17 @@ export function PackagesPanel({
               </Button>
             </div>
           ))}
+          <div ref={sentinelRef} />
+          {loadingMore ? (
+            <p className="flex items-center justify-center gap-1.5 py-3 text-xs text-muted-foreground">
+              <Loader2Icon className="size-3 animate-spin" /> 加载中…
+            </p>
+          ) : null}
+          {gallery !== null && !loadingMore && exhausted && gallery.length > 0 ? (
+            <p className="py-3 text-center text-xs text-muted-foreground">
+              已加载全部 {gallery.length} 个（npm 共 {total} 个结果）
+            </p>
+          ) : null}
         </div>
       </section>
       ) : null}

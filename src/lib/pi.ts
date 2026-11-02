@@ -383,7 +383,8 @@ export type PiBridge = {
       apiKey?: string;
     }) => Promise<{ ok: boolean; models?: FetchedModel[]; error?: string }>;
     setSetting: (patch: Record<string, unknown>) => Promise<{ ok: boolean; restart?: boolean }>;
-    gallery: (query?: string) => Promise<GalleryPackage[] | { error: string }>;
+    gallery: (query?: string, from?: number) =>
+      Promise<{ ok: boolean; items: GalleryPackage[]; total: number; error?: string }>;
     readSkill: (file: string, cwd?: string) => Promise<string>;
     deleteSkill: (dir: string) => Promise<{ ok: boolean; error?: string; restart?: boolean }>;
     setResources: (source: string, disabled: Record<string, boolean>) => Promise<{ ok: boolean; restart?: boolean }>;
