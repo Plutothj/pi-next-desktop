@@ -1,33 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FileUIPart } from "ai";
-import type { ModelInfo } from "@/lib/pi";
+import { DUAL_EXEC_PREFIX, DUAL_PLAN_PREFIX } from "@/lib/promptPrefixes";
+import { lastAssistantTextOf, type ModelInfo } from "@/lib/pi";
 import type { State } from "@/hooks/usePi";
 import type { useDualModel } from "@/hooks/useDualModel";
 
-// Dual-model chain directives. The planner runs read-only; the executor picks
-// up the same conversation once the planning turn settles.
-const DUAL_PLAN_PREFIX =
-  "【规划阶段】只做分析与方案：不要修改任何文件，也不要执行会改变状态的命令。请给出分步骤实施方案，具体到要改的文件/函数/命令，并说明每步如何验证。完成后停下，等待执行阶段。\n\n";
-const DUAL_EXEC_PREFIX =
-  "【执行阶段】请按上面确定的方案开始实施。逐项完成并验证；如果实际情况与方案不符，做最小必要调整，并在最终回复中说明偏差。";
-
 type Phase = "idle" | "planning" | "executing";
-
-/** The planner's final reply — what we persist as the plan document. */
-function lastAssistantText(messages: State["messages"]): string | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
-    if (message.role !== "assistant") continue;
-    const blocks = Array.isArray(message.content) ? message.content : [];
-    const text = blocks
-      .filter((block): block is { type: "text"; text: string } => block.type === "text")
-      .map((block) => block.text)
-      .join("\n")
-      .trim();
-    if (text) return text;
-  }
-  return null;
-}
 
 type PromptFn = (
   text: string,
@@ -120,7 +98,7 @@ export function useDualModelChain({
       void (async () => {
         // Persist the plan into the project so it survives the session and the
         // executor works from a stable document (like ZCode's .zcode/plans).
-        const planText = lastAssistantText(state.messages);
+        const planText = lastAssistantTextOf(state.messages);
         const saved = planText
           ? await window.pi.plans
               .save(state.cwd, `# 执行方案\n\n${planText}\n`)

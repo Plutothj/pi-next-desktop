@@ -427,6 +427,16 @@ export const blocksOf = (message: PiMessage): ContentBlock[] =>
     ? [{ type: "text", text: message.content }]
     : (message.content ?? []);
 
+export const lastAssistantTextOf = (messages: PiMessage[]): string | null => {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "assistant") continue;
+    const text = textOf(m.content).trim();
+    if (text) return text;
+  }
+  return null;
+};
+
 export const textOf = (content: unknown): string => {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";

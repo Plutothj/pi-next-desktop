@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BotIcon,
   BrainIcon,
@@ -39,6 +39,7 @@ import { SettingsDialog, type SettingsTab } from "@/components/settings-dialog";
 import { UpdateDialog } from "@/components/update-dialog";
 import { expandAttachments } from "@/lib/attachments";
 import { useNotifications } from "@/hooks/notifications";
+import { PLAN_PREFIX } from "@/lib/promptPrefixes";
 import { TerminalPanel } from "@/components/terminal-panel";
 import { FilesPanel } from "@/components/files-panel";
 import { AgentsPanel } from "@/components/agents-panel";
@@ -56,14 +57,9 @@ import { useDualModelChain } from "@/hooks/useDualModelChain";
 import { useUpdater } from "@/hooks/useUpdater";
 import { useTheme } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
-import type { PiMessage } from "@/lib/pi";
+import { lastAssistantTextOf, type PiMessage } from "@/lib/pi";
 
 const THINKING = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
-
-// pi has no plan mode, so the toggle sends a directive with the prompt and
-// keeps the UI in a read-only-ish posture. Tools are still available to the model.
-const PLAN_PREFIX =
-  "只做分析与方案：不要修改文件、不要执行写操作命令，给出分步骤方案后停下等我确认。\n\n";
 
 export default function App() {
   return (
@@ -135,6 +131,29 @@ function Shell() {
     if (status === "idle" || status === "up-to-date") updater.check();
     // available/downloading/ready/error/dev：弹窗按当前状态渲染，无需重复动作
   };
+
+  // 计划模式：回合结束后把最终方案落盘为 .pi/plans/plan-*.md（ZCode 同款），
+  // 文档是持久产物，会话里的那轮回复只是展示。
+  const prevPlanStreaming = useRef(false);
+  const [planSavedPath, setPlanSavedPath] = useState<string | null>(null);
+  useEffect(() => {
+    const settled = prevPlanStreaming.current && !state.isStreaming;
+    prevPlanStreaming.current = state.isStreaming;
+    if (!settled || !planMode) return;
+    const planText = lastAssistantTextOf(state.messages);
+    if (!planText) return;
+    void window.pi.plans
+      .save(state.cwd, `# 计划\n\n${planText}\n`)
+      .then((saved) => {
+        if (saved?.ok && saved.path) {
+          setPlanSavedPath(saved.path);
+          setTimeout(() => setPlanSavedPath(null), 12_000);
+        }
+        return null;
+      })
+      .catch(() => null);
+  });
+
   const [panel, setPanel] = useState<PanelTab | null>(null);
   const { tasks, run: runTask, kill: killTask, remove: removeTask, hosts } = useTasks();
   useNotifications(state.isStreaming, state.sessionName, tasks);
@@ -473,6 +492,20 @@ function Shell() {
         open={paletteOpen}
         sessions={state.sessions}
       />
+
+      {planSavedPath ? (
+        <div className="fixed right-6 bottom-6 z-50 max-w-md rounded-lg border bg-card px-4 py-2.5 text-xs shadow-lg">
+          计划已保存：
+          <span className="font-mono break-all">{planSavedPath}</span>
+          <button
+            className="ml-3 text-muted-foreground hover:text-foreground"
+            onClick={() => setPlanSavedPath(null)}
+            type="button"
+          >
+            ✕
+          </button>
+        </div>
+      ) : null}
 
       <ShortcutsDialog onOpenChange={setShortcutsOpen} open={shortcutsOpen} />
 

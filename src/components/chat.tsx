@@ -1,5 +1,6 @@
 import { memo, useMemo, useState } from "react";
 import { mermaid } from "@streamdown/mermaid";
+import { stripDirective } from "@/lib/promptPrefixes";
 import {
   BrainIcon,
   CheckIcon,
@@ -217,6 +218,12 @@ function Block({
   return null;
 }
 
+const BADGES: Record<"plan" | "dualPlan" | "dualExec", string> = {
+  plan: "计划模式",
+  dualPlan: "规划阶段",
+  dualExec: "执行阶段",
+};
+
 const UserMessage = memo(function UserMessage({
   message,
   onFork,
@@ -224,11 +231,19 @@ const UserMessage = memo(function UserMessage({
   message: PiMessage;
   onFork?: (message: PiMessage) => void;
 }) {
-  const text = textOf(message.content);
+  const raw = textOf(message.content);
+  // 指令前缀（计划模式/双模型链）只进会话、不进展示：剥离后以徽章标注阶段
+  const { kind, text } = stripDirective(raw);
+  const badge = kind === "plain" ? null : BADGES[kind];
   const images = blocksOf(message).filter((b) => b.type === "image");
   return (
     <Message from="user">
       <MessageContent className="rounded-2xl bg-muted px-4 py-2.5">
+        {badge ? (
+          <span className="mb-1.5 inline-block rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[10px] text-primary">
+            {badge}
+          </span>
+        ) : null}
         {text ? (
           <MessageResponse
             className="chat-md"
