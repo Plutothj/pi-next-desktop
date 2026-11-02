@@ -352,6 +352,20 @@ safeHandle("term:remove", (_e, id) => taskManager.removeTask(id));
 
 // ---------------------------------------------------------------- lifecycle
 
+// 单实例（按 userData 目录隔离：dev 与打包版互不冲突）。二次启动时唤起已有
+// 窗口，避免跑出第二个 pi 子进程、抢同一个任务桥管道。
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+    }
+  });
+}
+
 app.whenReady().then(() => {
   // Windows/Linux 默认带 File/Edit/View 菜单栏，与自绘标题栏冲突；macOS 的
   // 系统菜单（cmd+Q、复制粘贴加速键）不在窗口内，保留。
