@@ -18,7 +18,7 @@ export type SessionStats = {
 };
 
 /** Session token/cost/context stats, re-read after every agent turn. */
-export function useSessionStats(sessionFile: string | undefined, streaming: boolean) {
+export function useSessionStats(_sessionFile: string | undefined, streaming: boolean) {
   const [stats, setStats] = useState<SessionStats | null>(null);
 
   const refresh = useCallback(async () => {
@@ -30,7 +30,7 @@ export function useSessionStats(sessionFile: string | undefined, streaming: bool
 
   useEffect(() => {
     refresh();
-  }, [refresh, sessionFile]);
+  }, [refresh]);
 
   // The agent's usage changes during a turn; settle is the cheap moment to re-read.
   const prevStreaming = useRef(streaming);

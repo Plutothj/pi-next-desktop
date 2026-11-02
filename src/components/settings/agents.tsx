@@ -13,7 +13,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import type { CfgSnapshot, AgentProfile } from "@/lib/pi";
 import { Card } from "./shared";
-import type { ApplyFn } from "./shared";
 
 // extracted from settings-dialog.tsx
 const ALIASES: Record<string, string> = {

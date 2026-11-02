@@ -189,7 +189,7 @@ function OutputPane({ task }: { task: TaskInfo }) {
 
   useEffect(() => {
     if (stick && ref.current) ref.current.scrollTop = ref.current.scrollHeight;
-  }, [task.output, stick]);
+  }, [stick]);
 
   return (
     <pre

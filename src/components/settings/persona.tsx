@@ -9,7 +9,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type { CfgSnapshot } from "@/lib/pi";
-import type { ApplyFn } from "./shared";
 
 // extracted from settings-dialog.tsx
 export function PersonaPanel({

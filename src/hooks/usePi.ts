@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  type CommandInfo,
-  type ContentBlock,
-  type ModelInfo,
-  type PiMessage,
-  type ProjectInfo,
-  type UiDialogRequest,
-  type QueueState,
-  type RpcEvent,
-  type SessionInfo,
-  type ToolExec,
+import type {
+  CommandInfo,
+  ContentBlock,
+  ModelInfo,
+  PiMessage,
+  ProjectInfo,
+  UiDialogRequest,
+  QueueState,
+  RpcEvent,
+  SessionInfo,
+  ToolExec,
 } from "@/lib/pi";
 import type { FileUIPart } from "ai";
 

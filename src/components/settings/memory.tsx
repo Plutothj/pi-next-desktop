@@ -275,7 +275,7 @@ export function CommandsPanel({
 // ------------------------------------------------------------- agents / stats / projects
 
 /** Same roles ZCode shows (Explore / code review / general purpose), pi's names on the right. */
-const ALIASES: Record<string, string> = {
+const _ALIASES: Record<string, string> = {
   scout: "Explore · 代码库侦察",
   reviewer: "代码审查",
   delegate: "通用任务",

@@ -13,9 +13,11 @@
     "electron": "electron .",
     "dist": "npm run stage && npm run build && electron-builder --publish never",
     "dist:dir": "npm run stage && npm run build && electron-builder --dir",
-    "release": "npm run stage && npm run build && electron-builder --publish always"
+    "release": "npm run stage && npm run build && electron-builder --publish always",
+    "lint": "biome lint src electron tests"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.6.4",
     "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

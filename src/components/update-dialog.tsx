@@ -26,7 +26,7 @@ export function UpdateDialog({
   // 用户主动点了「检查更新」：发现新版就直接开始下载，不用再点一次
   useEffect(() => {
     if (open && status === "available") updater.download();
-  }, [open, status]); // eslint-disable-line react-hooks/exhaustive-deps -- 仅随状态变化触发
+  }, [open, status, updater.download]); // eslint-disable-line react-hooks/exhaustive-deps -- 仅随状态变化触发
 
   const retry = () => updater.check();
 

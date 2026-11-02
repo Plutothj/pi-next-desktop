@@ -1,21 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ArrowLeftIcon,
   HammerIcon,
-  ZapIcon,
   BarChart3Icon as BarChartIcon,
   BotIcon,
   BoxesIcon,
   BrainIcon,
-  CheckIcon,
-  DownloadIcon,
   KeyRoundIcon,
   Loader2Icon,
-  PackageIcon,
-  PlusIcon,
   PuzzleIcon,
-  RefreshCwIcon,
-  Trash2Icon,
   WrenchIcon,
   FolderIcon,
   PaletteIcon,
@@ -34,19 +27,9 @@ import { PersonaPanel } from "@/components/settings/persona";
 import { MemoryPanel, McpPanel, CommandsPanel } from "@/components/settings/memory";
 import { AgentsPanel, ProjectsPanel } from "@/components/settings/agents";
 import { UsagePanel } from "@/components/settings/usage";
-import { AppearancePanel } from "@/components/settings/appearance";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import {
   Select,
   SelectContent,
@@ -54,9 +37,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import type { AgentProfile, CfgSnapshot, GalleryPackage, ProviderInfo } from "@/lib/pi";
+import type { CfgSnapshot, } from "@/lib/pi";
 
 export type SettingsTab =
   | "general"

@@ -43,7 +43,7 @@ export function registerGitHandlers() {
     const dirty = lines.some((l) => /^[12u?]\s/.test(l));
 
     // Per-file status for the file tree: cwd-relative paths, "/" separated.
-    let changes = [];
+    const changes = [];
     const [porcelain, toplevel] = await Promise.all([
       git(gitDir(cwd), ["status", "--porcelain", "-z"]),
       git(gitDir(cwd), ["rev-parse", "--show-toplevel"]),

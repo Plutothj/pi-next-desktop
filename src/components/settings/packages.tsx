@@ -12,7 +12,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { CfgSnapshot, GalleryPackage } from "@/lib/pi";
-import type { ApplyFn } from "./shared";
 
 // extracted from settings-dialog.tsx
 export function PackagesPanel({
@@ -71,12 +70,12 @@ export function PackagesPanel({
       }
       setLoadingMore(false);
     },
-    [loadingMore, exhausted],
+    [loadingMore, exhausted, setLog],
   );
 
   useEffect(() => {
     search("");
-  }, []);
+  }, [search]);
 
   // 哨兵进入视口（外层滚动容器接近底部）时加载下一页
   useEffect(() => {

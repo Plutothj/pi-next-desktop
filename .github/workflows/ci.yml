@@ -15,6 +15,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npx biome lint src electron tests
       - run: npx tsc --noEmit
       - run: npm run build
       - run: npm test

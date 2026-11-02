@@ -38,6 +38,7 @@ import { SessionSidebar } from "@/components/sidebar";
 import { SettingsDialog, type SettingsTab } from "@/components/settings-dialog";
 import { UpdateDialog } from "@/components/update-dialog";
 import { expandAttachments } from "@/lib/attachments";
+import { useNotifications } from "@/hooks/notifications";
 import { TerminalPanel } from "@/components/terminal-panel";
 import { FilesPanel } from "@/components/files-panel";
 import { AgentsPanel } from "@/components/agents-panel";
@@ -126,7 +127,7 @@ function Shell() {
       clearTimeout(first);
       clearInterval(interval);
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- run once
+  }, [updater.check]); // eslint-disable-line react-hooks/exhaustive-deps -- run once
 
   const onUpdateAction = () => {
     setUpdateOpen(true);
@@ -136,6 +137,7 @@ function Shell() {
   };
   const [panel, setPanel] = useState<PanelTab | null>(null);
   const { tasks, run: runTask, kill: killTask, remove: removeTask, hosts } = useTasks();
+  useNotifications(state.isStreaming, state.sessionName, tasks);
   const { git, refresh: refreshGit } = useGit(state.cwd, state.isStreaming);
   const { stats, refresh: refreshStats } = useSessionStats(
     state.sessionFile,
@@ -162,7 +164,7 @@ function Shell() {
     splash.classList.add("hide");
     const timer = setTimeout(() => splash.remove(), 400);
     return () => clearTimeout(timer);
-  }, [state.status]);
+  }, [state.status, state]);
 
   // ⌘N — new task, mirroring ZCode.
   useEffect(() => {

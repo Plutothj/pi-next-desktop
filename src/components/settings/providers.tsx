@@ -24,7 +24,6 @@ import type {
   ProviderModel,
   ProviderModelCost,
 } from "@/lib/pi";
-import type { ApplyFn } from "./shared";
 
 // 常用供应商预设：一键填 id / baseUrl / 协议，配合「获取模型列表」即点即用
 const PROVIDER_PRESETS = [

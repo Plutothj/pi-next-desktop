@@ -2,7 +2,6 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import type { CfgSnapshot } from "@/lib/pi";
 import { Section } from "./shared";
-import type { ApplyFn } from "./shared";
 
 // extracted from settings-dialog.tsx
 export function ExtensionsPanel({

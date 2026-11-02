@@ -92,7 +92,7 @@ function StatusDot({ status }: { status: ChangeStatus | null }) {
 export function FilesPanel({ cwd, changes }: { cwd: string; changes?: GitStatus["changes"] }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [children, setChildren] = useState<Record<string, TreeEntry[]>>({});
-  const [loading, setLoading] = useState<Set<string>>(new Set());
+  const [_loading, setLoading] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<string[]>([]);
   const [file, setFile] = useState<{ path: string; content: string } | null>(null);
@@ -117,7 +117,7 @@ export function FilesPanel({ cwd, changes }: { cwd: string; changes?: GitStatus[
     setFile(null);
     setQuery("");
     loadDir("");
-  }, [cwd, loadDir]);
+  }, [loadDir]);
 
   // Search uses the bounded directory walk in the main process.
   useEffect(() => {

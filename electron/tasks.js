@@ -253,6 +253,7 @@ export function createTaskManager({ userDataDir, send }) {
       socket.on("data", async (chunk) => {
         buf += chunk;
         let nl;
+        // biome-ignore lint/suspicious/noAssignInExpressions: LF 严格切分是 AGENTS.md 硬性规则的模式
         while ((nl = buf.indexOf("\n")) !== -1) {
           const line = buf.slice(0, nl);
           buf = buf.slice(nl + 1);
@@ -261,11 +262,11 @@ export function createTaskManager({ userDataDir, send }) {
           try {
             payload = JSON.parse(line);
           } catch {
-            socket.end(JSON.stringify({ ok: false, error: "invalid json" }) + "\n");
+            socket.end(`${JSON.stringify({ ok: false, error: "invalid json" })}\n`);
             return;
           }
           const reply = await handleBridge(payload);
-          socket.end(JSON.stringify(reply) + "\n");
+          socket.end(`${JSON.stringify(reply)}\n`);
         }
       });
       socket.on("error", () => {});

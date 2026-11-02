@@ -142,14 +142,14 @@ export function useDualModelChain({
       reset();
     }
   }, [
-    state.isStreaming,
-    state.sessionFile,
-    state.models,
-    dual.config,
-    dual.find,
-    switchModel,
-    prompt,
-    reset,
+    state.isStreaming, 
+    state.sessionFile, 
+    state.models, 
+    dual.config, 
+    dual.find, 
+    switchModel, 
+    prompt, 
+    reset, state.messages, state.cwd
   ]);
 
   const stopAll = useCallback(() => {

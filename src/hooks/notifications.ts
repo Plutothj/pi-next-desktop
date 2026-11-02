@@ -30,7 +30,7 @@ export function useNotifications(streaming: boolean, sessionName: string | undef
     if (was && !streaming) {
       notify(sessionName ? `Pi · ${sessionName}` : "Pi", "回复已完成");
     }
-  }, [streaming, sessionName]);
+  }, [streaming, sessionName, notify]);
 
   // 后台任务结束（running → done/failed）
   useEffect(() => {
@@ -42,5 +42,5 @@ export function useNotifications(streaming: boolean, sessionName: string | undef
       }
     }
     prevTasks.current = new Map(tasks.map((t) => [t.id, t.status]));
-  }, [tasks]);
+  }, [tasks, notify]);
 }

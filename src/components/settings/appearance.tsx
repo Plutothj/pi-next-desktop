@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { PaletteIcon } from "lucide-react";
 import { Section } from "./shared";
 export function AppearancePanel() {
   const [theme, setTheme] = useState(localStorage.getItem("pi-theme") ?? "dark");

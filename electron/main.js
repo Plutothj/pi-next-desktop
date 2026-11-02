@@ -2,7 +2,7 @@
 // between pi's extension UI protocol and the renderer. Feature areas live in
 // their own modules (sessions, projects, git, tasks, workspace, config, diag).
 
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Tray, shell } from "electron";
+import { app, BrowserWindow, dialog, Menu, nativeImage, Tray, shell } from "electron";
 import { parseAttachment } from "./attachments.js";
 import { requireObject } from "./ipc-helpers.js";
 import fs from "node:fs";

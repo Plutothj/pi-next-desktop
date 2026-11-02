@@ -12,7 +12,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { CfgSnapshot } from "@/lib/pi";
-import type { ApplyFn } from "./shared";
 
 // extracted from settings-dialog.tsx
 export function SkillsPanel({

@@ -156,7 +156,7 @@ export function cliVersion(rt) {
       env: { ...process.env, ...rt.env },
       stdio: ["ignore", "pipe", "pipe"],
     });
-    const timer = setTimeout(() => { try { proc.kill(); } catch {} done(); }, 5000);
+    const _timer = setTimeout(() => { try { proc.kill(); } catch {} done(); }, 5000);
     proc.stdout.setEncoding("utf8");
     proc.stderr.setEncoding("utf8");
     proc.stdout.on("data", (d) => { out += d; });
@@ -207,6 +207,7 @@ export class PiProcess {
     proc.stdout.on("data", (chunk) => {
       buf += chunk;
       let nl;
+      // biome-ignore lint/suspicious/noAssignInExpressions: LF 严格切分是 AGENTS.md 硬性规则的模式
       while ((nl = buf.indexOf("\n")) !== -1) {
         let line = buf.slice(0, nl);
         buf = buf.slice(nl + 1);
