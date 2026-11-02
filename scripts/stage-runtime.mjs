@@ -1,6 +1,6 @@
 // Stage a self-contained runtime into runtime/ for packaging:
 //   runtime/            pi's bundle (from the local managed install, else npm)
-//   runtime/vendor/jiti TypeScript extension loader (jiti), loaded via NODE_PATH
+//   runtime/vendor/jiti + runtime/node_modules/jiti TS 扩展加载器（CJS 走 NODE_PATH，ESM 走 node_modules）
 //   runtime/bin/node    official Node runtime (portable, no system node needed)
 //
 // The packaged app sets PI_CODING_AGENT_DIR to ~/.pi-desktop/agent, so this
@@ -139,6 +139,11 @@ if (staged.jiti) {
   // electron-builder drops node_modules from extraResources, so use vendor/ + NODE_PATH.
   fs.mkdirSync(path.join(out, "vendor"), { recursive: true });
   fs.cpSync(staged.jiti, path.join(out, "vendor", "jiti"), { recursive: true });
+  // pi 的扩展加载 chunk 是 ESM：import('jiti') 不走 NODE_PATH，只沿目录向上找
+  // node_modules。vendor 副本留给 CJS require，再放一份到 runtime/node_modules
+  // 让 ESM 解析命中——否则所有 TS 第三方扩展都会因 jiti 解析失败而加载不了。
+  fs.mkdirSync(path.join(out, "node_modules"), { recursive: true });
+  fs.cpSync(staged.jiti, path.join(out, "node_modules", "jiti"), { recursive: true });
 }
 
 fs.writeFileSync(path.join(out, "VERSION"), `${staged.version}\n`);
