@@ -74,7 +74,21 @@ async function startPi(cwd) {
 
   const rt = resolveRuntime();
   const probe = await probeCli(rt);
-  const argv = [rt.cli, "--mode", "rpc"];
+  // 隔离 preload：第三方扩展硬编码 ~/.pi/agent 的读写重定向到隔离目录。
+  // 打包版 pi 用普通 node 跑 extraResources，读不了 asar，所以先复制到 userData。
+  const isolationPreload = path.join(app.getPath("userData"), "pi-isolation-preload.cjs");
+  try {
+    fs.copyFileSync(path.join(import.meta.dirname, "pi-isolation-preload.cjs"), isolationPreload);
+  } catch (err) {
+    logLine("pi", "isolation preload 复制失败（跳过）:", err);
+  }
+  // --require 须在脚本路径之前，node 会先加载它再启动 cli.js
+  const argv = [
+    ...(fs.existsSync(isolationPreload) ? ["--require", isolationPreload] : []),
+    rt.cli,
+    "--mode",
+    "rpc",
+  ];
   // Unknown flags make pi exit on startup; probe the CLI before adding one.
   if (probe.appendPrompt) {
     argv.push("--append-system-prompt", PI_BG_INSTRUCTIONS);
