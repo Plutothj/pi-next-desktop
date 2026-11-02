@@ -98,6 +98,9 @@ async function startPi(cwd) {
       PI_DESKTOP_TERM_SOCK: taskManager.paths.sock,
       // Isolated config/sessions/extensions: ~/.pi-desktop/agent
       PI_CODING_AGENT_DIR: AGENT_DIR,
+      // pi-memory 等记忆扩展默认写 ~/.pi/agent/memory，只认这个变量；
+      // 指回隔离目录，桌面「记忆」页才能看到。
+      PI_MEMORY_DIR: path.join(AGENT_DIR, "memory"),
       ...(rt.installRoot ? { PI_MANAGED_INSTALL_ROOT: rt.installRoot } : {}),
     },
   });
