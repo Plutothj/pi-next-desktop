@@ -91,9 +91,16 @@ export function saveProvider({ name, displayName, api, baseUrl, apiKey, headers,
   else delete next.headers;
 
   // An entry without id is invalid and makes pi drop the whole provider.
-  const list = (models ?? []).filter((m) => m && m.id);
-  if (list.length) {
-    next.models = list.map((m) => ({
+  // 同 id 去重保留首个（与渲染层编辑器的 seen-set 行为一致）。
+  const list = (models ?? []).filter((m) => m?.id);
+  const seen = new Set();
+  const unique = list.filter((m) => {
+    if (seen.has(m.id)) return false;
+    seen.add(m.id);
+    return true;
+  });
+  if (unique.length) {
+    next.models = unique.map((m) => ({
       id: m.id,
       name: m.name || m.id,
       api: m.api || api,

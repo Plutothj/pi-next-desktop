@@ -4,3 +4,7 @@ release
 runtime
 .DS_Store
 *.log
+
+# 本地工具产物
+.video_agent/
+.zcode/
