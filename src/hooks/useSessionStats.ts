@@ -32,6 +32,13 @@ export function useSessionStats(_sessionFile: string | undefined, streaming: boo
     refresh();
   }, [refresh]);
 
+  // 流式回合内 token 消耗持续变化：每 5 秒轮询一次，否则圆环只在回合结束才动
+  useEffect(() => {
+    if (!streaming) return;
+    const id = setInterval(refresh, 5000);
+    return () => clearInterval(id);
+  }, [streaming, refresh]);
+
   // The agent's usage changes during a turn; settle is the cheap moment to re-read.
   const prevStreaming = useRef(streaming);
   useEffect(() => {

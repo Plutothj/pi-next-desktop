@@ -2,7 +2,7 @@
 // between pi's extension UI protocol and the renderer. Feature areas live in
 // their own modules (sessions, projects, git, tasks, workspace, config, diag).
 
-import { app, BrowserWindow, dialog, Menu, nativeImage, Tray, shell } from "electron";
+import { app, BrowserWindow, dialog, Menu, nativeImage, screen, Tray, shell } from "electron";
 import { parseAttachment } from "./attachments.js";
 import { requireObject } from "./ipc-helpers.js";
 import fs from "node:fs";
@@ -276,8 +276,66 @@ function createWindow() {
     win.loadFile(path.join(import.meta.dirname, "..", "dist", "index.html"));
   }
 
+  // 4K 适配：Windows 缩放 100% 的大屏（物理宽 ≥3000 且系统缩放 <125%）上
+  // 1x 渲染的 UI 会小得不可用，按有效宽度给一个默认缩放；用户手动缩放后以
+  // 持久化值为准。
+  win.webContents.on("did-finish-load", () => {
+    const prefs = readUiPrefs();
+    if (prefs.zoom) {
+      win.webContents.setZoomFactor(prefs.zoom);
+      return;
+    }
+    try {
+      const display = screen.getPrimaryDisplay();
+      if (display.scaleFactor < 1.25 && display.size.width >= 3000) {
+        const cssWidth = display.size.width / (display.scaleFactor || 1);
+        const zoom = Math.min(2, Math.max(1, Math.round((cssWidth / 1600) * 100) / 100));
+        win.webContents.setZoomFactor(zoom);
+      }
+    } catch {}
+  });
+
   win.webContents.setWindowOpenHandler(({ url }) => openExternal(url));
 }
+
+// ------------------------------------------------------------ ui prefs (zoom)
+
+const uiPrefsFile = () => path.join(app.getPath("userData"), "ui.json");
+
+const readUiPrefs = () => {
+  try {
+    return JSON.parse(fs.readFileSync(uiPrefsFile(), "utf8")) ?? {};
+  } catch {
+    return {};
+  }
+};
+
+const writeUiPrefs = (patch) => {
+  try {
+    fs.writeFileSync(
+      uiPrefsFile(),
+      `${JSON.stringify({ ...readUiPrefs(), ...patch }, null, 2)}\n`,
+    );
+  } catch {}
+};
+
+function setZoomLevel(level) {
+  if (!win || win.isDestroyed()) return;
+  win.webContents.setZoomLevel(level);
+  writeUiPrefs({ zoom: win.webContents.getZoomFactor() });
+}
+
+safeHandle("ui:zoom", (_e, { delta } = {}) => {
+  if (!win || win.isDestroyed()) return { ok: false };
+  setZoomLevel(win.webContents.getZoomLevel() + Number(delta ?? 0.5));
+  return { ok: true, factor: win.webContents.getZoomFactor() };
+});
+
+safeHandle("ui:zoomReset", () => {
+  if (!win || win.isDestroyed()) return { ok: false };
+  setZoomLevel(0);
+  return { ok: true, factor: 1 };
+});
 
 // Only http(s) may leave the app; file:// or custom schemes stay local.
 function openExternal(url) {

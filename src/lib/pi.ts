@@ -327,6 +327,8 @@ export type PiBridge = {
   pickFolder: () => Promise<string | null>;
   reveal: (target: string) => Promise<void>;
   showWindow: () => Promise<{ ok: boolean }>;
+  zoom: (delta: number) => Promise<{ ok: boolean; factor?: number }>;
+  zoomReset: () => Promise<{ ok: boolean; factor?: number }>;
   sessions: () => Promise<SessionInfo[]>;
   searchSessions: (query: string) =>
     Promise<{

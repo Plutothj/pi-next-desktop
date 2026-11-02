@@ -144,6 +144,25 @@ function Shell() {
     state.isStreaming,
   );
 
+  // 界面缩放快捷键（Ctrl/Cmd + = - 0）；4K 100% 缩放屏另有主进程默认放大
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      if (e.key === "=" || e.key === "+") {
+        e.preventDefault();
+        void window.pi.zoom(0.5);
+      } else if (e.key === "-") {
+        e.preventDefault();
+        void window.pi.zoom(-0.5);
+      } else if (e.key === "0") {
+        e.preventDefault();
+        void window.pi.zoomReset();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+
   (window as unknown as Record<string, unknown>).__pi = state;
 
   const openSettings = (tab: SettingsTab) => {
