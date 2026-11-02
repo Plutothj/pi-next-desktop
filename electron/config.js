@@ -472,7 +472,8 @@ export function listSkills(cwd) {
 }
 
 export function deleteSkill(dir) {
-  if (!dir.startsWith(path.join(AGENT_DIR, "skills"))) {
+  const root = path.join(AGENT_DIR, "skills") + path.sep;
+  if (!dir.startsWith(root)) {
     throw new Error("只能删除用户目录下的技能");
   }
   fs.rmSync(dir, { recursive: true, force: true });

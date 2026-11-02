@@ -59,5 +59,4 @@ macOS 为主力开发平台。Windows 代码路径（命名管道、`cmd /d /s /
 ## 已知风险（改相关区域时注意）
 
 - 会话扫描每次全量读 `~/.pi/agent/sessions`，O(总字节)，别再加重扫描逻辑。
-- `PiProcess.command` 无超时、boot 无互斥。
 - `App.tsx`（~900 行）与 `settings-dialog.tsx`（~1700 行）偏大，改时优先局部修改，拆分是既定方向但尚未做。

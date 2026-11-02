@@ -78,7 +78,8 @@ export function registerWorkspaceHandlers() {
     const root = resolveRoot(cwd);
     if (typeof file !== "string" || !file) return { error: "缺少文件路径" };
     const target = path.resolve(root, file);
-    if (!target.startsWith(root)) return { error: "越界路径" };
+    // + path.sep：/foo/bar-evil/x 不能因前缀相同而通过 /foo/bar 的守卫
+    if (target !== root && !target.startsWith(root + path.sep)) return { error: "越界路径" };
     try {
       const stat = fs.statSync(target);
       if (stat.size > 1_000_000) return { error: "文件过大" };

@@ -270,7 +270,15 @@ export function createTaskManager({ userDataDir, send }) {
       });
       socket.on("error", () => {});
     });
-    server.on("error", (err) => logLine("term-bridge", err));
+    server.on("error", (err) => {
+      logLine("term-bridge", err);
+      // 被其他实例占用等场景：不能只写日志让终端面板静默失效
+      send?.({
+        type: "ui_notify",
+        message: `终端桥接启动失败（${err.code ?? "错误"}），本实例的后台任务面板不可用。`,
+        notifyType: "warning",
+      });
+    });
     server.listen(paths.sock, () => {
       // Only the current user should be able to drive the app (POSIX only).
       if (process.platform !== "win32") {
