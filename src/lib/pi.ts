@@ -62,6 +62,7 @@ export type QueueState = { steering: string[]; followUp: string[] };
 export type RpcEvent = {
   type: string;
   id?: string;
+  value?: boolean;
   message?: PiMessage;
   usage?: Usage;
   assistantMessageEvent?: {
@@ -327,6 +328,13 @@ export type PiBridge = {
   pickFolder: () => Promise<string | null>;
   reveal: (target: string) => Promise<void>;
   showWindow: () => Promise<{ ok: boolean }>;
+  platform: string;
+  win: {
+    minimize: () => Promise<{ ok: boolean }>;
+    toggleMaximize: () => Promise<{ ok: boolean; maximized?: boolean }>;
+    closeApp: () => Promise<{ ok: boolean }>;
+    state: () => Promise<{ maximized: boolean }>;
+  };
   zoom: (delta: number) => Promise<{ ok: boolean; factor?: number }>;
   zoomReset: () => Promise<{ ok: boolean; factor?: number }>;
   zoomSet: (factor: number) => Promise<{ ok: boolean; factor?: number; error?: string }>;

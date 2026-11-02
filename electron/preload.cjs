@@ -34,6 +34,13 @@ contextBridge.exposeInMainWorld("pi", {
   },
   reveal: (target) => ipcRenderer.invoke("pi:reveal", target),
   showWindow: () => ipcRenderer.invoke("pi:showWindow"),
+  platform: process.platform,
+  win: {
+    minimize: () => ipcRenderer.invoke("win:minimize"),
+    toggleMaximize: () => ipcRenderer.invoke("win:toggleMaximize"),
+    closeApp: () => ipcRenderer.invoke("win:closeApp"),
+    state: () => ipcRenderer.invoke("win:state"),
+  },
   zoom: (delta) => ipcRenderer.invoke("ui:zoom", { delta }),
   zoomReset: () => ipcRenderer.invoke("ui:zoomReset"),
   zoomSet: (factor) => ipcRenderer.invoke("ui:zoomSet", { factor }),

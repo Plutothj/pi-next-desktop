@@ -242,6 +242,9 @@ function createWindow() {
     height: 780,
     minWidth: 620,
     minHeight: 420,
+    // macOS 保留红绿灯；Windows/Linux 去掉系统标题栏，用自绘栏（渲染层
+    // header 即拖拽区，窗口控制按钮经 IPC）。
+    frame: process.platform === "darwin",
     titleBarStyle: "hiddenInset",
     backgroundColor: "#14151a",
     webPreferences: {
@@ -251,25 +254,18 @@ function createWindow() {
       webviewTag: true,
     },
   });
-  // 点 X 不退出：隐藏到托盘，pi 子进程继续在后台跑
+  // 点 X 不退出：隐藏到托盘，pi 子进程继续在后台跑（不弹气泡，托盘图标本身即提示）
   if (process.platform !== "darwin") {
     win.on("close", (event) => {
       if (quitting) return;
       event.preventDefault();
       win.hide();
-      if (!trayNotified) {
-        trayNotified = true;
-        // Windows 气泡：告知程序仍在运行、如何退出
-        if (process.platform === "win32" && typeof tray?.displayBalloon === "function") {
-          tray.displayBalloon({
-            iconType: "info",
-            title: "Pi 仍在运行",
-            content: "已最小化到系统托盘。点击托盘图标恢复窗口，右键托盘图标可退出。",
-          });
-        }
-      }
     });
   }
+  // 自绘标题栏的窗口状态同步：最大化按钮需要知道当前状态
+  const pushMaximized = () => send({ type: "win_maximized", value: win.isMaximized() });
+  win.on("maximize", pushMaximized);
+  win.on("unmaximize", pushMaximized);
   if (process.env.PI_DEV_URL) {
     win.loadURL(process.env.PI_DEV_URL);
   } else {
@@ -309,6 +305,31 @@ function setZoomFactorPersisted(factor) {
 }
 
 safeHandle("ui:zoomGet", () => clampZoom(readUiPrefs().zoomFactor ?? 1));
+
+// ------------------------------------------------- 自绘标题栏的窗口控制
+
+safeHandle("win:minimize", () => {
+  win?.minimize();
+  return { ok: true };
+});
+
+safeHandle("win:toggleMaximize", () => {
+  if (!win || win.isDestroyed()) return { ok: false };
+  if (win.isMaximized()) win.unmaximize();
+  else win.maximize();
+  return { ok: true, maximized: win.isMaximized() };
+});
+
+// 走 win.close()：Windows/Linux 被 close 拦截转为隐藏到托盘，与原生 X 一致
+safeHandle("win:closeApp", () => {
+  win?.close();
+  return { ok: true };
+});
+
+safeHandle("win:state", () => {
+  if (!win || win.isDestroyed()) return { maximized: false };
+  return { maximized: win.isMaximized() };
+});
 
 safeHandle("ui:zoom", (_e, { delta } = {}) => {
   if (!win || win.isDestroyed()) return { ok: false };

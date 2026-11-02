@@ -11,6 +11,7 @@ import {
   SunIcon,
   WrenchIcon,
 } from "lucide-react";
+import logo from "@/assets/logo.png";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -317,10 +318,18 @@ export function SessionSidebar({
 
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground">
-      <div className="drag h-12 shrink-0" />
-      <div className="flex items-center gap-1 pr-3 pb-2 pl-20">
+      {window.pi.platform === "darwin" ? <div className="drag h-12 shrink-0" /> : null}
+      <div
+        className={cn(
+          "drag flex h-12 shrink-0 items-center gap-2 pr-3",
+          window.pi.platform === "darwin" ? "pl-20" : "pl-3",
+        )}
+      >
+        {window.pi.platform !== "darwin" ? (
+          <img alt="Pi" className="no-drag size-7 shrink-0 rounded-md" draggable={false} src={logo} />
+        ) : null}
         <Button
-          className="gap-1.5 px-2"
+          className="no-drag flex-1 justify-center gap-1.5 px-2"
           onClick={onNewSession}
           size="sm"
           title="新建任务"
@@ -330,7 +339,7 @@ export function SessionSidebar({
           <span className="text-xs">新建任务</span>
         </Button>
         <Button
-          className="ml-auto"
+          className="no-drag ml-auto"
           onClick={onOpenPalette}
           size="icon-sm"
           title="搜索（⌘K）"
@@ -338,7 +347,7 @@ export function SessionSidebar({
         >
           <SearchIcon />
         </Button>
-        <Button onClick={onOpenSkills} size="icon-sm" title="技能" variant="ghost">
+        <Button className="no-drag" onClick={onOpenSkills} size="icon-sm" title="技能" variant="ghost">
           <WrenchIcon />
         </Button>
       </div>
@@ -346,17 +355,15 @@ export function SessionSidebar({
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
-            className="mx-2 mb-2 h-auto justify-start gap-2 py-1.5 text-xs"
+            className="mx-2 mb-2 h-8 justify-start gap-2 px-2.5 text-xs"
+            title={activeProject?.path ?? "打开文件夹…"}
             variant="ghost"
           >
             <FolderIcon className="size-3.5 shrink-0" />
-            <span className="min-w-0 flex-1 text-left">
-              <span className="block truncate">{activeProject?.name ?? "选择项目"}</span>
-              <span className="block truncate text-[10px] text-muted-foreground">
-                {state.cwd || "~"}
-              </span>
+            <span className="min-w-0 flex-1 truncate text-left">
+              {activeProject?.name ?? "选择项目"}
             </span>
-            <ChevronDownIcon className="ml-auto size-3 opacity-50" />
+            <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="max-h-80 w-72">
@@ -403,7 +410,7 @@ export function SessionSidebar({
         <Input
           className="h-7 text-xs"
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="搜索会话（标题与全文）"
+          placeholder="搜索会话"
           value={search}
         />
       </div>

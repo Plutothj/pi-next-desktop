@@ -2,9 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BotIcon,
   BrainIcon,
+  CopyIcon,
   FilesIcon,
   GlobeIcon,
   Minimize2Icon,
+  MinusIcon,
+  SquareIcon,
   TerminalIcon,
   WorkflowIcon,
   XIcon,
@@ -165,6 +168,14 @@ function Shell() {
 
   // 界面缩放快捷键（Ctrl/Cmd + = - 0，10% 步进），反馈气泡显示当前倍率
   const [zoomPill, setZoomPill] = useState<number | null>(null);
+  // 无边框窗口的最大化状态（自绘按钮显示还原/最大化）
+  const [winMaximized, setWinMaximized] = useState(false);
+  useEffect(() => {
+    window.pi.win.state().then((s) => setWinMaximized(s.maximized)).catch(() => {});
+    return window.pi.onEvent((rec) => {
+      if (rec.type === "win_maximized") setWinMaximized(Boolean(rec.value));
+    });
+  }, []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
@@ -279,7 +290,15 @@ function Shell() {
       />
 
       <main className="flex min-w-0 flex-1 flex-col">
-        <header className="drag flex h-12 shrink-0 items-center gap-2 border-b px-4">
+        <header
+          className="drag flex h-12 shrink-0 items-center gap-2 border-b px-4"
+          onDoubleClick={(e) => {
+            // 自绘标题栏：双击切换最大化（点在按钮上除外）
+            if (window.pi.platform === "darwin") return;
+            if ((e.target as HTMLElement).closest("button")) return;
+            void window.pi.win.toggleMaximize();
+          }}
+        >
           <span className="max-w-56 truncate text-xs text-muted-foreground">
             {state.sessionName ?? "未命名会话"}
           </span>
@@ -289,7 +308,7 @@ function Shell() {
             </Badge>
           ) : null}
 
-          <div className="no-drag ml-auto flex items-center gap-1.5">
+          <div className="no-drag ml-auto flex items-center gap-1.5 self-stretch">
             <Button
               className={cn("h-7 px-2 text-xs", panel === "terminal" && "bg-accent")}
               onClick={() => setPanel(panel === "terminal" ? null : "terminal")}
@@ -333,6 +352,42 @@ function Shell() {
             >
               <Minimize2Icon className="size-3.5" />
             </Button>
+
+            {/* OS 领地（仅无边框平台）：Windows caption 语法——贴角、满高、
+                方角，与应用工具之间用发丝线分界；关闭悬停用系统关闭红。
+                关闭走 close 拦截转托盘，与原生 X 行为一致。 */}
+            {window.pi.platform !== "darwin" ? (
+              <div className="-mr-4 ml-2 flex self-stretch border-l border-border/60">
+                <button
+                  className="flex w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  onClick={() => void window.pi.win.minimize()}
+                  title="最小化"
+                  type="button"
+                >
+                  <MinusIcon className="size-3.5" />
+                </button>
+                <button
+                  className="flex w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  onClick={() => void window.pi.win.toggleMaximize()}
+                  title={winMaximized ? "还原" : "最大化"}
+                  type="button"
+                >
+                  {winMaximized ? (
+                    <CopyIcon className="size-3" />
+                  ) : (
+                    <SquareIcon className="size-3" />
+                  )}
+                </button>
+                <button
+                  className="flex w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-[#e81123] hover:text-white"
+                  onClick={() => void window.pi.win.closeApp()}
+                  title="关闭"
+                  type="button"
+                >
+                  <XIcon className="size-4" />
+                </button>
+              </div>
+            ) : null}
           </div>
         </header>
 
