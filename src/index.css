@@ -112,6 +112,25 @@
   -webkit-app-region: no-drag;
 }
 
+/* 细滚动条：贴主题配色，替换 Windows 上的原生灰色滚动条（含上下箭头） */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background-color: color-mix(in oklch, var(--muted-foreground) 38%, transparent);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in oklch, var(--muted-foreground) 65%, transparent);
+}
+
 /* compact transcript: agent UIs pack many turns per screen */
 [data-streamdown], .prose { --tw-prose-body: inherit; }
 [data-streamdown] p, .prose p { margin: 0.35rem 0; }
