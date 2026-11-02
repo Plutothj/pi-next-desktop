@@ -251,7 +251,7 @@ reject（调用方 `.catch` 语义不变）。启动期预期错误（`pi 未运
 | `cfg:read` | 汇总 settings/providers/packages/skills/mcp/prompts/memory/persona |
 | `cfg:setSetting` | 点号路径合并写入 `settings.json`，返回 `{ok,restart:true}` |
 | `cfg:saveProvider` / `cfg:deleteProvider` / `cfg:setMcp` / `cfg:savePersona` / `cfg:setResources` | 配置修改（均返回 restart 标记） |
-| `cfg:fetchModels` | 从供应商 `/models` 端点拉取模型列表（密钥留空回退已存密钥），返回 `{ok, models\|error}` |
+| `cfg:fetchModels` | 从供应商 `/models` 端点拉取模型列表（密钥留空回退已存密钥），并合并 models.dev 元数据（reasoning/模态/上下文/价格/推理档位，缓存 1h，目录不可达不影响主流程），返回 `{ok, models\|error}` |
 | `cfg:gallery` / `cfg:readSkill` / `cfg:deleteSkill` | 包市场查询、技能读取/删除 |
 | `cfg:install` / `cfg:uninstall` | shell out `pi install/remove`，输出经 `cfg_progress` 流式回传 |
 | `diag:export` | 保存诊断 txt（版本/平台/运行时/会话/任务/日志），完成后可显示于 Finder |

@@ -17,7 +17,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import type { CfgSnapshot, ProviderInfo, ProviderModel } from "@/lib/pi";
+import type {
+  CfgSnapshot,
+  FetchedModel,
+  ProviderInfo,
+  ProviderModel,
+  ProviderModelCost,
+} from "@/lib/pi";
 import type { ApplyFn } from "./shared";
 
 // extracted from settings-dialog.tsx
@@ -118,7 +124,17 @@ export function ProvidersPanel({
 
 
 // 每个模型一行的结构化草稿；显示名与 ID 相同时留空。
-type ModelDraft = { id: string; name: string; reasoning: boolean; image: boolean };
+// contextWindow/maxTokens/cost 来自 models.dev 元数据：编辑时静默保存，不占版面。
+type ModelDraft = {
+  id: string;
+  name: string;
+  reasoning: boolean;
+  image: boolean;
+  contextWindow?: number;
+  maxTokens?: number;
+  cost?: ProviderModelCost;
+  effort?: string[];
+};
 
 const toDrafts = (models: ProviderModel[] | undefined): ModelDraft[] =>
   (models ?? []).map((m) => ({
@@ -126,7 +142,28 @@ const toDrafts = (models: ProviderModel[] | undefined): ModelDraft[] =>
     name: m.name && m.name !== m.id ? m.name : "",
     reasoning: Boolean(m.reasoning),
     image: (m.input ?? ["text"]).includes("image"),
+    contextWindow: m.contextWindow,
+    maxTokens: m.maxTokens,
+    cost: m.cost,
   }));
+
+const fmtTokens = (n?: number) => {
+  if (!n) return "";
+  return n >= 1_000_000 ? `${Math.round(n / 1_000_000)}M` : `${Math.round(n / 1_000)}k`;
+};
+
+const fmtCost = (c?: ProviderModelCost) => (c ? `$${c.input}/$${c.output}` : "");
+
+// 行悬浮提示：上下文 / 输出上限 / 价格 / 推理档位
+const draftTip = (r: ModelDraft) =>
+  [
+    r.contextWindow ? `上下文 ${r.contextWindow.toLocaleString()}` : "",
+    r.maxTokens ? `最大输出 ${r.maxTokens.toLocaleString()}` : "",
+    r.cost ? `价格 $${r.cost.input}/$${r.cost.output} 每 Mtok` : "",
+    r.effort?.length ? `推理档位 ${r.effort.join("/")}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
 function ProviderForm({
   initial,
@@ -153,7 +190,7 @@ function ProviderForm({
   const [saving, setSaving] = useState(false);
   const [rows, setRows] = useState<ModelDraft[]>(() => toDrafts(initial?.models));
   // 「获取模型列表」的结果与勾选状态
-  const [available, setAvailable] = useState<{ id: string; name: string }[] | null>(null);
+  const [available, setAvailable] = useState<FetchedModel[] | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState("");
   const [fetching, setFetching] = useState(false);
@@ -185,7 +222,12 @@ function ProviderForm({
       ),
     );
     setFilter("");
-    setLog(`获取到 ${res.models.length} 个模型，勾选后添加`);
+    const enriched = res.models.filter(
+      (m) => m.cost != null || m.contextWindow != null || m.reasoningEffort != null,
+    ).length;
+    setLog(
+      `获取到 ${res.models.length} 个模型${enriched ? `，${enriched} 个带 models.dev 元数据` : ""}，勾选后添加`,
+    );
   };
 
   const visible = (available ?? []).filter((m) => {
@@ -224,8 +266,12 @@ function ProviderForm({
         ...chosen.map((m) => ({
           id: m.id,
           name: m.name && m.name !== m.id ? m.name : "",
-          reasoning: false,
-          image: false,
+          reasoning: Boolean(m.reasoning),
+          image: Boolean(m.image),
+          contextWindow: m.contextWindow,
+          maxTokens: m.maxTokens,
+          cost: m.cost,
+          effort: m.reasoningEffort,
         })),
       ]);
     }
@@ -250,6 +296,9 @@ function ProviderForm({
           name: r.name.trim() || id,
           reasoning: r.reasoning,
           input: r.image ? ["text", "image"] : ["text"],
+          contextWindow: r.contextWindow,
+          maxTokens: r.maxTokens,
+          cost: r.cost,
         },
       ];
     });
@@ -385,25 +434,40 @@ function ProviderForm({
               </Button>
             </div>
             <div className="max-h-44 space-y-0.5 overflow-auto">
-              {visible.map((m) => (
-                <label
-                  className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs hover:bg-accent/60"
-                  key={m.id}
-                >
-                  <input
-                    checked={picked.has(m.id)}
-                    className="accent-primary size-3.5"
-                    onChange={() => togglePick(m.id)}
-                    type="checkbox"
-                  />
-                  <span className="truncate font-mono">{m.id}</span>
-                  {m.name && m.name !== m.id ? (
-                    <span className="ml-auto shrink-0 truncate pl-2 text-muted-foreground">
-                      {m.name}
-                    </span>
-                  ) : null}
-                </label>
-              ))}
+              {visible.map((m) => {
+                const meta = [
+                  m.reasoning ? "推理" : "",
+                  m.image ? "图片" : "",
+                  fmtTokens(m.contextWindow),
+                  fmtCost(m.cost),
+                  m.reasoningEffort?.length ? `档位 ${m.reasoningEffort.join("/")}` : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ");
+                return (
+                  <label
+                    className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs hover:bg-accent/60"
+                    key={m.id}
+                    title={meta}
+                  >
+                    <input
+                      checked={picked.has(m.id)}
+                      className="accent-primary size-3.5"
+                      onChange={() => togglePick(m.id)}
+                      type="checkbox"
+                    />
+                    <span className="truncate font-mono">{m.id}</span>
+                    {meta ? (
+                      <span className="shrink-0 text-[10px] text-muted-foreground">{meta}</span>
+                    ) : null}
+                    {m.name && m.name !== m.id ? (
+                      <span className="ml-auto shrink-0 truncate pl-2 text-muted-foreground">
+                        {m.name}
+                      </span>
+                    ) : null}
+                  </label>
+                );
+              })}
               {!visible.length ? (
                 <p className="px-2 py-3 text-center text-xs text-muted-foreground">无匹配模型</p>
               ) : null}
@@ -414,7 +478,7 @@ function ProviderForm({
         {rows.length ? (
           <div className="space-y-1.5">
             {rows.map((row, i) => (
-              <div className="flex items-center gap-1.5" key={i}>
+              <div className="flex items-center gap-1.5" key={i} title={draftTip(row)}>
                 <Input
                   aria-label="模型 ID"
                   className="h-8 flex-1 font-mono text-xs"
@@ -429,6 +493,11 @@ function ProviderForm({
                   placeholder="显示名（可选）"
                   value={row.name}
                 />
+                {row.contextWindow ? (
+                  <span className="w-9 shrink-0 text-center text-[10px] text-muted-foreground">
+                    {fmtTokens(row.contextWindow)}
+                  </span>
+                ) : null}
                 <FlagChip
                   active={row.reasoning}
                   label="推理"

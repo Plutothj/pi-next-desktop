@@ -166,6 +166,13 @@ export type ProjectInfo = {
   exists: boolean;
 };
 
+export type ProviderModelCost = {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+};
+
 export type ProviderModel = {
   id: string;
   name: string;
@@ -173,6 +180,20 @@ export type ProviderModel = {
   reasoning?: boolean;
   input?: string[];
   contextWindow?: number;
+  maxTokens?: number;
+  cost?: ProviderModelCost;
+};
+
+// cfg:fetchModels 返回的模型：provider 端点数据 + models.dev 元数据合并
+export type FetchedModel = {
+  id: string;
+  name: string;
+  reasoning?: boolean;
+  image?: boolean;
+  contextWindow?: number;
+  maxTokens?: number;
+  cost?: ProviderModelCost;
+  reasoningEffort?: string[];
 };
 
 export type ProviderInfo = {
@@ -360,7 +381,7 @@ export type PiBridge = {
       api?: string;
       baseUrl?: string;
       apiKey?: string;
-    }) => Promise<{ ok: boolean; models?: { id: string; name: string }[]; error?: string }>;
+    }) => Promise<{ ok: boolean; models?: FetchedModel[]; error?: string }>;
     setSetting: (patch: Record<string, unknown>) => Promise<{ ok: boolean; restart?: boolean }>;
     gallery: (query?: string) => Promise<GalleryPackage[] | { error: string }>;
     readSkill: (file: string, cwd?: string) => Promise<string>;

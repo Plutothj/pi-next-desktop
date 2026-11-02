@@ -68,6 +68,8 @@ export function listProviders() {
         reasoning: Boolean(m.reasoning),
         input: m.input ?? ["text"],
         contextWindow: m.contextWindow,
+        maxTokens: m.maxTokens,
+        cost: m.cost,
       })),
     };
   });
@@ -125,6 +127,68 @@ export function deleteProvider(name) {
 }
 
 // ------------------------------------------------------------- model catalog
+
+// models.dev：pi 生态共用的模型元数据库（推理、模态、上下文、价格、推理档位）。
+// 供应商自己的 /models 端点大多只回 id，能力信息从这里补全。5MB 级别，进程内缓存 1 小时。
+const MODEL_CATALOG_URL = "https://models.dev/api.json";
+let catalogCache = null;
+
+async function fetchCatalog() {
+  if (catalogCache && Date.now() - catalogCache.at < 3_600_000) {
+    return catalogCache;
+  }
+  let db = null;
+  // models.dev 偶发超时，重试一次
+  for (let i = 0; i < 2 && !db; i++) {
+    try {
+      const res = await fetch(MODEL_CATALOG_URL, { signal: AbortSignal.timeout(20_000) });
+      if (res.ok) db = await res.json();
+    } catch {}
+  }
+  if (!db) throw new Error("models.dev 不可达");
+  // 反查索引：modelId → 元数据（跨供应商同名 id 取首个）
+  const index = new Map();
+  for (const p of Object.values(db)) {
+    for (const [id, meta] of Object.entries(p.models ?? {})) {
+      if (!index.has(id)) index.set(id, meta);
+    }
+  }
+  catalogCache = { at: Date.now(), providerModels: db, index };
+  return catalogCache;
+}
+
+const slugOf = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+const toCost = (c) =>
+  c
+    ? {
+        input: c.input ?? 0,
+        output: c.output ?? 0,
+        cacheRead: c.cache_read ?? 0,
+        cacheWrite: c.cache_write ?? 0,
+      }
+    : undefined;
+
+// 先按供应商 slug 精确匹配（deepseek、openai…），再按模型 id 全目录兜底
+function lookupCatalog(catalog, providerName, modelId) {
+  const direct = catalog.providerModels[slugOf(providerName)]?.models?.[modelId];
+  return direct ?? catalog.index.get(modelId) ?? null;
+}
+
+function enrichWithCatalog(catalog, providerName, m) {
+  const meta = lookupCatalog(catalog, providerName, m.id);
+  if (!meta) return m;
+  return {
+    ...m,
+    name: m.name && m.name !== m.id ? m.name : (meta.name ?? m.name),
+    reasoning: Boolean(meta.reasoning),
+    image: (meta.modalities?.input ?? []).includes("image"),
+    contextWindow: meta.limit?.context,
+    maxTokens: meta.limit?.output,
+    cost: toCost(meta.cost),
+    reasoningEffort: meta.reasoning_options?.find((o) => o.type === "effort")?.values,
+  };
+}
 
 const API_DEFAULT_BASE = {
   "openai-completions": "https://api.openai.com/v1",
@@ -193,7 +257,13 @@ export async function fetchProviderModels({ name, api, baseUrl, apiKey } = {}) {
   }
   const list = pick(await res.json()).filter((m) => m.id);
   if (!list.length) throw new Error("该端点未返回任何模型");
-  return list;
+  // 合并 models.dev 元数据；目录不可达不影响主流程
+  try {
+    const catalog = await fetchCatalog();
+    return list.map((m) => enrichWithCatalog(catalog, name, m));
+  } catch {
+    return list;
+  }
 }
 
 // --------------------------------------------------------------- packages
