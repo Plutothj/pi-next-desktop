@@ -432,6 +432,13 @@ async function main() {
     if (!JSON.parse(stillRunning).running) throw new Error(`切回 A 时进程不在: ${stillRunning}`);
   });
 
+  // 17. 项目树：创建项目后出现在侧栏的项目分组里
+  await check("创建项目", async () => {
+    await evaluate(`window.pi.projects.add(${JSON.stringify(agentDir)}).then(r => JSON.stringify(r))`);
+    const projects = await evaluate(`window.pi.projects.list().then(l => JSON.stringify(l.map(p => p.path)))`);
+    if (!JSON.parse(projects).includes(agentDir)) throw new Error(`项目未登记: ${projects}`);
+  });
+
   ws.close();
 }
 

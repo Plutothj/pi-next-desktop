@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  CheckIcon,
   ChevronDownIcon,
   DownloadIcon,
   FolderIcon,
+  FolderPlusIcon,
   MessageSquarePlusIcon,
   MoonIcon,
   SearchIcon,
@@ -19,8 +19,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { baseName, cn } from "@/lib/utils";
@@ -241,6 +239,7 @@ export function SessionSidebar({
   onOpenPalette,
   onOpenSkills,
   onOpenSettings,
+  onCreateProject,
   onToggleTheme,
   openProject,
   openSession,
@@ -255,6 +254,7 @@ export function SessionSidebar({
   onOpenPalette: () => void;
   onOpenSkills: () => void;
   onOpenSettings: () => void;
+  onCreateProject: () => void;
   onToggleTheme: () => void;
   openProject: (path: string) => void;
   openSession: (path: string, cwd?: string) => void | Promise<void>;
@@ -312,7 +312,7 @@ export function SessionSidebar({
       expandedFor.current = state.sessionFile;
     }
   }, [state.sessionFile, state.sessions, state.projects, view, sort]);
-  const activeProject =
+  const _activeProject =
     state.projects.find((p) => p.path === state.cwd) ??
     (state.cwd ? { path: state.cwd, name: baseName(state.cwd) } : null);
 
@@ -352,59 +352,19 @@ export function SessionSidebar({
         </Button>
       </div>
 
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            className="mx-2 mb-2 h-8 justify-start gap-2 px-2.5 text-xs"
-            title={activeProject?.path ?? "打开文件夹…"}
-            variant="ghost"
-          >
-            <FolderIcon className="size-3.5 shrink-0" />
-            <span className="min-w-0 flex-1 truncate text-left">
-              {activeProject?.name ?? "选择项目"}
-            </span>
-            <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="max-h-80 w-72">
-          <DropdownMenuLabel className="text-[11px] text-muted-foreground">
-            项目
-          </DropdownMenuLabel>
-          {state.projects.length === 0 ? (
-            <p className="px-2 py-1.5 text-[11px] text-muted-foreground">
-              还没有项目，打开一个文件夹开始
-            </p>
-          ) : null}
-          {state.projects.map((p) => (
-            <DropdownMenuItem
-              className="text-xs"
-              key={p.path}
-              onSelect={() => {
-                // Already the live workspace: just close the menu.
-                if (p.path !== state.cwd) openProject(p.path);
-              }}
-            >
-              <FolderIcon className={cn("size-3.5 shrink-0", !p.exists && "opacity-40")} />
-              <span className="min-w-0 flex-1 truncate" title={p.path}>
-                {p.name}
-                <span className="ml-1.5 text-[10px] text-muted-foreground">{p.sessions}</span>
-              </span>
-              {p.path === state.cwd ? <CheckIcon className="size-3 shrink-0" /> : null}
-            </DropdownMenuItem>
-          ))}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            className="text-xs"
-            onSelect={async () => {
-              const dir = await window.pi.pickFolder();
-              if (dir) openProject(dir);
-            }}
-          >
-            <FolderIcon className="size-3.5" />
-            打开文件夹…
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <div className="mb-1 flex items-center gap-1 px-2">
+        <span className="text-[11px] font-medium text-muted-foreground">项目</span>
+        <Button
+          className="ml-auto h-6 gap-1 px-1.5 text-[11px]"
+          onClick={onCreateProject}
+          size="sm"
+          title="创建项目：选择文件夹并加入项目列表"
+          variant="ghost"
+        >
+          <FolderPlusIcon className="size-3" />
+          新建
+        </Button>
+      </div>
 
       <div className="px-2 pb-1">
         <Input
@@ -477,40 +437,74 @@ export function SessionSidebar({
                 {groupSessions(visibleSessions, state.projects, view, sort).map(([label, items]) => {
             const open = view === "timeline" || expanded.has(label);
             const visible = open ? items : items.slice(0, COLLAPSED_COUNT);
+            // 工作区视图：分组是项目，渲染成可折叠的项目标题（带目录图标）
+            const isProject = view === "workspace";
+            const projectPath = items[0]?.cwd;
+            const isActiveProject = isProject && projectPath === state.cwd;
             return (
-            <div key={label}>
-              <p className="px-2 pt-2 pb-1 text-[10px] font-medium text-muted-foreground">
-                {label}
-              </p>
+            <div className="mb-0.5" key={label}>
+              {isProject ? (
+                <button
+                  className={cn(
+                    "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-sidebar-accent",
+                    isActiveProject && "font-medium text-foreground",
+                  )}
+                  onClick={() => toggleGroup(label)}
+                  title={projectPath ?? label}
+                  type="button"
+                >
+                  <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate">{label}</span>
+                  {items.length > 0 ? (
+                    <span className="shrink-0 text-[10px] text-muted-foreground/60">
+                      {items.length}
+                    </span>
+                  ) : null}
+                  <ChevronDownIcon
+                    className={cn(
+                      "size-3 shrink-0 opacity-50 transition-transform",
+                      open && "rotate-180",
+                    )}
+                  />
+                </button>
+              ) : (
+                <p className="px-2 pt-2 pb-1 text-[10px] font-medium text-muted-foreground">
+                  {label}
+                </p>
+              )}
               {items.length === 0 ? (
-                <p className="px-2 py-1 text-[10px] text-muted-foreground/60">暂无任务</p>
+                <p className="px-2 py-1 pl-7 text-[10px] text-muted-foreground/60">暂无会话</p>
               ) : null}
-              {visible.map((s) => (
-                <TaskRow
-                  active={state.sessionFile === s.path}
-                  currentCwd={state.cwd}
-                  key={s.path}
-                  showProject={view !== "workspace"}
-                  onDelete={() => deleteSession(s.path)}
-                  onExport={() => window.pi.exportHtml()}
-                  onOpen={() => openSession(s.path, s.cwd)}
-                  onRename={(title) => {
-                    if (s.path === state.sessionFile) renameSession(title);
-                    else {
-                      // Renaming applies to the live session: switch first.
-                      Promise.resolve(openSession(s.path, s.cwd)).then(() => renameSession(title));
-                    }
-                  }}
-                  onReveal={() => shellReveal(s.path)}
-                  renaming={renaming === s.path}
-                  session={s}
-                  setRenaming={setRenaming}
-                  streaming={state.sessionFile === s.path && state.isStreaming}
-                />
-              ))}
+              {open
+                ? visible.map((s) => (
+                    <div className={cn(isProject && "pl-3")} key={s.path}>
+                      <TaskRow
+                        active={state.sessionFile === s.path}
+                        currentCwd={state.cwd}
+                        key={s.path}
+                        showProject={view !== "workspace"}
+                        onDelete={() => deleteSession(s.path)}
+                        onExport={() => window.pi.exportHtml()}
+                        onOpen={() => openSession(s.path, s.cwd)}
+                        onRename={(title) => {
+                          if (s.path === state.sessionFile) renameSession(title);
+                          else {
+                            // Renaming applies to the live session: switch first.
+                            Promise.resolve(openSession(s.path, s.cwd)).then(() => renameSession(title));
+                          }
+                        }}
+                        onReveal={() => shellReveal(s.path)}
+                        renaming={renaming === s.path}
+                        session={s}
+                        setRenaming={setRenaming}
+                        streaming={state.sessionFile === s.path && state.isStreaming}
+                      />
+                    </div>
+                  ))
+                : null}
               {items.length > COLLAPSED_COUNT ? (
                 <button
-                  className="flex w-full items-center gap-1 rounded px-2 py-1 text-[10px] text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+                  className="flex w-full items-center gap-1 rounded px-2 py-1 pl-7 text-[10px] text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
                   onClick={() => toggleGroup(label)}
                   type="button"
                 >

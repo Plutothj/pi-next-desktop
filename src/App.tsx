@@ -55,6 +55,7 @@ import { PlanWorkbench } from "@/components/plan-workbench";
 import { AgentsPanel } from "@/components/agents-panel";
 import { BrowserPanel } from "@/components/browser-panel";
 import { CommandPalette, type PanelTab } from "@/components/command-palette";
+import { CreateProjectDialog } from "@/components/create-project-dialog";
 import { ExtensionDialog } from "@/components/extension-dialog";
 import { DualModelDialog } from "@/components/dual-model-dialog";
 import { ShortcutsDialog } from "@/components/shortcuts-dialog";
@@ -105,6 +106,7 @@ function Shell() {
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [planMode, setPlanMode] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [dualOpen, setDualOpen] = useState(false);
   const dual = useDualModel();
@@ -336,6 +338,7 @@ function Shell() {
         onNewSession={newSession}
         onOpenPalette={() => setPaletteOpen(true)}
         onOpenSkills={() => openSettings("skills")}
+        onCreateProject={() => setCreateProjectOpen(true)}
         onOpenSettings={() => openSettings("general")}
         onToggleTheme={toggleTheme}
         openProject={openProject}
@@ -662,6 +665,15 @@ function Shell() {
           </button>
         </div>
       ) : null}
+
+      <CreateProjectDialog
+        onCreate={async (dir) => {
+          await window.pi.projects.add(dir).catch(() => null);
+          await openProject(dir);
+        }}
+        onOpenChange={setCreateProjectOpen}
+        open={createProjectOpen}
+      />
 
       <ShortcutsDialog onOpenChange={setShortcutsOpen} open={shortcutsOpen} />
 
