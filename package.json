@@ -14,7 +14,8 @@
     "dist": "npm run stage && npm run build && electron-builder --publish never",
     "dist:dir": "npm run stage && npm run build && electron-builder --dir",
     "release": "npm run stage && npm run build && electron-builder --publish always",
-    "lint": "biome lint src electron tests"
+    "lint": "biome lint src electron tests",
+    "test:e2e": "node tests/e2e/run.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.4",

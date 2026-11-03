@@ -19,3 +19,21 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm run build
       - run: npm test
+
+  # E2E：CDP 驱动真实 Electron（fixture agent 目录，无网络依赖），
+  # 覆盖 boot/侧栏/窗口控制/设置面板挂载/设置搜索/搜索 IPC 等 UI 回归。
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libatk-bridge2.0-0 libgtk-3-0 libasound2t64
+      - run: npm ci
+      - run: npm run build
+      - run: npm run stage
+      - run: xvfb-run -a npm run test:e2e
