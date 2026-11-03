@@ -62,6 +62,25 @@ export type SettingsTab =
   | "about";
 
 // Nav mirrors ZCode's Settings: top-level items, then Agent 能力, then 数据与统计.
+// keywords：设置页搜索的匹配词（含俗称），让"缩放"能找到外观、"密钥"找到模型设置。
+const NAV_KEYWORDS: Record<SettingsTab, string[]> = {
+  general: ["默认模型", "会话", "压缩", "重试", "网络", "代理", "思考"],
+  appearance: ["主题", "深色", "浅色", "缩放", "字体大小", "zoom"],
+  providers: ["模型", "供应商", "密钥", "apikey", "api", "baseurl", "请求头", "预设"],
+  persona: ["系统提示词", "人设", "system"],
+  memory: ["记忆", "memory", "mcp"],
+  agents: ["子智能体", "subagent", "项目"],
+  packages: ["插件", "包", "市场", "扩展"],
+  mcp: ["mcp", "服务器"],
+  skills: ["技能", "skill"],
+  commands: ["命令", "自定义命令", "prompt"],
+  stats: ["统计", "用量", "token", "费用"],
+  tools: ["工具", "codemode"],
+  shell: ["shell", "终端", "命令行"],
+  extensions: ["扩展", "extension"],
+  projects: ["项目", "工作区", "目录"],
+  about: ["版本", "更新", "升级", "about"],
+};
 const NAV: { group?: string; items: { id: SettingsTab; label: string; icon: typeof BoxesIcon }[] }[] = [
   {
     items: [
@@ -493,6 +512,21 @@ export function SettingsDialog({
   const [cfg, setCfg] = useState<CfgSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState<string | null>(null);
+  const [navQuery, setNavQuery] = useState("");
+
+  // 设置页搜索：按标签 + 关键词过滤导航项
+  const visibleNav = (() => {
+    const q = navQuery.trim().toLowerCase();
+    if (!q) return NAV;
+    return NAV.map((section) => ({
+      ...section,
+      items: section.items.filter(
+        (item) =>
+          item.label.toLowerCase().includes(q) ||
+          (NAV_KEYWORDS[item.id] ?? []).some((k) => k.toLowerCase().includes(q)),
+      ),
+    })).filter((section) => section.items.length > 0);
+  })();
 
   const load = useCallback(async () => {
     const snapshot = await window.pi.cfg.read(cwd);
@@ -537,9 +571,14 @@ export function SettingsDialog({
           <ArrowLeftIcon className="size-4" />
           返回工作区
         </Button>
-        <div className="mx-1 mb-2 h-px bg-border" />
+        <Input
+          className="mb-2 h-7 text-xs"
+          onChange={(e) => setNavQuery(e.target.value)}
+          placeholder="搜索设置项…"
+          value={navQuery}
+        />
         <div className="min-h-0 flex-1 overflow-auto">
-          {NAV.map((section, i) => (
+          {visibleNav.map((section, i) => (
             <div className="mb-2" key={section.group ?? i}>
               {section.group ? (
                 <p className="px-2.5 pt-3 pb-1.5 text-[11px] font-medium text-muted-foreground">
