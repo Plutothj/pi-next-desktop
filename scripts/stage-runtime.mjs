@@ -13,6 +13,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import zlib from "node:zlib";
 
 const root = path.resolve(import.meta.dirname, "..");
 const out = path.join(root, "runtime");
@@ -220,4 +221,80 @@ try {
   await stageNode();
 } catch (err) {
   console.warn("node runtime not staged (app falls back to a system node):", err.message);
+}
+
+
+// ------------------------------------------------------- 内置扩展 bundle
+// 随应用分发的扩展：stage 时用 npm pack 取发布产物、解包成目录放进
+// runtime/bundled-extensions/；首次启动由主进程用 pi 的安装器离线装入
+// ~/.pi-desktop/agent（依赖树交给 pi/npm，比手工拷 node_modules 可靠）。
+
+/** 解 .tgz（npm pack 产物）到目录，剥掉顶层的 package/。不依赖系统 tar。 */
+function extractTgz(tgzPath, destDir) {
+  const buf = zlib.gunzipSync(fs.readFileSync(tgzPath));
+  const NUL = String.fromCharCode(0);
+  const strip = (s) => {
+    const i = s.indexOf(NUL);
+    return i === -1 ? s : s.slice(0, i);
+  };
+  let off = 0;
+  while (off + 512 <= buf.length) {
+    const header = buf.subarray(off, off + 512);
+    if (header.every((b) => b === 0)) break;
+    const rawName = strip(header.subarray(0, 100).toString("utf8"));
+    const size = parseInt(strip(header.subarray(124, 136).toString("utf8")).trim(), 8) || 0;
+    const typeflag = String.fromCharCode(header[156] || 48);
+    off += 512;
+    const body = buf.subarray(off, off + size);
+    off += Math.ceil(size / 512) * 512;
+    const name = rawName.replace(/^package\//, "");
+    if (!name || name.startsWith("..")) continue;
+    const target = path.join(destDir, name);
+    if (typeflag === "5" || rawName.endsWith("/")) {
+      fs.mkdirSync(target, { recursive: true });
+    } else {
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, body);
+    }
+  }
+}
+
+const BUNDLED_EXTENSIONS = [
+  { name: "pi-memory" },
+  { name: "@juicesharp/rpiv-ask-user-question" },
+];
+
+function stageBundledExtensions() {
+  const dest = path.join(out, "bundled-extensions");
+  fs.rmSync(dest, { recursive: true, force: true });
+  fs.mkdirSync(dest, { recursive: true });
+
+  for (const ext of BUNDLED_EXTENSIONS) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pi-ext-"));
+    try {
+      const args = ["pack", ext.name, "--pack-destination", tmp, "--loglevel=error"];
+      if (process.platform === "win32") {
+        execFileSync("cmd.exe", ["/d", "/s", "/c", "npm", ...args], { stdio: "inherit" });
+      } else {
+        execFileSync("npm", args, { stdio: "inherit" });
+      }
+      const tgz = fs.readdirSync(tmp).find((f) => f.endsWith(".tgz"));
+      if (!tgz) throw new Error(`npm pack 未产出 tgz: ${ext.name}`);
+      const safe = ext.name.replace(/[@/]/g, "-").replace(/^-/, "");
+      const pkgDir = path.join(dest, safe);
+      fs.mkdirSync(pkgDir, { recursive: true });
+      extractTgz(path.join(tmp, tgz), pkgDir);
+      console.log(`bundled extension: ${ext.name} → ${safe}/`);
+    } catch (err) {
+      console.warn(`bundled extension skipped (${ext.name}):`, err.message);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+}
+
+try {
+  stageBundledExtensions();
+} catch (err) {
+  console.warn("bundled extensions not staged:", err.message);
 }

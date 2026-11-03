@@ -7,6 +7,7 @@ import { parseAttachment } from "./attachments.js";
 import { createAgentBoard } from "./agents.js";
 import { installAutoRouter } from "./auto-router.js";
 import { installTodoExtension } from "./todo-extension.js";
+import { installBundledExtensions } from "./bundled-extensions.js";
 import { createScheduler } from "./schedules.js";
 import { requireObject, requireString, optionalString } from "./ipc-helpers.js";
 import fs from "node:fs";
@@ -651,6 +652,13 @@ app.whenReady().then(() => {
   installAutoRouter(AGENT_DIR);
   installTodoExtension(AGENT_DIR);
   scheduler.start();
+  // 内置扩展：首次启动（或应用升级后）离线装进 agent 目录，失败不阻塞启动
+  void installBundledExtensions({
+    resourcesPath: process.resourcesPath,
+    agentDir: AGENT_DIR,
+    runtime: resolveRuntime(),
+    appVersion: app.getVersion(),
+  }).catch((err) => logLine("bundled-ext", err));
   taskManager.startBridge();
   createWindow();
   if (process.platform !== "darwin") createTray();
