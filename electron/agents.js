@@ -23,6 +23,7 @@ export function createAgentBoard({ send, termEnv, agentDir }) {
     startedAt: a.startedAt,
     endedAt: a.endedAt ?? null,
     tail: a.log.slice(-400),
+    alive: Boolean(a.proc?.running),
     sessionFile: a.sessionFile ?? null,
   });
 
@@ -42,6 +43,7 @@ export function createAgentBoard({ send, termEnv, agentDir }) {
       log: "",
       sessionFile: null,
       proc: null,
+      notifySettle: true,
     };
     agents.set(id, agent);
 
@@ -98,32 +100,59 @@ export function createAgentBoard({ send, termEnv, agentDir }) {
   }
 
   async function handleRecord(agent, rec) {
-    // 文本尾巴：message_update 的 text_delta
+    // v2：全部记录转发给渲染层（并行会话实时视图），带 agentId
+    send({ type: "agent_event", agentId: agent.id, rec });
+
     if (rec.type === "message_update" && rec.assistantMessageEvent?.type === "text_delta") {
       agent.log += rec.assistantMessageEvent.delta ?? "";
       return;
     }
-    // agent_settled：pi 不会再自动继续 → 任务完成
+    // agent_settled：pi 不会再自动继续 → 本轮完成。v2 保活：不杀进程，
+    // 用户可以继续追问（活会话）；显式停止或退出应用才收摊。
     if (rec.type === "agent_settled") {
       agent.settled = true;
       agent.status = "done";
       agent.endedAt = Date.now();
-      // 拿会话文件供"转正"，然后收摊
       const st = await agent.proc?.command({ type: "get_state" }, 5000).catch(() => null);
       if (st?.data?.sessionFile) agent.sessionFile = st.data.sessionFile;
-      send({
-        type: "ui_notify",
-        message: `并行任务「${agent.name}」已完成`,
-        notifyType: "info",
-      });
+      if (agent.notifySettle) {
+        send({
+          type: "ui_notify",
+          message: `并行会话「${agent.name}」已完成`,
+          notifyType: "info",
+        });
+      }
       push(agent);
-      agent.proc?.stop();
       return;
     }
     if (rec.type === "message_end") push(agent);
     if (rec.type === "error") {
       agent.log += `\n[错误] ${rec.message ?? ""}`;
     }
+  }
+
+  // 活会话追问：空闲 = 新 prompt；流式中 = steer（pi 的 streamingBehavior 语义）
+  async function message(id, text) {
+    const agent = agents.get(id);
+    if (!agent || !agent.proc?.running) return { ok: false, error: "会话不在运行" };
+    const payload = { type: "prompt", message: text };
+    if (agent.status === "running" && !agent.settled) payload.streamingBehavior = "steer";
+    agent.settled = false;
+    agent.notifySettle = true;
+    agent.status = "running";
+    agent.startedAt = Date.now();
+    agent.endedAt = null;
+    push(agent);
+    const res = await agent.proc.command(payload, 10_000).catch((err) => ({ error: err.message }));
+    return res?.error ? { ok: false, error: res.error } : { ok: true };
+  }
+
+  // 中断当前回合（进程保活，可继续对话）
+  async function abort(id) {
+    const agent = agents.get(id);
+    if (!agent || !agent.proc?.running) return { ok: false, error: "会话不在运行" };
+    await agent.proc.command({ type: "abort" }, 5000).catch(() => null);
+    return { ok: true };
   }
 
   function stop(id) {
@@ -142,9 +171,9 @@ export function createAgentBoard({ send, termEnv, agentDir }) {
 
   function stopAll() {
     for (const agent of agents.values()) {
-      if (agent.status === "running") agent.proc?.stop();
+      agent.proc?.stop();
     }
   }
 
-  return { start, stop, list, stopAll, agentDirHint: agentDir };
+  return { start, stop, list, stopAll, message, abort, agentDirHint: agentDir };
 }

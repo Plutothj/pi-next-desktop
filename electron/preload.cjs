@@ -53,6 +53,8 @@ contextBridge.exposeInMainWorld("pi", {
     list: () => ipcRenderer.invoke("board:list"),
     run: (payload) => ipcRenderer.invoke("board:run", payload),
     stop: (id) => ipcRenderer.invoke("board:stop", id),
+    message: (id, message) => ipcRenderer.invoke("board:message", { id, message }),
+    abort: (id) => ipcRenderer.invoke("board:abort", id),
   },
   zoom: (delta) => ipcRenderer.invoke("ui:zoom", { delta }),
   zoomReset: () => ipcRenderer.invoke("ui:zoomReset"),

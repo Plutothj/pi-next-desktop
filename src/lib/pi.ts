@@ -64,6 +64,8 @@ export type RpcEvent = {
   id?: string;
   value?: boolean;
   agent?: BoardAgent;
+  agentId?: string;
+  rec?: RpcEvent;
   message?: PiMessage;
   usage?: Usage;
   assistantMessageEvent?: {
@@ -366,6 +368,8 @@ export type PiBridge = {
     list: () => Promise<BoardAgent[]>;
     run: (payload: { name?: string; cwd?: string; message: string }) => Promise<BoardAgent>;
     stop: (id: string) => Promise<{ ok: boolean; error?: string }>;
+    message: (id: string, message: string) => Promise<{ ok: boolean; error?: string }>;
+    abort: (id: string) => Promise<{ ok: boolean; error?: string }>;
   };
   zoom: (delta: number) => Promise<{ ok: boolean; factor?: number }>;
   zoomReset: () => Promise<{ ok: boolean; factor?: number }>;

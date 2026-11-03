@@ -428,8 +428,22 @@ function BashCard({ message }: { message: PiMessage }) {
 
 const PAGE = 60;
 
-export function Chat(props: { state: State; onFork?: (message: PiMessage) => void }) {
-  const { state, onFork } = props;
+/** 主聊天与并行会话共用的转录视图：消息流 + 流式块 + 等待占位。 */
+export function Transcript({
+  messages,
+  streaming,
+  isStreaming,
+  tools,
+  cwd,
+  onFork,
+}: {
+  messages: PiMessage[];
+  streaming: ContentBlock[] | null;
+  isStreaming: boolean;
+  tools: Record<string, ToolExec>;
+  cwd: string;
+  onFork?: (message: PiMessage) => void;
+}) {
   // Long sessions get one page at a time: the DOM stays small no matter how
   // many turns the transcript holds.
   const [limit, setLimit] = useState(PAGE);
@@ -437,13 +451,13 @@ export function Chat(props: { state: State; onFork?: (message: PiMessage) => voi
   // toolResult messages live in the transcript but render inside their card.
   const results = useMemo(() => {
     const map: Record<string, PiMessage> = {};
-    for (const m of state.messages) {
+    for (const m of messages) {
       if (m.role === "toolResult" && m.toolCallId) map[m.toolCallId] = m;
     }
     return map;
-  }, [state.messages]);
+  }, [messages]);
 
-  const visible = state.messages.filter(
+  const visible = messages.filter(
     (m) => m.role !== "toolResult" && m.role !== "system" && m.role !== "bashExecution",
   );
   const start = Math.max(0, visible.length - limit);
@@ -452,10 +466,10 @@ export function Chat(props: { state: State; onFork?: (message: PiMessage) => voi
   return (
     <Conversation>
       <ConversationContent className="mx-auto w-full max-w-3xl gap-2 px-5 py-4 lg:max-w-4xl xl:max-w-5xl 2xl:max-w-6xl min-[1800px]:max-w-7xl">
-        {visible.length === 0 && !state.streaming ? (
+        {visible.length === 0 && !streaming ? (
           <ConversationEmptyState
             title="开始对话"
-            description={`工作目录 ${state.cwd || "~"}`}
+            description={`工作目录 ${cwd || "~"}`}
           />
         ) : null}
 
@@ -481,7 +495,7 @@ export function Chat(props: { state: State; onFork?: (message: PiMessage) => voi
                 message={message}
                 onFork={onFork}
                 results={results}
-                tools={state.tools}
+                tools={tools}
               />
             );
           }
@@ -498,21 +512,21 @@ export function Chat(props: { state: State; onFork?: (message: PiMessage) => voi
           return null;
         })}
 
-        {state.messages
+        {messages
           .filter((m) => m.role === "bashExecution")
           .slice(-1)
-          .map((m, i) => (state.isStreaming ? <BashCard key={`bash-${i}`} message={m} /> : null))}
+          .map((m, i) => (isStreaming ? <BashCard key={`bash-${i}`} message={m} /> : null))}
 
         {/* 等待首字：prompt 已被接受但模型还没有任何输出（联网/排队/思考），
             给一个带秒数的占位行，否则这段时间界面完全静默 */}
-        {state.isStreaming && (!state.streaming || state.streaming.length === 0) ? (
+        {isStreaming && (!streaming || streaming.length === 0) ? (
           <WaitingRow />
         ) : null}
 
-        {state.streaming ? (
+        {streaming ? (
           <AssistantMessage
-            blocks={state.streaming}
-            tools={state.tools}
+            blocks={streaming}
+            tools={tools}
             results={results}
             streaming
           />
@@ -520,5 +534,20 @@ export function Chat(props: { state: State; onFork?: (message: PiMessage) => voi
       </ConversationContent>
       <ConversationScrollButton />
     </Conversation>
+  );
+}
+
+/** 主聊天视图：完整会话状态包一层 Transcript。 */
+export function Chat(props: { state: State; onFork?: (message: PiMessage) => void }) {
+  const { state, onFork } = props;
+  return (
+    <Transcript
+      cwd={state.cwd}
+      isStreaming={state.isStreaming}
+      messages={state.messages}
+      onFork={onFork}
+      streaming={state.streaming}
+      tools={state.tools}
+    />
   );
 }

@@ -74,6 +74,13 @@ safeHandle("schedules:save", (_e, payload) => {
 });
 safeHandle("schedules:delete", (_e, id) => scheduler.remove(requireString(id, "id")));
 
+// 并行会话 v2：追问 / 中断（进程保活）
+safeHandle("board:message", async (_e, payload) => {
+  const { id, message } = requireObject(payload, "payload");
+  return agentBoard.message(requireString(id, "id"), requireString(message, "message"));
+});
+safeHandle("board:abort", (_e, id) => agentBoard.abort(requireString(id, "id")));
+
 const pi = new PiProcess({
   onRecord(rec) {
     if (rec.type === "extension_ui_request") {

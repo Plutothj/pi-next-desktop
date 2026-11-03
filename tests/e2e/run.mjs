@@ -243,6 +243,17 @@ async function main() {
       "board list",
     );
     if (listed !== "yes") throw new Error("list 缺少该任务");
+
+    // v2：面板可进入该会话的实时对话视图（Transcript 渲染）
+    await evaluate(`[...document.querySelectorAll('header button[title]')].find(b => b.title === '并行任务').click()`);
+    await waitForExpr(`document.body.textContent.includes('e2e 并行')`, 10_000, "board card");
+    await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent.includes('e2e 并行')).click()`);
+    await waitForExpr(
+      `Boolean(document.querySelector('textarea[placeholder]')) && document.body.textContent.includes('列表')`,
+      10_000,
+      "agent chat view",
+    );
+
     const stopped = await evaluate(
       `window.pi.board.stop(${JSON.stringify(v.id)}).then(r => JSON.stringify(r))`,
     );
