@@ -9,35 +9,41 @@ import { logLine } from "./logs.js";
 export function registerProjectHandlers({ userDataDir, scanSessions }) {
   const projectsFile = path.join(userDataDir, "projects.json");
 
-  const readProjects = () => {
+  const readStore = () => {
     try {
       const raw = JSON.parse(fs.readFileSync(projectsFile, "utf8"));
-      return Array.isArray(raw?.projects)
-        ? raw.projects.filter((p) => typeof p === "string")
-        : [];
+      return {
+        projects: Array.isArray(raw?.projects) ? raw.projects.filter((p) => typeof p === "string") : [],
+        removed: Array.isArray(raw?.removed) ? raw.removed.filter((p) => typeof p === "string") : [],
+      };
     } catch {
-      return [];
+      return { projects: [], removed: [] };
     }
   };
 
-  const writeProjects = (projects) => {
+  const writeStore = (store) => {
     try {
       fs.mkdirSync(path.dirname(projectsFile), { recursive: true });
-      fs.writeFileSync(projectsFile, JSON.stringify({ projects }, null, 2));
+      fs.writeFileSync(projectsFile, JSON.stringify(store, null, 2));
     } catch (err) {
       logLine("projects", err);
     }
   };
 
+  const readProjects = () => readStore().projects;
+
   safeHandle("projects:list", () => {
+    const store = readStore();
+    const removed = new Set(store.removed);
     const byPath = new Map();
     for (const session of scanSessions()) {
+      if (removed.has(session.cwd)) continue; // 用户已移除：不再作为隐式项目出现
       const entry = byPath.get(session.cwd) ?? { path: session.cwd, sessions: 0, mtime: 0, stored: false };
       entry.sessions += 1;
       entry.mtime = Math.max(entry.mtime, session.mtime);
       byPath.set(session.cwd, entry);
     }
-    for (const projectPath of readProjects()) {
+    for (const projectPath of store.projects) {
       const entry = byPath.get(projectPath) ?? { path: projectPath, sessions: 0, mtime: 0, stored: false };
       entry.stored = true;
       byPath.set(projectPath, entry);
@@ -56,8 +62,12 @@ export function registerProjectHandlers({ userDataDir, scanSessions }) {
       if (typeof dir !== "string" || !fs.statSync(dir).isDirectory()) {
         return { ok: false, error: "目录不存在" };
       }
-      const stored = readProjects();
-      if (!stored.includes(dir)) writeProjects([dir, ...stored].slice(0, 50));
+      const store = readStore();
+      if (!store.projects.includes(dir)) store.projects.unshift(dir);
+      // 重新添加：从 removed 里清除
+      store.removed = store.removed.filter((p) => p !== dir);
+      store.projects = store.projects.slice(0, 50);
+      writeStore(store);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -65,7 +75,11 @@ export function registerProjectHandlers({ userDataDir, scanSessions }) {
   });
 
   safeHandle("projects:remove", (_e, dir) => {
-    writeProjects(readProjects().filter((p) => p !== dir));
+    const store = readStore();
+    store.projects = store.projects.filter((p) => p !== dir);
+    // 记入 removed：有会话的目录不再作为隐式项目冒出来
+    if (!store.removed.includes(dir)) store.removed.push(dir);
+    writeStore(store);
     return { ok: true };
   });
 }
