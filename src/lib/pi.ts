@@ -433,6 +433,9 @@ export type PiBridge = {
     status: (cwd: string) => Promise<GitStatus>;
     branches: (cwd: string) => Promise<{ branches: string[]; error?: string }>;
     checkout: (cwd: string, branch: string) => Promise<{ ok: boolean; error?: string }>;
+    diff: (cwd: string, file: string) => Promise<{ ok: boolean; patch: string; additions: number; deletions: number; error?: string }>;
+    revertFile: (cwd: string, file: string) => Promise<{ ok: boolean; error?: string }>;
+    revertAll: (cwd: string) => Promise<{ ok: boolean; error?: string }>;
   };
   term: {
     run: (cmd: string, cwd: string, label?: string, host?: string) => Promise<{ id: string; cwd: string }>;

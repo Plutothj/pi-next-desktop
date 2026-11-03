@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { CodeBlock, CodeBlockCopyButton } from "@/components/ai-elements/code-block";
 import { baseName, cn } from "@/lib/utils";
 import type { GitStatus, TreeEntry } from "@/lib/pi";
+import { ChangesPanel } from "@/components/changes-panel";
 
 const LANGS: Record<string, string> = {
   ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx", json: "json",
@@ -90,6 +91,7 @@ function StatusDot({ status }: { status: ChangeStatus | null }) {
 }
 
 export function FilesPanel({ cwd, changes }: { cwd: string; changes?: GitStatus["changes"] }) {
+  const [tab, setTab] = useState<"changes" | "tree">("changes");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [children, setChildren] = useState<Record<string, TreeEntry[]>>({});
   const [_loading, setLoading] = useState<Set<string>>(new Set());
@@ -259,6 +261,37 @@ export function FilesPanel({ cwd, changes }: { cwd: string; changes?: GitStatus[
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 gap-0.5 px-2 pb-1">
+        <button
+          className={cn(
+            "flex-1 rounded-md px-2 py-1 text-[11px] transition-colors",
+            tab === "changes"
+              ? "bg-accent font-medium text-foreground"
+              : "text-muted-foreground hover:bg-accent/40",
+          )}
+          onClick={() => setTab("changes")}
+          type="button"
+        >
+          改动{changes?.length ? ` (${changes.length})` : ""}
+        </button>
+        <button
+          className={cn(
+            "flex-1 rounded-md px-2 py-1 text-[11px] transition-colors",
+            tab === "tree"
+              ? "bg-accent font-medium text-foreground"
+              : "text-muted-foreground hover:bg-accent/40",
+          )}
+          onClick={() => setTab("tree")}
+          type="button"
+        >
+          文件树
+        </button>
+      </div>
+      {tab === "changes" ? (
+        <ChangesPanel changes={changes} cwd={cwd} onReverted={refresh} />
+      ) : null}
+      {tab === "tree" ? (
+      <div className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 p-2 pb-1">
         <div className="flex h-8 items-center gap-1.5 rounded-md border bg-muted/30 px-2">
           <SearchIcon className="size-3.5 shrink-0 text-muted-foreground" />
@@ -322,6 +355,8 @@ export function FilesPanel({ cwd, changes }: { cwd: string; changes?: GitStatus[
           renderRows("", 0)
         )}
       </div>
+      </div>
+      ) : null}
     </div>
   );
 }

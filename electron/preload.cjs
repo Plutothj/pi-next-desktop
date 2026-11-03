@@ -88,6 +88,9 @@ contextBridge.exposeInMainWorld("pi", {
     status: (cwd) => ipcRenderer.invoke("git:status", { cwd }),
     branches: (cwd) => ipcRenderer.invoke("git:branches", { cwd }),
     checkout: (cwd, branch) => ipcRenderer.invoke("git:checkout", { cwd, branch }),
+    diff: (cwd, file) => ipcRenderer.invoke("git:diff", { cwd, file }),
+    revertFile: (cwd, file) => ipcRenderer.invoke("git:revertFile", { cwd, file }),
+    revertAll: (cwd) => ipcRenderer.invoke("git:revertAll", { cwd }),
   },
   term: {
     run: (cmd, cwd, label, host) => ipcRenderer.invoke("term:run", { cmd, cwd, label, host }),
