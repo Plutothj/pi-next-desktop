@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { Section } from "@/components/settings/shared";
 import { ModelRow } from "@/components/settings/shared";
+import { AppearancePanel } from "@/components/settings/appearance";
 import { ProvidersPanel } from "@/components/settings/providers";
 import { PackagesPanel } from "@/components/settings/packages";
 import { SkillsPanel } from "@/components/settings/skills";
@@ -595,7 +596,12 @@ export function SettingsDialog({
               ) : null}
               {tab === "skills" ? <SkillsPanel cfg={cfg} cwd={cwd} onApply={apply} /> : null}
               {tab === "general" ? <SettingsForm cfg={cfg} sections={GROUPS.general} /> : null}
-              {tab === "appearance" ? <SettingsForm cfg={cfg} sections={GROUPS.appearance} /> : null}
+              {tab === "appearance" ? (
+                <div className="space-y-8">
+                  <AppearancePanel />
+                  <SettingsForm cfg={cfg} sections={GROUPS.appearance} />
+                </div>
+              ) : null}
               {tab === "tools" ? <SettingsForm cfg={cfg} sections={GROUPS.tools} /> : null}
               {tab === "shell" ? <SettingsForm cfg={cfg} sections={GROUPS.shell} /> : null}
               {tab === "extensions" ? <ExtensionsPanel cfg={cfg} onApply={apply} /> : null}
