@@ -9,13 +9,15 @@ import os from "node:os";
 import path from "node:path";
 import { logLine } from "./logs.js";
 
-export function termPaths(userDataDir) {
+export function termPaths(userDataDir, sockOverride) {
   // Node speaks named pipes with the same net API on Windows, and AF_UNIX is
   // not uniformly available there, so pick the platform-native endpoint.
+  // sockOverride：测试用，避免和正在运行的正式实例抢管道。
   const sock =
-    process.platform === "win32"
+    sockOverride ||
+    (process.platform === "win32"
       ? `\\\\.\\pipe\\pi-desktop-term-${os.userInfo().username.replace(/[^A-Za-z0-9_-]/g, "")}`
-      : path.join(userDataDir, "term.sock");
+      : path.join(userDataDir, "term.sock"));
   const binDir = path.join(userDataDir, "bin");
   return { sock, binDir, binPath: path.join(binDir, "pi-bg") };
 }
@@ -58,7 +60,7 @@ async function main() {
   } else {
     const command = words.join(" ");
     if (!command) { console.error(usage); process.exit(2); }
-    payload = { op: "run", command, cwd: flags.cwd, label: flags.label, host: flags.host };
+    payload = { op: "run", command, cwd: flags.cwd || process.cwd(), label: flags.label, host: flags.host };
   }
 
   const res = await new Promise((resolve, reject) => {
@@ -106,8 +108,8 @@ export function installTermCli(userDataDir) {
 const MAX_OUTPUT = 200_000;
 const publicTask = ({ kill, output, ...rest }) => ({ ...rest, outputTail: output.slice(-500) });
 
-export function createTaskManager({ userDataDir, send }) {
-  const paths = termPaths(userDataDir);
+export function createTaskManager({ userDataDir, send, sock }) {
+  const paths = termPaths(userDataDir, sock);
   const tasks = new Map();
   let taskId = 1;
 

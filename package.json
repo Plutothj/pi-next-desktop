@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "node --test \"tests/**/*.test.mjs\"",
+    "test": "node --test --test-force-exit tests/",
     "stage": "node scripts/stage-runtime.mjs",
     "start": "npm run build && electron .",
     "electron": "electron .",
