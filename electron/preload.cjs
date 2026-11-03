@@ -1,7 +1,8 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("pi", {
-  start: (cwd) => ipcRenderer.invoke("pi:start", { cwd }),
+  start: (cwd, sessionFile) => ipcRenderer.invoke("pi:start", { cwd, sessionFile }),
+  switchSession: (sessionFile, cwd) => ipcRenderer.invoke("pi:switchSession", { sessionFile, cwd }),
   send: (payload) => ipcRenderer.invoke("pi:send", payload),
   pickFolder: () => ipcRenderer.invoke("pi:pickFolder"),
   sessions: () => ipcRenderer.invoke("pi:sessions"),

@@ -335,6 +335,10 @@ export type AgentProfile = {
 };
 
 export type PiBridge = {
+  switchSession: (
+    sessionFile: string,
+    cwd?: string,
+  ) => Promise<{ ok: boolean; running?: boolean; error?: string }>;
   start: (cwd?: string) => Promise<{
     state: Record<string, unknown> | null;
     models: ModelInfo[];

@@ -8,6 +8,7 @@ import { createAgentBoard } from "./agents.js";
 import { installAutoRouter } from "./auto-router.js";
 import { installTodoExtension } from "./todo-extension.js";
 import { installBundledExtensions } from "./bundled-extensions.js";
+import { createSessionPool } from "./session-pool.js";
 import { createScheduler } from "./schedules.js";
 import { requireObject, requireString, optionalString } from "./ipc-helpers.js";
 import fs from "node:fs";
@@ -83,23 +84,44 @@ safeHandle("board:message", async (_e, payload) => {
 });
 safeHandle("board:abort", (_e, id) => agentBoard.abort(requireString(id, "id")));
 
-const pi = new PiProcess({
-  onRecord(rec) {
+// 多会话池：每个会话一个 pi 进程。主聊天界面显示 activeSession，
+// 切会话只切这个指针，后台会话继续跑（不再被 switch_session 打断）。
+let activeSession = null;
+
+const pool = createSessionPool({
+  send(rec) {
     if (rec.type === "extension_ui_request") {
       handleExtensionUi(rec);
       return;
     }
+    if (rec.type === "pi_stderr") {
+      process.stderr.write(rec.text);
+      recordLine("pi-stderr", rec.text.trimEnd().slice(0, 500));
+      return;
+    }
     send(rec);
   },
-  onExit({ code, signal }) {
-    pendingDialogs.clear();
-    send({ type: "ui_dialog_clear" });
-    send({ type: "child_exit", code, signal });
+  makeEnv: (rt) => piEnv(rt),
+  buildArgs: async (sessionFile) => {
+    const runtime = resolveRuntime();
+    const probe = await probeCli(runtime);
+    const isolationPreload = path.join(app.getPath("userData"), "pi-isolation-preload.cjs");
+    try {
+      fs.copyFileSync(path.join(import.meta.dirname, "pi-isolation-preload.cjs"), isolationPreload);
+    } catch (err) {
+      logLine("pi", "isolation preload 复制失败（跳过）:", err);
+    }
+    const argv = [
+      ...(fs.existsSync(isolationPreload) ? ["--require", isolationPreload] : []),
+      runtime.cli,
+      "--mode",
+      "rpc",
+    ];
+    if (probe.appendPrompt) argv.push("--append-system-prompt", PI_BG_INSTRUCTIONS);
+    if (sessionFile && fs.existsSync(sessionFile)) argv.push("--session", sessionFile);
+    return { runtime, argv };
   },
-  onStderr(data) {
-    process.stderr.write(data);
-    recordLine("pi-stderr", data.trimEnd().slice(0, 500));
-  },
+  activeKey: () => activeSession,
 });
 
 // ---------------------------------------------------------------- pi lifecycle
@@ -121,47 +143,20 @@ function piEnv(rt) {
 // instead of interleaving two poll loops.
 let bootLock = Promise.resolve();
 
-async function startPi(cwd) {
-  pi.stop();
+async function startPi(cwd, sessionFile = null) {
+  // 切到目标会话（null = 新会话，由 pi 分配文件）；其余会话进程保持运行。
+  // 注意：activeSession 先保持旧值，等新进程起来再切换，避免 ensure 期间
+  // 事件被路由到错误会话。
   pendingDialogs.clear();
   send({ type: "ui_dialog_clear" });
 
-  const rt = resolveRuntime();
-  const probe = await probeCli(rt);
-  // 隔离 preload：第三方扩展硬编码 ~/.pi/agent 的读写重定向到隔离目录。
-  // 打包版 pi 用普通 node 跑 extraResources，读不了 asar，所以先复制到 userData。
-  const isolationPreload = path.join(app.getPath("userData"), "pi-isolation-preload.cjs");
-  try {
-    fs.copyFileSync(path.join(import.meta.dirname, "pi-isolation-preload.cjs"), isolationPreload);
-  } catch (err) {
-    logLine("pi", "isolation preload 复制失败（跳过）:", err);
-  }
-  // --require 须在脚本路径之前，node 会先加载它再启动 cli.js
-  const argv = [
-    ...(fs.existsSync(isolationPreload) ? ["--require", isolationPreload] : []),
-    rt.cli,
-    "--mode",
-    "rpc",
-  ];
-  // Unknown flags make pi exit on startup; probe the CLI before adding one.
-  if (probe.appendPrompt) {
-    argv.push("--append-system-prompt", PI_BG_INSTRUCTIONS);
-  } else {
-    send({
-      type: "ui_notify",
-      message: "当前 pi 版本不支持 --append-system-prompt，pi-bg 长任务指引未注入（pi-bg 仍可用）",
-      notifyType: "warning",
-    });
-  }
+  await pool.ensure(sessionFile, cwd, { active: true });
+  activeSession = sessionFile;
+  pool.activate(sessionFile);
 
-  pi.start({
-    node: rt.node,
-    argv,
-    cwd,
-    env: piEnv(rt),
-  });
+  const rt = resolveRuntime();
   const version = (await cliVersion(rt)) ?? runtimeVersion(rt);
-  logLine("pi", `started ${rt.cli} (v${version}) in ${cwd}`);
+  logLine("pi", `session ready: ${sessionFile ?? "(new)"} in ${cwd} (pi v${version})`);
   return { rt, version };
 }
 
@@ -177,7 +172,7 @@ function stripAnsi(text) {
 // Dialog requests block pi until answered, so every one of them gets a reply.
 function handleExtensionUi(req) {
   const reply = (values) => {
-    pi.write({ type: "extension_ui_response", id: req.id, ...values });
+    pool.write(activeSession, { type: "extension_ui_response", id: req.id, ...values });
   };
 
   if (req.method === "confirm") {
@@ -460,7 +455,7 @@ const writeLastWorkspace = (cwd) => {
   } catch {}
 };
 
-safeHandle("pi:start", async (_e, { cwd } = {}) => {
+safeHandle("pi:start", async (_e, { cwd, sessionFile = null } = {}) => {
   const saved = readLastWorkspace();
   const resolved =
     cwd && fs.existsSync(cwd)
@@ -469,25 +464,34 @@ safeHandle("pi:start", async (_e, { cwd } = {}) => {
         ? saved
         : os.homedir();
   const run = async () => {
-    await startPi(resolved);
+    await startPi(resolved, sessionFile);
     writeLastWorkspace(resolved);
     // Cold start: get_state can answer before the session/model exist, so poll.
     let state = null;
     for (let i = 0; i < 40; i++) {
       await new Promise((r) => setTimeout(r, 400));
-      state = await pi.command({ type: "get_state" }).catch((e) => ({ error: String(e) }));
+      state = await pool.command(activeSession, { type: "get_state" }).catch((e) => ({ error: String(e) }));
       if (process.env.PI_DEBUG) recordLine("boot-poll", i, JSON.stringify(state).slice(0, 200));
       if (state?.data?.model) break;
     }
     const [models, messages] = await Promise.all([
-      pi.command({ type: "get_available_models" }).catch(() => null),
-      pi.command({ type: "get_messages" }).catch(() => null),
+      pool.command(activeSession, { type: "get_available_models" }).catch(() => null),
+      pool.command(activeSession, { type: "get_messages" }).catch(() => null),
     ]);
+    // 会话文件由 pi 分配（新会话第一次落盘后才拿到）；回传给渲染层做键。
+    // 池里的槽也要跟着改键，否则后续 command 会落在不存在的 null 键上。
+    const assigned =
+      state?.data?.sessionFile ?? (sessionFile && fs.existsSync(sessionFile) ? sessionFile : null);
+    if (assigned) {
+      if (!sessionFile) pool.rebind(null, assigned);
+      activeSession = assigned;
+    }
     return {
       state: state?.data ?? null,
       models: models?.data?.models ?? [],
       messages: messages?.data?.messages ?? [],
       cwd: resolved,
+      sessionFile: assigned,
     };
   };
   // Serialise overlapping boots; the caller always gets the latest result.
@@ -499,8 +503,21 @@ safeHandle("pi:start", async (_e, { cwd } = {}) => {
   return result;
 });
 
+// 切换界面显示的会话：只切活动指针（后台会话进程继续跑，不中断）。
+safeHandle("pi:switchSession", async (_e, { sessionFile, cwd } = {}) => {
+  if (typeof sessionFile !== "string" || !sessionFile) return { ok: false, error: "缺少会话路径" };
+  activeSession = sessionFile;
+  pool.activate(sessionFile);
+  const running = pool.isRunning(sessionFile);
+  if (!running) {
+    // 进程已被回收：按 --session 重新拉起（历史完整恢复）
+    await startPi(cwd && fs.existsSync(cwd) ? cwd : os.homedir(), sessionFile);
+  }
+  return { ok: true, running: pool.isRunning(sessionFile) };
+});
+
 safeHandle("pi:send", async (_e, payload) => {
-  const res = await pi.command(payload);
+  const res = await pool.command(activeSession, payload);
   return res.data ?? null;
 });
 
@@ -536,7 +553,7 @@ safeHandle("pi:uiRespond", (_e, { id, value, cancelled, confirmed } = {}) => {
   if (cancelled) payload.cancelled = true;
   else if (confirmed !== undefined) payload.confirmed = Boolean(confirmed);
   else payload.value = typeof value === "string" ? value : "";
-  pi.write(payload);
+  pool.write(activeSession, payload);
   return { ok: true };
 });
 
@@ -559,6 +576,17 @@ if (process.env.PI_DEBUG) {
 
 // ---------------------------------------------------------------- modules
 
+// 兼容层：session/project 等模块以「单个 pi」的形态调用（command/write/running），
+// 这里把它们代理到当前活动会话的进程上。
+const pi = {
+  command: (payload, timeoutMs) => pool.command(activeSession, payload),
+  write: (payload) => pool.write(activeSession, payload),
+  get running() {
+    return pool.isRunning(activeSession);
+  },
+  stop: () => pool.stop(activeSession),
+};
+
 registerSessionHandlers({ pi, dialog, shell });
 registerProjectHandlers({ userDataDir: APP_HOME, scanSessions });
 registerGitHandlers();
@@ -573,7 +601,7 @@ registerDiagHandlers({
     const probe = await probeCli(rt);
     let session = "unavailable";
     try {
-      const state = await pi.command({ type: "get_state" });
+      const state = await pool.command(activeSession, { type: "get_state" });
       session = {
         sessionFile: state?.data?.sessionFile,
         model: state?.data?.model?.id,
@@ -590,7 +618,7 @@ registerDiagHandlers({
         managed: Boolean(rt.installRoot),
         flags: probe,
       },
-      piRunning: pi.running,
+      piRunning: pool.count() > 0,
       session,
       tasks: taskManager.snapshot(),
     };
@@ -652,6 +680,8 @@ app.whenReady().then(() => {
   installAutoRouter(AGENT_DIR);
   installTodoExtension(AGENT_DIR);
   scheduler.start();
+  // 空闲会话回收：非活动且静默 10 分钟的 pi 进程停掉（切回时按 --session 重启）
+  setInterval(() => pool.sweep(), 60_000).unref();
   // 内置扩展：首次启动（或应用升级后）离线装进 agent 目录，失败不阻塞启动
   void installBundledExtensions({
     resourcesPath: process.resourcesPath,
@@ -668,13 +698,13 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
-  pi.stop();
+  pool.stopAll();
   if (process.platform !== "darwin") app.quit();
 });
 
 app.on("before-quit", () => {
   quitting = true;
-  pi.stop();
+  pool.stopAll();
   taskManager.stopBridge();
   agentBoard.stopAll();
   scheduler.stop();

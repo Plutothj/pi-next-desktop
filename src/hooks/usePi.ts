@@ -487,8 +487,11 @@ export function usePi() {
   const openSession = useCallback(
     async (file: string, cwd?: string) => {
       const seq = ++openSeq.current;
-      const switched = await send({ type: "switch_session", sessionPath: file });
-      if (!switched || seq !== openSeq.current) return;
+      // 切换 = 换界面显示的活动会话；后台会话的 pi 进程继续跑，不中断。
+      const switched = await window.pi
+        .switchSession(file, cwd)
+        .catch(() => ({ ok: false }));
+      if (!switched?.ok || seq !== openSeq.current) return;
       const [st, msgs] = await Promise.all([
         send({ type: "get_state" }),
         send({ type: "get_messages" }),

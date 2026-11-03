@@ -398,6 +398,40 @@ async function main() {
     await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent.trim() === '取消')?.click()`);
   });
 
+  // 16. 多会话：开会话 A → 发消息（回合进行中）→ 切到 B → A 的后台进程仍在
+  await check("多会话并行", async () => {
+    // A 发一条（fixture 供应商不可达，回合会失败，但进程处于忙碌状态）
+    await evaluate(`window.pi.send({ type: "prompt", message: "A 的任务" }).catch(() => null)`);
+    await sleep(1200);
+    const aFile = await evaluate(`window.__pi?.sessionFile`);
+    if (!aFile) throw new Error("A 会话未落盘");
+
+    // 造 B 会话文件
+    const sessionsRoot = path.join(agentDir, "sessions");
+    const walk = (d) =>
+      fs.readdirSync(d, { withFileTypes: true }).flatMap((e) =>
+        e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)],
+      );
+    const files = walk(sessionsRoot).filter((f) => f.endsWith(".jsonl"));
+    if (!files.length) throw new Error("磁盘上没有会话文件");
+    const bFile = path.join(path.dirname(files[0]), "e2e-second.jsonl");
+    fs.copyFileSync(files[0], bFile);
+
+    // 切到 B
+    await evaluate(`window.__piOpenSession(${JSON.stringify(bFile)}, ${JSON.stringify(agentDir)})`);
+    await waitForExpr(
+      `window.__pi?.sessionFile?.includes("e2e-second")`,
+      15_000,
+      "switched to B",
+    );
+
+    // 关键：A 的进程仍在（切走不杀进程）——用主进程状态断言
+    const stillRunning = await evaluate(
+      `window.pi.switchSession(${JSON.stringify(aFile)}, ${JSON.stringify(agentDir)}).then(r => JSON.stringify(r))`,
+    );
+    if (!JSON.parse(stillRunning).running) throw new Error(`切回 A 时进程不在: ${stillRunning}`);
+  });
+
   ws.close();
 }
 
