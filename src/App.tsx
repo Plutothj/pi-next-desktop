@@ -341,6 +341,10 @@ function Shell() {
         onCreateProject={() => setCreateProjectOpen(true)}
         onOpenSettings={() => openSettings("general")}
         onToggleTheme={toggleTheme}
+        onRemoveProject={async (dir) => {
+          await window.pi.projects.remove(dir).catch(() => null);
+          await refreshSessions();
+        }}
         openProject={openProject}
         openSession={openSession}
         deleteSession={deleteSession}

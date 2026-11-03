@@ -10,6 +10,7 @@ import {
   Settings2Icon,
   SunIcon,
   WrenchIcon,
+  XIcon,
 } from "lucide-react";
 import logo from "@/assets/logo.png";
 import { Button } from "@/components/ui/button";
@@ -247,6 +248,7 @@ export function SessionSidebar({
   renameSession,
   update,
   onUpdateAction,
+  onRemoveProject,
 }: {
   state: State;
   theme: "dark" | "light";
@@ -262,6 +264,7 @@ export function SessionSidebar({
   renameSession: (title: string) => Promise<void>;
   update: UpdateState;
   onUpdateAction: () => void;
+  onRemoveProject: (dir: string) => Promise<void>;
 }) {
   const [view, setView] = useState<"grouped" | "workspace" | "timeline">("workspace");
   const [sort, setSort] = useState<"updated" | "created">("updated");
@@ -444,29 +447,49 @@ export function SessionSidebar({
             return (
             <div className="mb-0.5" key={label}>
               {isProject ? (
-                <button
-                  className={cn(
-                    "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-sidebar-accent",
-                    isActiveProject && "font-medium text-foreground",
-                  )}
-                  onClick={() => toggleGroup(label)}
-                  title={projectPath ?? label}
-                  type="button"
-                >
-                  <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate">{label}</span>
-                  {items.length > 0 ? (
-                    <span className="shrink-0 text-[10px] text-muted-foreground/60">
-                      {items.length}
-                    </span>
-                  ) : null}
-                  <ChevronDownIcon
+                <div className="group/project flex w-full items-center rounded-md transition-colors hover:bg-sidebar-accent">
+                  <button
                     className={cn(
-                      "size-3 shrink-0 opacity-50 transition-transform",
-                      open && "rotate-180",
+                      "flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1.5 pl-2 text-left text-xs",
+                      isActiveProject && "font-medium text-foreground",
                     )}
-                  />
-                </button>
+                    onClick={() => {
+                      // 双击项目标题 = 切换到该工作区
+                      if (projectPath && projectPath !== state.cwd) openProject(projectPath);
+                      else toggleGroup(label);
+                    }}
+                    title={projectPath ?? label}
+                    type="button"
+                  >
+                    <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate">{label}</span>
+                    {items.length > 0 ? (
+                      <span className="shrink-0 text-[10px] text-muted-foreground/60">
+                        {items.length}
+                      </span>
+                    ) : null}
+                    <ChevronDownIcon
+                      className={cn(
+                        "size-3 shrink-0 opacity-50 transition-transform",
+                        open && "rotate-180",
+                      )}
+                    />
+                  </button>
+                  <button
+                    className="mr-1 shrink-0 rounded p-0.5 text-muted-foreground/0 transition-colors group-hover/project:text-muted-foreground hover:text-destructive"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (!projectPath) return;
+                      if (!confirm(`从项目列表移除「${label}」？\n（会话文件不会被删除）`)) return;
+                      await window.pi.projects.remove(projectPath).catch(() => null);
+                      await onRemoveProject(projectPath);
+                    }}
+                    title="从列表移除（不删会话）"
+                    type="button"
+                  >
+                    <XIcon className="size-3" />
+                  </button>
+                </div>
               ) : (
                 <p className="px-2 pt-2 pb-1 text-[10px] font-medium text-muted-foreground">
                   {label}
