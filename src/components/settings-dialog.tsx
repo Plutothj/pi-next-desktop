@@ -11,6 +11,7 @@ import {
   PuzzleIcon,
   WrenchIcon,
   FolderIcon,
+  InfoIcon,
   PaletteIcon,
   PlugIcon,
   SettingsIcon,
@@ -19,6 +20,7 @@ import {
 } from "lucide-react";
 import { Section } from "@/components/settings/shared";
 import { ModelRow } from "@/components/settings/shared";
+import { AboutPanel } from "@/components/settings/about";
 import { AppearancePanel } from "@/components/settings/appearance";
 import { ProvidersPanel } from "@/components/settings/providers";
 import { PackagesPanel } from "@/components/settings/packages";
@@ -56,7 +58,8 @@ export type SettingsTab =
   | "tools"
   | "shell"
   | "extensions"
-  | "projects";
+  | "projects"
+  | "about";
 
 // Nav mirrors ZCode's Settings: top-level items, then Agent 能力, then 数据与统计.
 const NAV: { group?: string; items: { id: SettingsTab; label: string; icon: typeof BoxesIcon }[] }[] = [
@@ -92,6 +95,7 @@ const NAV: { group?: string; items: { id: SettingsTab; label: string; icon: type
     items: [
       { id: "stats", label: "使用统计", icon: BarChartIcon },
       { id: "projects", label: "项目", icon: FolderIcon },
+      { id: "about", label: "版本", icon: InfoIcon },
     ],
   },
 ];
@@ -622,6 +626,7 @@ export function SettingsDialog({
               ) : null}
               {tab === "stats" ? <UsagePanel /> : null}
               {tab === "projects" ? <ProjectsPanel cwd={cwd} /> : null}
+              {tab === "about" ? <AboutPanel /> : null}
             </div>
           </div>
         )}
