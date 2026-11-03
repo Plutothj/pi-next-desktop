@@ -64,9 +64,13 @@ export default function (pi: ExtensionAPI) {
     name: "todo",
     label: "Todo",
     description: "Manage the session todo list (survives fork/branch). Actions: list, add(text), toggle(id), remove(id), clear",
+    promptSnippet: "Track a multi-step task with an explicit checklist (add items, toggle them done)",
+    // promptGuidelines 会平铺进系统提示的 <rules> 段，每条必须点名工具
+    // （不能写 "this tool"），否则模型不知道指哪个工具。
     promptGuidelines: [
-      "Use the todo tool to plan multi-step work: add items first, then toggle them as you finish each step.",
-      "Keep the list short and concrete; clear it when the task is done.",
+      "Use the todo tool for any task that needs three or more distinct steps: add the steps first, then toggle each one done as you finish it.",
+      "The todo tool's list lives in the conversation, so it survives forking and switching branches; re-read it with action=list when unsure what remains.",
+      "Keep the todo tool list short and concrete (one line per step), and clear it with action=clear once the whole task is finished.",
     ],
     parameters: Params,
 
