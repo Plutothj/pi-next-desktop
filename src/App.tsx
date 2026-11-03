@@ -42,7 +42,7 @@ import { SettingsDialog, type SettingsTab } from "@/components/settings-dialog";
 import { UpdateDialog } from "@/components/update-dialog";
 import { expandAttachments } from "@/lib/attachments";
 import { useNotifications } from "@/hooks/notifications";
-import { PLAN_PREFIX } from "@/lib/promptPrefixes";
+import { PLAN_PREFIX, stripDirective } from "@/lib/promptPrefixes";
 import { TerminalPanel } from "@/components/terminal-panel";
 import { FilesPanel } from "@/components/files-panel";
 import { AgentsPanel } from "@/components/agents-panel";
@@ -60,7 +60,7 @@ import { useDualModelChain } from "@/hooks/useDualModelChain";
 import { useUpdater } from "@/hooks/useUpdater";
 import { useTheme } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
-import { lastAssistantTextOf, type PiMessage } from "@/lib/pi";
+import { lastAssistantTextOf, textOf, type PiMessage } from "@/lib/pi";
 
 const THINKING = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
@@ -134,6 +134,25 @@ function Shell() {
     if (status === "idle" || status === "up-to-date") updater.check();
     // available/downloading/ready/error/dev：弹窗按当前状态渲染，无需重复动作
   };
+
+  // 会话标题：pi 只在手动重命名后才有 sessionName，否则顶栏永远是"未命名
+  // 会话"。首条用户消息出现时派生标题并走 set_session_name 持久化（与侧栏
+  // 扫描的兜底规则一致：首条用户消息）。
+  const autoTitled = useRef<string | null>(null);
+  const firstUser = state.messages.find((m) => m.role === "user");
+  const derivedTitle = (() => {
+    if (!firstUser) return null;
+    const clean = stripDirective(textOf(firstUser.content)).text.replace(/\s+/g, " ").trim();
+    if (!clean) return null;
+    return clean.length > 40 ? `${clean.slice(0, 40)}…` : clean;
+  })();
+  useEffect(() => {
+    if (state.sessionName || !state.sessionFile || !derivedTitle) return;
+    if (autoTitled.current === state.sessionFile) return;
+    autoTitled.current = state.sessionFile;
+    void renameSession(derivedTitle);
+  });
+  const headerTitle = state.sessionName ?? derivedTitle ?? "未命名会话";
 
   // 计划模式：回合结束后把最终方案落盘为 .pi/plans/plan-*.md（ZCode 同款），
   // 文档是持久产物，会话里的那轮回复只是展示。
@@ -299,8 +318,8 @@ function Shell() {
             void window.pi.win.toggleMaximize();
           }}
         >
-          <span className="max-w-56 truncate text-xs text-muted-foreground">
-            {state.sessionName ?? "未命名会话"}
+          <span className="max-w-56 truncate text-xs text-muted-foreground" title={headerTitle}>
+            {headerTitle}
           </span>
           {planMode ? (
             <Badge className="text-[10px]" variant="secondary">
