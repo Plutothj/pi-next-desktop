@@ -22,7 +22,7 @@ import {
 import type { SessionInfo } from "@/lib/pi";
 import { baseName } from "@/lib/utils";
 
-export type PanelTab = "files" | "terminal" | "agents" | "browser" | "board" | "tree";
+export type PanelTab = "files" | "terminal" | "agents" | "browser" | "board" | "tree" | "plan";
 
 /** ⌘K palette, modelled on ZCode's command center. */
 export function CommandPalette({

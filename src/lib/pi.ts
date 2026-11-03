@@ -381,6 +381,9 @@ export type PiBridge = {
   diagExport: () => Promise<{ ok: boolean; path?: string; error?: string }>;
   plans: {
     save: (cwd: string, content: string) => Promise<{ ok: boolean; path?: string; error?: string }>;
+    list: (cwd: string) => Promise<{ path: string; name: string; mtime: number; size: number }[]>;
+    read: (cwd: string, file: string) => Promise<{ ok: boolean; content?: string; error?: string }>;
+    delete: (cwd: string, file: string) => Promise<{ ok: boolean; error?: string }>;
   };
   stats: {
     usage: (days?: "all" | 7 | 30) => Promise<UsageReport>;

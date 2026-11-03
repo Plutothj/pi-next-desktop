@@ -130,6 +130,52 @@ export function registerWorkspaceHandlers() {
     return { ok: true, path: file };
   });
 
+  // 计划工作台：列出/读取/删除 <项目>/.pi/plans/*.md
+  const plansDir = (cwd) => path.join(resolveRoot(cwd), ".pi", "plans");
+  const planGuard = (file, cwd) => {
+    const resolved = path.resolve(file);
+    const root = path.resolve(plansDir(cwd)) + path.sep;
+    if (!resolved.startsWith(root)) throw new Error("路径不在 plans 目录内");
+    return resolved;
+  };
+
+  safeHandle("plans:list", (_e, { cwd } = {}) => {
+    try {
+      const dir = plansDir(cwd);
+      return fs
+        .readdirSync(dir)
+        .filter((f) => f.endsWith(".md"))
+        .map((f) => {
+          const full = path.join(dir, f);
+          const stat = fs.statSync(full);
+          return { path: full, name: f.replace(/\.md$/, ""), mtime: stat.mtimeMs, size: stat.size };
+        })
+        .sort((a, b) => b.mtime - a.mtime);
+    } catch {
+      return [];
+    }
+  });
+
+  safeHandle("plans:read", (_e, { cwd, file } = {}) => {
+    try {
+      const full = planGuard(file, cwd);
+      const stat = fs.statSync(full);
+      if (stat.size > 1_000_000) return { ok: false, error: "文件过大" };
+      return { ok: true, content: fs.readFileSync(full, "utf8") };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  safeHandle("plans:delete", (_e, { cwd, file } = {}) => {
+    try {
+      fs.rmSync(planGuard(file, cwd), { force: true });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
   safeHandle("ssh:hosts", () => {
     const file = path.join(os.homedir(), ".ssh", "config");
     let raw = "";

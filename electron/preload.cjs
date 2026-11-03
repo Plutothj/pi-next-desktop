@@ -14,6 +14,9 @@ contextBridge.exposeInMainWorld("pi", {
   diagExport: () => ipcRenderer.invoke("diag:export"),
   plans: {
     save: (cwd, content) => ipcRenderer.invoke("plans:save", { cwd, content }),
+    list: (cwd) => ipcRenderer.invoke("plans:list", { cwd }),
+    read: (cwd, file) => ipcRenderer.invoke("plans:read", { cwd, file }),
+    delete: (cwd, file) => ipcRenderer.invoke("plans:delete", { cwd, file }),
   },
   stats: {
     usage: (days) => ipcRenderer.invoke("stats:usage", { days }),

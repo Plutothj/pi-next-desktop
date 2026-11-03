@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BotIcon,
   BrainIcon,
+  ClipboardListIcon,
   CopyIcon,
   FilesIcon,
   GlobeIcon,
@@ -49,6 +50,7 @@ import { TerminalPanel } from "@/components/terminal-panel";
 import { FilesPanel } from "@/components/files-panel";
 import { BoardPanel } from "@/components/board-panel";
 import { SessionTreePanel } from "@/components/session-tree";
+import { PlanWorkbench } from "@/components/plan-workbench";
 import { AgentsPanel } from "@/components/agents-panel";
 import { BrowserPanel } from "@/components/browser-panel";
 import { CommandPalette, type PanelTab } from "@/components/command-palette";
@@ -309,6 +311,18 @@ function Shell() {
     [fork, controller],
   );
 
+  // 计划工作台：按落盘的计划文档执行（先读文档再逐项实施）
+  const executePlan = useCallback(
+    (file: string) => {
+      void prompt(
+        `请先读取计划文档 ${file}，然后严格按计划逐项实施并验证；与计划不符处做最小必要调整并在最后说明偏差。`,
+        undefined,
+        "followUp",
+      );
+    },
+    [prompt],
+  );
+
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
       <SessionSidebar
@@ -389,6 +403,14 @@ function Shell() {
               variant="ghost"
             >
               <ListTreeIcon className="size-3.5" />
+            </Button>
+            <Button
+              className={cn("h-7 px-2 text-xs", panel === "plan" && "bg-accent")}
+              onClick={() => setPanel(panel === "plan" ? null : "plan")}
+              title="计划"
+              variant="ghost"
+            >
+              <ClipboardListIcon className="size-3.5" />
             </Button>
             <Button
               className={cn("h-7 px-2 text-xs", panel === "browser" && "bg-accent")}
@@ -585,6 +607,9 @@ function Shell() {
             {panel === "board" ? <BoardPanel cwd={state.cwd} onPromote={openSession} /> : null}
             {panel === "tree" ? (
               <SessionTreePanel onForkEntry={handleForkEntry} sessionFile={state.sessionFile} />
+            ) : null}
+            {panel === "plan" ? (
+              <PlanWorkbench cwd={state.cwd} onExecute={executePlan} />
             ) : null}
             {panel === "browser" ? <BrowserPanel cwd={state.cwd} /> : null}
           </div>
