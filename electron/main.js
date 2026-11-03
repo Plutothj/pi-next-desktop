@@ -6,6 +6,7 @@ import { app, BrowserWindow, dialog, Menu, nativeImage, Tray, shell } from "elec
 import { parseAttachment } from "./attachments.js";
 import { createAgentBoard } from "./agents.js";
 import { installAutoRouter } from "./auto-router.js";
+import { installTodoExtension } from "./todo-extension.js";
 import { createScheduler } from "./schedules.js";
 import { requireObject, requireString, optionalString } from "./ipc-helpers.js";
 import fs from "node:fs";
@@ -648,6 +649,7 @@ app.whenReady().then(() => {
   installTermCli(APP_HOME);
   // auto 虚拟模型扩展（模型选择器里的 pi-desktop/auto：low→最便宜，high→最强）
   installAutoRouter(AGENT_DIR);
+  installTodoExtension(AGENT_DIR);
   scheduler.start();
   taskManager.startBridge();
   createWindow();
