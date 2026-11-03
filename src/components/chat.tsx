@@ -95,28 +95,28 @@ function ToolRow({
   return (
     <div className="group/tool">
       <button
-        className="flex h-6 w-full items-center gap-1.5 rounded px-1 text-left text-[11px] text-muted-foreground hover:bg-muted/40"
+        className="flex h-7 w-full items-center gap-1.5 rounded px-1 text-left text-xs text-muted-foreground hover:bg-muted/40"
         onClick={() => setOpen((value) => !value)}
         type="button"
       >
-        <Icon className="size-3 shrink-0 opacity-70" />
-        <span className="shrink-0 font-medium text-foreground/75">{block.name}</span>
+        <Icon className="size-3.5 shrink-0" />
+        <span className="shrink-0 font-medium text-foreground/80">{block.name}</span>
         {preview ? (
-          <span className="min-w-0 flex-1 truncate font-mono opacity-60">{preview}</span>
+          <span className="min-w-0 flex-1 truncate font-mono">{preview}</span>
         ) : (
           <span className="flex-1" />
         )}
         {failed ? (
-          <XIcon className="size-3 shrink-0 text-rose-500" />
+          <XIcon className="size-3.5 shrink-0 text-rose-500" />
         ) : running ? (
-          <Loader2Icon className="size-3 shrink-0 animate-spin" />
+          <Loader2Icon className="size-3.5 shrink-0 animate-spin" />
         ) : (
-          <CheckIcon className="size-3 shrink-0 text-emerald-600/60" />
+          <CheckIcon className="size-3.5 shrink-0 text-emerald-600/70" />
         )}
         <ChevronDownIcon
           className={cn(
-            "size-3 shrink-0 opacity-0 transition group-hover/tool:opacity-50",
-            open && "rotate-180 opacity-50",
+            "size-3.5 shrink-0 opacity-0 transition group-hover/tool:opacity-60",
+            open && "rotate-180 opacity-60",
           )}
         />
       </button>
@@ -125,17 +125,17 @@ function ToolRow({
           {diff ? (
             <FileDiff path={diff.path} pairs={diff.pairs} created={diff.created} />
           ) : (
-            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-[10px] text-muted-foreground/80">
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">
               {JSON.stringify(args, null, 2).slice(0, 4000)}
             </pre>
           )}
           {output ? (
-            <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-all rounded bg-muted/40 p-2 font-mono text-[10px]">
+            <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-all rounded bg-muted/40 p-2 font-mono text-xs">
               {output.slice(0, 8000)}
             </pre>
           ) : null}
           {result?.details ? (
-            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-[10px] text-muted-foreground/70">
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">
               {typeof result.details === "string" ? result.details : JSON.stringify(result.details, null, 2)}
             </pre>
           ) : null}
@@ -158,16 +158,16 @@ function ThinkingRow({
   return (
     <div>
       <button
-        className="flex h-6 items-center gap-1.5 rounded px-1 text-[11px] text-muted-foreground/70 hover:bg-muted/40 hover:text-muted-foreground"
+        className="flex h-7 items-center gap-1.5 rounded px-1 text-xs text-muted-foreground hover:bg-muted/40"
         onClick={() => setOpen((value) => !value)}
         type="button"
       >
-        <BrainIcon className="size-3 shrink-0 opacity-70" />
+        <BrainIcon className="size-3.5 shrink-0" />
         <span>{streaming ? "思考中…" : "思考"}</span>
-        <ChevronDownIcon className={cn("size-3 opacity-40 transition", expanded && "rotate-180")} />
+        <ChevronDownIcon className={cn("size-3.5 transition", expanded && "rotate-180")} />
       </button>
       {expanded && block.thinking.trim() ? (
-        <div className="my-1 ml-4 max-h-40 overflow-auto whitespace-pre-wrap border-l pl-3 text-[11px] leading-5 text-muted-foreground/80">
+        <div className="my-1 ml-4 max-h-40 overflow-auto whitespace-pre-wrap border-l pl-3 text-xs leading-6 text-muted-foreground">
           {block.thinking}
         </div>
       ) : null}
@@ -240,7 +240,7 @@ const UserMessage = memo(function UserMessage({
     <Message from="user">
       <MessageContent className="rounded-2xl bg-muted px-4 py-2.5">
         {badge ? (
-          <span className="mb-1.5 inline-block rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[10px] text-primary">
+          <span className="mb-1.5 inline-block rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-xs text-primary">
             {badge}
           </span>
         ) : null}
