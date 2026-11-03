@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { mermaid } from "@streamdown/mermaid";
 import { stripDirective } from "@/lib/promptPrefixes";
 import {
@@ -140,6 +140,24 @@ function ToolRow({
             </pre>
           ) : null}
         </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** 等待首字占位：联网 / 排队 / 等待模型首个 token，秒数让"没卡死"可见。 */
+function WaitingRow() {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setElapsed((v) => v + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <div className="flex items-center gap-2 px-1 py-1.5 text-xs text-muted-foreground">
+      <Loader2Icon className="size-3.5 animate-spin" />
+      <span>正在等待模型响应…</span>
+      {elapsed >= 3 ? (
+        <span className="text-muted-foreground/60">{elapsed}s</span>
       ) : null}
     </div>
   );
@@ -483,6 +501,12 @@ export function Chat(props: { state: State; onFork?: (message: PiMessage) => voi
           .filter((m) => m.role === "bashExecution")
           .slice(-1)
           .map((m, i) => (state.isStreaming ? <BashCard key={`bash-${i}`} message={m} /> : null))}
+
+        {/* 等待首字：prompt 已被接受但模型还没有任何输出（联网/排队/思考），
+            给一个带秒数的占位行，否则这段时间界面完全静默 */}
+        {state.isStreaming && (!state.streaming || state.streaming.length === 0) ? (
+          <WaitingRow />
+        ) : null}
 
         {state.streaming ? (
           <AssistantMessage
