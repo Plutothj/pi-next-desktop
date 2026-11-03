@@ -48,6 +48,7 @@ import { useNotifications } from "@/hooks/notifications";
 import { PLAN_PREFIX, stripDirective } from "@/lib/promptPrefixes";
 import { TerminalPanel } from "@/components/terminal-panel";
 import { FilesPanel } from "@/components/files-panel";
+import { WidgetStrip } from "@/components/widget-strip";
 import { BoardPanel } from "@/components/board-panel";
 import { SessionTreePanel } from "@/components/session-tree";
 import { PlanWorkbench } from "@/components/plan-workbench";
@@ -506,6 +507,7 @@ function Shell() {
               ))}
             </div>
           ) : null}
+          <WidgetStrip placement="above" widgets={state.widgets} data-widget-strip />
           <div className="relative">
             <ExtensionDialog dialog={state.dialog} onRespond={respondDialog} />
             <Composer
@@ -549,6 +551,7 @@ function Shell() {
               </PromptInputSelect>
             </Composer>
           </div>
+          <WidgetStrip placement="below" widgets={state.widgets} />
         </div>
       </main>
 

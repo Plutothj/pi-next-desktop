@@ -207,7 +207,7 @@ function handleExtensionUi(req) {
     return;
   }
   if (req.method === "setWidget") {
-    send({ type: "ui_widget", key: req.widgetKey, lines: (req.widgetLines ?? []).map(stripAnsi) });
+    send({ type: "ui_widget", key: req.widgetKey, lines: (req.widgetLines ?? []).map(stripAnsi), placement: req.widgetPlacement === "belowEditor" ? "below" : "above" });
     return;
   }
   // select / input / editor are answered from the renderer; pi keeps the
@@ -545,6 +545,13 @@ if (process.env.PI_DEBUG) {
     pendingDialogs.add(id);
     send({ type: "ui_dialog", dialog: { ...dialogRequest, id } });
     return { ok: true, id };
+  });
+
+  // 调试/测试：注入一条 widget 事件（与扩展 setWidget 同一条渲染通路）
+  safeHandle("pi:debugWidget", (_e, payload) => {
+    const { key = "debug", lines = [], placement = "above" } = requireObject(payload, "payload");
+    send({ type: "ui_widget", key, lines, placement });
+    return { ok: true };
   });
 }
 

@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld("pi", {
   },
   // Only registered when the main process runs with PI_DEBUG.
   debugDialog: (dialog) => ipcRenderer.invoke("pi:debugDialog", dialog),
+  debugWidget: (payload) => ipcRenderer.invoke("pi:debugWidget", payload),
   projects: {
     list: () => ipcRenderer.invoke("projects:list"),
     add: (dir) => ipcRenderer.invoke("projects:add", dir),

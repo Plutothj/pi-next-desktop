@@ -66,6 +66,8 @@ export type RpcEvent = {
   agent?: BoardAgent;
   agentId?: string;
   rec?: RpcEvent;
+  lines?: string[];
+  placement?: "above" | "below";
   message?: PiMessage;
   usage?: Usage;
   assistantMessageEvent?: {
@@ -395,6 +397,7 @@ export type PiBridge = {
       | { ok: false; error: string }
     >;
   debugDialog: (dialog: Omit<UiDialogRequest, "id">) => Promise<{ ok: boolean; id: string }>;
+  debugWidget: (payload: { key?: string; lines: string[]; placement?: "above" | "below" }) => Promise<{ ok: boolean }>;
   exportHtml: () => Promise<{ ok: boolean; path?: string; error?: string }>;
   diagExport: () => Promise<{ ok: boolean; path?: string; error?: string }>;
   plans: {

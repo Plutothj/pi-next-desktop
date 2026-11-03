@@ -98,6 +98,7 @@ async function main() {
         PI_NODE: node,
         PI_AGENT_DIR: agentDir,
         PI_E2E: "1",
+        PI_DEBUG: "1", // 启用 debugWidget 等测试注入通道
       },
       stdio: ["ignore", "pipe", "pipe"],
     },
@@ -315,6 +316,21 @@ async function main() {
       `window.pi.schedules.list().then(async l => { const s = l.find(x => x.name === 'e2e 定时'); return window.pi.schedules.delete(s.id); }).then(r => r.ok)`,
     );
     if (removed !== true) throw new Error("delete 失败");
+  });
+
+  // 13. 扩展 widget：注入 setWidget 事件 → 卡片渲染（标题/进度/✓ 结构）
+  await check("扩展 widget 面板", async () => {
+    await evaluate(
+      `window.pi.debugWidget({ key: "e2e", lines: ["--- 构建进度 ---", "3/10 编译", "✓ 类型检查通过", "✗ 单元测试失败"] })`,
+    );
+    await waitForExpr(`Boolean(document.querySelector('[data-widget-card]'))`, 10_000, "widget card");
+    const txt = await evaluate(`document.querySelector('[data-widget-card]').textContent`);
+    if (!txt.includes("构建进度") || !txt.includes("类型检查通过")) {
+      throw new Error(`widget 内容异常: ${txt.slice(0, 80)}`);
+    }
+    // 清除（lines 为空）
+    await evaluate(`window.pi.debugWidget({ key: "e2e", lines: [] })`);
+    await waitForExpr(`!document.querySelector('[data-widget-card]')`, 10_000, "widget cleared");
   });
 
   ws.close();

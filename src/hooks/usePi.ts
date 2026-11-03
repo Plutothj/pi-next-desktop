@@ -41,6 +41,8 @@ export type State = {
   commands: CommandInfo[];
   /** Extension statuses pushed via ctx.ui.setStatus, e.g. a git extension's branch. */
   statuses: Record<string, string>;
+  /** Extension widgets pushed via ctx.ui.setWidget（纯文本行，渲染层做轻量结构化）. */
+  widgets: Record<string, { lines: string[]; placement: "above" | "below" }>;
   /** Blocking extension dialog (select / input / editor) awaiting an answer. */
   dialog: UiDialogRequest | null;
   autoCompact: boolean;
@@ -60,6 +62,7 @@ const initialState: State = {
   projects: [],
   commands: [],
   statuses: {},
+  widgets: {},
   dialog: null,
   autoCompact: true,
 };
@@ -161,6 +164,15 @@ function reduce(state: State, rec: RpcEvent): State {
       if (rec.text) statuses[key] = rec.text;
       else delete statuses[key];
       return { ...state, statuses };
+    }
+    case "ui_widget": {
+      // 扩展 widgets：按 key 存储；lines 为空表示清除该 widget
+      const key = rec.key ?? "widget";
+      const widgets = { ...state.widgets };
+      const lines = (rec.lines ?? []).filter((l) => l !== undefined);
+      if (lines.length) widgets[key] = { lines, placement: rec.placement ?? "above" };
+      else delete widgets[key];
+      return { ...state, widgets };
     }
     case "ui_dialog":
       return { ...state, dialog: rec.dialog ?? null };
