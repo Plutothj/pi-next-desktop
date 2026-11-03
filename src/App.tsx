@@ -280,12 +280,14 @@ function Shell() {
     else if (name === "plan") setPlanMode((v) => !v);
   };
 
-  // Fork rebuilds history up to (not including) the chosen user prompt and
-  // returns its text; prefill the composer so it can be edited and resent.
+  // 编辑重发：fork 截断到此提问之前，原文预填进输入框并聚焦，改完 Enter 重发
   const handleFork = useCallback(
     async (message: PiMessage) => {
       const res = await forkAt(message);
-      if (res.ok && res.text) controller.textInput.setInput(res.text);
+      if (res.ok && res.text) {
+        controller.textInput.setInput(res.text);
+        document.querySelector<HTMLTextAreaElement>('[data-editor="main"]')?.focus();
+      }
     },
     [forkAt, controller],
   );

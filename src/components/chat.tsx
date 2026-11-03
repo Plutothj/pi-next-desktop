@@ -10,6 +10,7 @@ import {
   FileTextIcon,
   GitForkIcon,
   Loader2Icon,
+  PencilLineIcon,
   SearchIcon,
   TerminalIcon,
   WrenchIcon,
@@ -285,11 +286,11 @@ const UserMessage = memo(function UserMessage({
         <CopyAction text={text} />
         {onFork ? (
           <MessageAction
-            label="从这里分支"
+            label="编辑重发"
             onClick={() => onFork(message)}
-            tooltip="从这里分支：新会话保留此提问之前的历史，输入框预填该提问"
+            tooltip="编辑重发：截断此提问之后的内容，输入框预填原文供修改后重新发送"
           >
-            <GitForkIcon className="size-4" />
+            <PencilLineIcon className="size-4" />
           </MessageAction>
         ) : null}
       </MessageActions>

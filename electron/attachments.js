@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import AdmZip from "adm-zip";
 import mammoth from "mammoth";
+import * as XLSX from "xlsx";
 import { extractText, getDocumentProxy } from "unpdf";
 import { logLine } from "./logs.js";
 
@@ -29,6 +30,20 @@ export async function parseAttachment({ name, dataBase64 } = {}) {
   if (lower.endsWith(".docx")) {
     const { value } = await mammoth.extractRawText({ buffer: bytes });
     return { ok: true, kind: "text", text: value };
+  }
+
+  if ([".xlsx", ".xls", ".xlsm"].some((ext) => lower.endsWith(ext))) {
+    const wb = XLSX.read(bytes, { type: "buffer" });
+    // 每 sheet 转 CSV（跳过全空行），单 sheet 超过 5000 行截断并标注
+    const parts = wb.SheetNames.map((sheetName) => {
+      let csv = XLSX.utils.sheet_to_csv(wb.Sheets[sheetName], { blankrows: false });
+      const rows = csv.split("\n");
+      if (rows.length > 5000) {
+        csv = `${rows.slice(0, 5000).join("\n")}\n…（${sheetName} 共 ${rows.length} 行，已截断）`;
+      }
+      return `## Sheet: ${sheetName}\n${csv}`;
+    });
+    return { ok: true, kind: "text", text: parts.join("\n\n") };
   }
 
   if (lower.endsWith(".zip")) {

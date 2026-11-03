@@ -229,7 +229,7 @@ export function Composer({
         </PromptInputAttachments>
 
         <PromptInputBody>
-          <PromptInputTextarea
+          <PromptInputTextarea data-editor="main"
             onBlur={onBlur}
             onKeyDown={onKeyDown}
             placeholder={

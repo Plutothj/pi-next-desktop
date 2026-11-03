@@ -84,6 +84,13 @@ export async function expandAttachments(
         const text = cap(res.text, 60_000);
         total += text.length;
         blocks.push(wrap(name, "docx 提取的纯文本，格式信息未保留", text || "（空文档）"));
+      } else if (["xlsx", "xls", "xlsm"].includes(ext) || mime.includes("spreadsheetml")) {
+        const bytes = await decode(part);
+        const res = await window.pi.parseAttachment({ name, dataBase64: toBase64(bytes) });
+        if (!res.ok || res.kind !== "text") throw new Error(res.ok ? "解析结果为空" : res.error);
+        const text = cap(res.text, 60_000);
+        total += text.length;
+        blocks.push(wrap(name, "表格转 CSV（按 Sheet 分节，公式与样式未保留）", text || "（空表格）"));
       } else if (ext === "zip" || mime === "application/zip") {
         const bytes = await decode(part);
         const res = await window.pi.parseAttachment({ name, dataBase64: toBase64(bytes) });
