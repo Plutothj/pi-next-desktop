@@ -103,6 +103,14 @@
       "owner": "Plutothj",
       "repo": "pi-next-desktop",
       "releaseType": "release"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "allowElevation": true,
+      "license": "LICENSE",
+      "deleteAppDataOnUninstall": false
     }
   },
   "description": "pi coding agent 的桌面客户端",
