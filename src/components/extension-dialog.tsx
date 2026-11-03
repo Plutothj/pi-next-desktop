@@ -20,10 +20,13 @@ export function ExtensionDialog({
   ) => void;
 }) {
   const [text, setText] = useState("");
+  // select 里选中"其他/Other"类选项时，切成输入框让用户写自由答案
+  const [freeform, setFreeform] = useState(false);
 
   useEffect(() => {
     if (!dialog) return;
     setText(dialog.method === "editor" ? (dialog.prefill ?? "") : "");
+    setFreeform(false);
   }, [dialog]);
 
   const cancel = () => {
@@ -31,8 +34,16 @@ export function ExtensionDialog({
   };
   const confirm = (value?: string) => {
     if (!dialog) return;
-    onRespond(dialog, { value: dialog.method === "select" ? value : text });
+    if (dialog.method === "select") {
+      onRespond(dialog, { value: freeform ? text : value });
+      return;
+    }
+    onRespond(dialog, { value: text });
   };
+
+  // "其他 / Other / 自定义" 这类兜底选项：改为自由输入，而不是回传字面量
+  const isOtherOption = (option: string) =>
+    /^(其他|其它|other|custom|自定义|手动输入)/i.test(option.trim());
 
   // Escape works even if focus has moved elsewhere.
   useEffect(() => {
@@ -62,18 +73,37 @@ export function ExtensionDialog({
         </Button>
       </div>
 
-      {dialog.method === "select" ? (
+      {dialog.method === "select" && !freeform ? (
         <div className="flex max-h-64 flex-col gap-0.5 overflow-auto p-1.5">
           {(dialog.options ?? []).map((option) => (
             <button
               className="rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
               key={option}
-              onClick={() => confirm(option)}
+              onClick={() => {
+                if (isOtherOption(option)) {
+                  setFreeform(true);
+                  return;
+                }
+                confirm(option);
+              }}
               type="button"
             >
               {option}
             </button>
           ))}
+        </div>
+      ) : null}
+
+      {dialog.method === "select" && freeform ? (
+        <div className="p-1.5">
+          <Input
+            autoFocus
+            className="h-8 text-xs"
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && text.trim() && confirm()}
+            placeholder="输入你的答案…"
+            value={text}
+          />
         </div>
       ) : null}
 
@@ -101,9 +131,14 @@ export function ExtensionDialog({
         </div>
       ) : null}
 
-      {dialog.method === "select" ? null : (
+      {dialog.method === "select" && !freeform ? null : (
         <div className="flex justify-end border-t px-2 py-1.5">
-          <Button className="h-7 px-3 text-xs" onClick={() => confirm()} size="sm">
+          <Button
+            className="h-7 px-3 text-xs"
+            disabled={freeform && !text.trim()}
+            onClick={() => confirm()}
+            size="sm"
+          >
             确认
           </Button>
         </div>

@@ -333,6 +333,43 @@ async function main() {
     await waitForExpr(`!document.querySelector('[data-widget-card]')`, 10_000, "widget cleared");
   });
 
+  // 14. 扩展对话框：连续两次（rpiv 选"其他"会立刻再弹一个输入框），
+  //     第二个不能因为第一个的答复返回而被吞掉（历史 bug）
+  await check("扩展对话框连弹", async () => {
+    await evaluate(
+      `window.pi.debugDialog({ method: 'select', title: 'E2E 选择', options: ['选项甲', '其他'] })`,
+    );
+    await waitForExpr(`document.body.textContent.includes('E2E 选择')`, 10_000, "first dialog");
+    // 点"其他" → 本地切成自由输入（不回传字面量）
+    await evaluate(
+      `[...document.querySelectorAll('button')].find(b => b.textContent.trim() === '其他').click()`,
+    );
+    const hasInput = await waitForExpr(
+      `Boolean(document.querySelector('input[placeholder*="输入你的答案"]'))`,
+      5_000,
+      "freeform input",
+    ).catch(() => null);
+    if (!hasInput) throw new Error("点『其他』未切换到输入框");
+    // 输入并确认 → 对话框应关闭
+    await evaluate(`(() => {
+      const i = document.querySelector('input[placeholder*="输入你的答案"]');
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(i, '我的自定义答案');
+      i.dispatchEvent(new Event('input', { bubbles: true }));
+    })()`);
+    await sleep(200);
+    await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent.trim() === '确认').click()`);
+    await waitForExpr(`!document.body.textContent.includes('E2E 选择')`, 8_000, "first dialog closed");
+
+    // 立刻再来一个：模拟扩展在收到答复后马上弹下一个
+    await evaluate(
+      `window.pi.debugDialog({ method: 'input', title: 'E2E 追问', placeholder: '继续说' })`,
+    );
+    await waitForExpr(`document.body.textContent.includes('E2E 追问')`, 8_000, "second dialog survives");
+    // 收尾：取消掉（debug 对话框会挂在主进程 pendingDialogs 里）
+    await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent.trim() === '取消')?.click()`);
+  });
+
   ws.close();
 }
 
