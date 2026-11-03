@@ -333,6 +333,34 @@ async function main() {
     await waitForExpr(`!document.querySelector('[data-widget-card]')`, 10_000, "widget cleared");
   });
 
+  // 13b. todo 清单渲染：复选框 + 完成划线 + 全完成折叠
+  await check("todo 清单 UI", async () => {
+    await evaluate(
+      `window.pi.debugWidget({ key: "todo", lines: ["--- Todo 1/3 ---", "✓ #1 已完成的事", "▸ #2 待办甲", "▸ #3 待办乙"] })`,
+    );
+    await waitForExpr(`Boolean(document.querySelector('[data-widget-card] li'))`, 10_000, "todo list");
+    const txt = await evaluate(`document.querySelector('[data-widget-card]').textContent`);
+    if (!txt.includes("已完成的事") || !txt.includes("待办甲")) {
+      throw new Error(`清单内容异常: ${txt.slice(0, 80)}`);
+    }
+    // 已完成项应有删除线
+    const struck = await evaluate(
+      `[...document.querySelectorAll('[data-widget-card] li span')].some(s => s.textContent.includes('已完成的事') && s.className.includes('line-through'))`,
+    );
+    if (struck !== true) throw new Error("已完成项没有删除线");
+
+    // 全部完成 → 自动折叠（列表隐藏）
+    await evaluate(
+      `window.pi.debugWidget({ key: "todo", lines: ["--- Todo 3/3 ---", "✓ #1 甲", "✓ #2 乙", "✓ #3 丙"] })`,
+    );
+    await sleep(400);
+    const collapsed = await evaluate(
+      `document.querySelectorAll('[data-widget-card] li').length === 0`,
+    );
+    if (collapsed !== true) throw new Error("全部完成后没有折叠");
+    await evaluate(`window.pi.debugWidget({ key: "todo", lines: [] })`);
+  });
+
   // 14. 扩展对话框：连续两次（rpiv 选"其他"会立刻再弹一个输入框），
   //     第二个不能因为第一个的答复返回而被吞掉（历史 bug）
   await check("扩展对话框连弹", async () => {
