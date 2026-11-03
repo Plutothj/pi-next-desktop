@@ -229,6 +229,26 @@ async function main() {
     if (!s) throw new Error(`status=${s}`);
   });
 
+  // 8. 并行任务板生命周期：发射 → running → stop → 终态（LLM 往返在 CI 不可
+  //    行，fixture 供应商无后端；真实完成路径在用户机器上验证）
+  await check("并行任务板", async () => {
+    const started = await evaluate(
+      `window.pi.board.run({ name: 'e2e 并行', cwd: ${JSON.stringify(agentDir)}, message: '只回复：完成' }).then(a => JSON.stringify({ id: a.id, status: a.status }))`,
+    );
+    const v = JSON.parse(started);
+    if (!v.id || v.status !== "running") throw new Error(started);
+    const listed = await waitForExpr(
+      `window.pi.board.list().then(l => l.some(x => x.id === ${JSON.stringify(v.id)}) ? 'yes' : null)`,
+      30_000,
+      "board list",
+    );
+    if (listed !== "yes") throw new Error("list 缺少该任务");
+    const stopped = await evaluate(
+      `window.pi.board.stop(${JSON.stringify(v.id)}).then(r => JSON.stringify(r))`,
+    );
+    if (!JSON.parse(stopped).ok) throw new Error(stopped);
+  });
+
   ws.close();
 }
 

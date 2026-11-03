@@ -7,6 +7,7 @@ import {
   GlobeIcon,
   Minimize2Icon,
   MinusIcon,
+  RocketIcon,
   SquareIcon,
   TerminalIcon,
   WorkflowIcon,
@@ -45,6 +46,7 @@ import { useNotifications } from "@/hooks/notifications";
 import { PLAN_PREFIX, stripDirective } from "@/lib/promptPrefixes";
 import { TerminalPanel } from "@/components/terminal-panel";
 import { FilesPanel } from "@/components/files-panel";
+import { BoardPanel } from "@/components/board-panel";
 import { AgentsPanel } from "@/components/agents-panel";
 import { BrowserPanel } from "@/components/browser-panel";
 import { CommandPalette, type PanelTab } from "@/components/command-palette";
@@ -358,6 +360,14 @@ function Shell() {
               <BotIcon className="size-3.5" />
             </Button>
             <Button
+              className={cn("h-7 px-2 text-xs", panel === "board" && "bg-accent")}
+              onClick={() => setPanel(panel === "board" ? null : "board")}
+              title="并行任务"
+              variant="ghost"
+            >
+              <RocketIcon className="size-3.5" />
+            </Button>
+            <Button
               className={cn("h-7 px-2 text-xs", panel === "browser" && "bg-accent")}
               onClick={() => setPanel(panel === "browser" ? null : "browser")}
               title="内置浏览器"
@@ -549,6 +559,7 @@ function Shell() {
             ) : null}
             {panel === "files" ? <FilesPanel changes={git?.changes} cwd={state.cwd} /> : null}
             {panel === "agents" ? <AgentsPanel cwd={state.cwd} state={state} /> : null}
+            {panel === "board" ? <BoardPanel cwd={state.cwd} onPromote={openSession} /> : null}
             {panel === "browser" ? <BrowserPanel cwd={state.cwd} /> : null}
           </div>
         </aside>

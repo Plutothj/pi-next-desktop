@@ -4,7 +4,8 @@
 
 import { app, BrowserWindow, dialog, Menu, nativeImage, Tray, shell } from "electron";
 import { parseAttachment } from "./attachments.js";
-import { requireObject } from "./ipc-helpers.js";
+import { createAgentBoard } from "./agents.js";
+import { requireObject, requireString, optionalString } from "./ipc-helpers.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -44,6 +45,17 @@ process.on("unhandledRejection", (err) => logLine("unhandled-rejection", err));
 const pendingDialogs = new Set();
 const taskManager = createTaskManager({ userDataDir: APP_HOME, send });
 
+// 并行 agent 任务板（独立 pi 子进程，见 agents.js）
+const agentBoard = createAgentBoard({ send, termEnv: () => piEnv(resolveRuntime()), agentDir: AGENT_DIR });
+safeHandle("board:list", () => agentBoard.list());
+safeHandle("board:run", (_e, payload) => {
+  const { name, cwd, message } = requireObject(payload, "payload");
+  requireString(message, "message");
+  const dir = typeof cwd === "string" && cwd && fs.existsSync(cwd) ? cwd : os.homedir();
+  return agentBoard.start({ name: optionalString(name, "name"), cwd: dir, message });
+});
+safeHandle("board:stop", (_e, id) => agentBoard.stop(requireString(id, "id")));
+
 const pi = new PiProcess({
   onRecord(rec) {
     if (rec.type === "extension_ui_request") {
@@ -64,6 +76,19 @@ const pi = new PiProcess({
 });
 
 // ---------------------------------------------------------------- pi lifecycle
+
+// 主 pi 与并行 agent 子进程共用的环境（隔离目录 + pi-bg 桥）
+function piEnv(rt) {
+  return {
+    ...process.env,
+    ...rt.env,
+    PATH: [taskManager.paths.binDir, path.dirname(rt.node), process.env.PATH ?? ""].join(path.delimiter),
+    PI_DESKTOP_TERM_SOCK: taskManager.paths.sock,
+    PI_CODING_AGENT_DIR: AGENT_DIR,
+    PI_MEMORY_DIR: path.join(AGENT_DIR, "memory"),
+    ...(rt.installRoot ? { PI_MANAGED_INSTALL_ROOT: rt.installRoot } : {}),
+  };
+}
 
 // Boots are serialised: a rapid project switch waits for the previous start
 // instead of interleaving two poll loops.
@@ -106,19 +131,7 @@ async function startPi(cwd) {
     node: rt.node,
     argv,
     cwd,
-    env: {
-      ...process.env,
-      ...rt.env,
-      // pi-bg must resolve from the agent's bash tool.
-      PATH: [taskManager.paths.binDir, path.dirname(rt.node), process.env.PATH ?? ""].join(path.delimiter),
-      PI_DESKTOP_TERM_SOCK: taskManager.paths.sock,
-      // Isolated config/sessions/extensions: ~/.pi-desktop/agent
-      PI_CODING_AGENT_DIR: AGENT_DIR,
-      // pi-memory 等记忆扩展默认写 ~/.pi/agent/memory，只认这个变量；
-      // 指回隔离目录，桌面「记忆」页才能看到。
-      PI_MEMORY_DIR: path.join(AGENT_DIR, "memory"),
-      ...(rt.installRoot ? { PI_MANAGED_INSTALL_ROOT: rt.installRoot } : {}),
-    },
+    env: piEnv(rt),
   });
   const version = (await cliVersion(rt)) ?? runtimeVersion(rt);
   logLine("pi", `started ${rt.cli} (v${version}) in ${cwd}`);
@@ -618,4 +631,5 @@ app.on("before-quit", () => {
   quitting = true;
   pi.stop();
   taskManager.stopBridge();
+  agentBoard.stopAll();
 });

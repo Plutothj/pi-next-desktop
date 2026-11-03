@@ -63,6 +63,7 @@ export type RpcEvent = {
   type: string;
   id?: string;
   value?: boolean;
+  agent?: BoardAgent;
   message?: PiMessage;
   usage?: Usage;
   assistantMessageEvent?: {
@@ -293,6 +294,18 @@ export type CommandInfo = {
   sourceInfo?: { path?: string; scope?: string };
 };
 
+// 并行 agent 任务板的卡片
+export type BoardAgent = {
+  id: string;
+  name: string;
+  cwd: string;
+  status: "running" | "done" | "failed" | "error";
+  startedAt: number;
+  endedAt: number | null;
+  tail: string;
+  sessionFile: string | null;
+};
+
 export type TaskInfo = {
   id: string;
   cmd: string;
@@ -334,6 +347,11 @@ export type PiBridge = {
     toggleMaximize: () => Promise<{ ok: boolean; maximized?: boolean }>;
     closeApp: () => Promise<{ ok: boolean }>;
     state: () => Promise<{ maximized: boolean }>;
+  };
+  board: {
+    list: () => Promise<BoardAgent[]>;
+    run: (payload: { name?: string; cwd?: string; message: string }) => Promise<BoardAgent>;
+    stop: (id: string) => Promise<{ ok: boolean; error?: string }>;
   };
   zoom: (delta: number) => Promise<{ ok: boolean; factor?: number }>;
   zoomReset: () => Promise<{ ok: boolean; factor?: number }>;
