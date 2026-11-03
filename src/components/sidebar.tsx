@@ -442,7 +442,11 @@ export function SessionSidebar({
             const visible = open ? items : items.slice(0, COLLAPSED_COUNT);
             // 工作区视图：分组是项目，渲染成可折叠的项目标题（带目录图标）
             const isProject = view === "workspace";
-            const projectPath = items[0]?.cwd;
+            // 项目路径：优先从会话取；没有会话的项目从 projects 列表按名称反查
+            const projectPath =
+              items[0]?.cwd ??
+              state.projects.find((p) => p.name === label)?.path ??
+              null;
             const isActiveProject = isProject && projectPath === state.cwd;
             return (
             <div className="mb-0.5" key={label}>
