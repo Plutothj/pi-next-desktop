@@ -44,6 +44,11 @@ contextBridge.exposeInMainWorld("pi", {
     closeApp: () => ipcRenderer.invoke("win:closeApp"),
     state: () => ipcRenderer.invoke("win:state"),
   },
+  schedules: {
+    list: () => ipcRenderer.invoke("schedules:list"),
+    save: (payload) => ipcRenderer.invoke("schedules:save", payload),
+    delete: (id) => ipcRenderer.invoke("schedules:delete", id),
+  },
   board: {
     list: () => ipcRenderer.invoke("board:list"),
     run: (payload) => ipcRenderer.invoke("board:run", payload),

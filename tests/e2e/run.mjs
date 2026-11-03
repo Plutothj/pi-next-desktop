@@ -279,6 +279,33 @@ async function main() {
     if (read !== true) throw new Error("plans:read 失败");
   });
 
+  // 11. auto 虚拟模型扩展真的被 pi 加载（模型选择器里出现 pi-desktop/auto）
+  await check("auto 虚拟模型", async () => {
+    const found = await evaluate(
+      `(() => {
+        const models = window.__pi?.models ?? [];
+        return JSON.stringify({ has: models.some(m => m.provider === "pi-desktop" && m.id === "auto"), providers: models.map(m => m.provider) });
+      })()`,
+    );
+    const v = JSON.parse(found);
+    if (!v.has) throw new Error(`提供者: ${v.providers.join(", ") || "（空）"}`);
+  });
+
+  // 12. 定时任务 CRUD
+  await check("定时任务", async () => {
+    const saved = await evaluate(
+      `window.pi.schedules.save({ time: '23:59', name: 'e2e 定时', message: '测试任务', cwd: window.__pi?.cwd }).then(r => JSON.stringify(r))`,
+    );
+    const v = JSON.parse(saved);
+    if (!v.ok) throw new Error(saved);
+    const listed = await evaluate(`window.pi.schedules.list().then(l => l.some(s => s.name === 'e2e 定时'))`);
+    if (listed !== true) throw new Error("list 缺少该任务");
+    const removed = await evaluate(
+      `window.pi.schedules.list().then(async l => { const s = l.find(x => x.name === 'e2e 定时'); return window.pi.schedules.delete(s.id); }).then(r => r.ok)`,
+    );
+    if (removed !== true) throw new Error("delete 失败");
+  });
+
   ws.close();
 }
 

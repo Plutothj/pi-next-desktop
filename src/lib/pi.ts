@@ -348,7 +348,21 @@ export type PiBridge = {
     closeApp: () => Promise<{ ok: boolean }>;
     state: () => Promise<{ maximized: boolean }>;
   };
-  board: {
+  schedules: {
+    list: () => Promise<
+      { id: string; name: string; time: string; cwd: string; message: string; enabled: boolean; lastRun: string | null }[]
+    >;
+    save: (payload: {
+      id?: string;
+      name?: string;
+      time: string;
+      cwd?: string;
+      message: string;
+      enabled?: boolean;
+    }) => Promise<{ ok: boolean; error?: string }>;
+    delete: (id: string) => Promise<{ ok: boolean }>;
+  };
+    board: {
     list: () => Promise<BoardAgent[]>;
     run: (payload: { name?: string; cwd?: string; message: string }) => Promise<BoardAgent>;
     stop: (id: string) => Promise<{ ok: boolean; error?: string }>;

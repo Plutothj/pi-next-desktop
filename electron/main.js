@@ -5,6 +5,8 @@
 import { app, BrowserWindow, dialog, Menu, nativeImage, Tray, shell } from "electron";
 import { parseAttachment } from "./attachments.js";
 import { createAgentBoard } from "./agents.js";
+import { installAutoRouter } from "./auto-router.js";
+import { createScheduler } from "./schedules.js";
 import { requireObject, requireString, optionalString } from "./ipc-helpers.js";
 import fs from "node:fs";
 import os from "node:os";
@@ -47,6 +49,14 @@ const taskManager = createTaskManager({ userDataDir: APP_HOME, send });
 
 // 并行 agent 任务板（独立 pi 子进程，见 agents.js）
 const agentBoard = createAgentBoard({ send, termEnv: () => piEnv(resolveRuntime()), agentDir: AGENT_DIR });
+const scheduler = createScheduler({
+  userDataDir: app.getPath("userData"),
+  fire: (s) => {
+    void agentBoard
+      .start({ name: s.name, cwd: s.cwd && fs.existsSync(s.cwd) ? s.cwd : os.homedir(), message: s.message })
+      .then(() => send({ type: "ui_notify", message: `定时任务「${s.name}」已派出`, notifyType: "info" }));
+  },
+});
 safeHandle("board:list", () => agentBoard.list());
 safeHandle("board:run", (_e, payload) => {
   const { name, cwd, message } = requireObject(payload, "payload");
@@ -55,6 +65,14 @@ safeHandle("board:run", (_e, payload) => {
   return agentBoard.start({ name: optionalString(name, "name"), cwd: dir, message });
 });
 safeHandle("board:stop", (_e, id) => agentBoard.stop(requireString(id, "id")));
+
+// 定时任务（每天 HH:MM 触发，派给并行 agent 板）
+safeHandle("schedules:list", () => scheduler.list());
+safeHandle("schedules:save", (_e, payload) => {
+  const p = requireObject(payload, "payload");
+  try { return scheduler.save(p); } catch (err) { return { ok: false, error: err.message }; }
+});
+safeHandle("schedules:delete", (_e, id) => scheduler.remove(requireString(id, "id")));
 
 const pi = new PiProcess({
   onRecord(rec) {
@@ -614,6 +632,9 @@ app.whenReady().then(() => {
   // The bridge and its CLI must exist before pi starts, since pi's bash tool
   // uses the injected PATH / env to reach them.
   installTermCli(APP_HOME);
+  // auto 虚拟模型扩展（模型选择器里的 pi-desktop/auto：low→最便宜，high→最强）
+  installAutoRouter(AGENT_DIR);
+  scheduler.start();
   taskManager.startBridge();
   createWindow();
   if (process.platform !== "darwin") createTray();
@@ -632,4 +653,5 @@ app.on("before-quit", () => {
   pi.stop();
   taskManager.stopBridge();
   agentBoard.stopAll();
+  scheduler.stop();
 });

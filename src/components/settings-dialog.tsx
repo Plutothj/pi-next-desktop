@@ -6,6 +6,7 @@ import {
   BotIcon,
   BoxesIcon,
   BrainIcon,
+  ClockIcon,
   KeyRoundIcon,
   Loader2Icon,
   PuzzleIcon,
@@ -21,6 +22,7 @@ import {
 import { Section } from "@/components/settings/shared";
 import { ModelRow } from "@/components/settings/shared";
 import { AboutPanel } from "@/components/settings/about";
+import { SchedulesPanel } from "@/components/settings/schedules";
 import { AppearancePanel } from "@/components/settings/appearance";
 import { ProvidersPanel } from "@/components/settings/providers";
 import { PackagesPanel } from "@/components/settings/packages";
@@ -59,7 +61,8 @@ export type SettingsTab =
   | "shell"
   | "extensions"
   | "projects"
-  | "about";
+  | "about"
+  | "schedules";
 
 // Nav mirrors ZCode's Settings: top-level items, then Agent 能力, then 数据与统计.
 // keywords：设置页搜索的匹配词（含俗称），让"缩放"能找到外观、"密钥"找到模型设置。
@@ -80,6 +83,7 @@ const NAV_KEYWORDS: Record<SettingsTab, string[]> = {
   extensions: ["扩展", "extension"],
   projects: ["项目", "工作区", "目录"],
   about: ["版本", "更新", "升级", "about"],
+  schedules: ["定时", "计划任务", "cron", "自动化"],
 };
 const NAV: { group?: string; items: { id: SettingsTab; label: string; icon: typeof BoxesIcon }[] }[] = [
   {
@@ -115,6 +119,7 @@ const NAV: { group?: string; items: { id: SettingsTab; label: string; icon: type
       { id: "stats", label: "使用统计", icon: BarChartIcon },
       { id: "projects", label: "项目", icon: FolderIcon },
       { id: "about", label: "版本", icon: InfoIcon },
+      { id: "schedules", label: "定时任务", icon: ClockIcon },
     ],
   },
 ];
@@ -666,6 +671,7 @@ export function SettingsDialog({
               {tab === "stats" ? <UsagePanel /> : null}
               {tab === "projects" ? <ProjectsPanel cwd={cwd} /> : null}
               {tab === "about" ? <AboutPanel /> : null}
+              {tab === "schedules" ? <SchedulesPanel cwd={cwd} /> : null}
             </div>
           </div>
         )}
