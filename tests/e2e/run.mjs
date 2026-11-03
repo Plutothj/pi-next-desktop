@@ -249,6 +249,21 @@ async function main() {
     if (!JSON.parse(stopped).ok) throw new Error(stopped);
   });
 
+  // 9. 会话树面板：get_tree 渲染 + 节点点击重走（fork）
+  await check("会话树面板", async () => {
+    // 先发一条消息产生树节点（fixture 供应商不可达，回合会失败，但条目已入树）
+    await evaluate(`window.pi.send({ type: 'prompt', message: 'e2e 树节点' }).catch(() => null)`);
+    await sleep(1500);
+    await evaluate(`[...document.querySelectorAll('header button[title]')].find(b => b.title === '会话树').click()`);
+    await waitForExpr(`Boolean(document.querySelector('.flex.h-full.flex-col.p-3'))`, 10_000, "tree panel");
+    const hasNode = await waitForExpr(
+      `document.body.textContent.includes('e2e 树节点') || document.body.textContent.includes('会话树')`,
+      10_000,
+      "tree node",
+    );
+    if (!hasNode) throw new Error("树面板无内容");
+  });
+
   ws.close();
 }
 

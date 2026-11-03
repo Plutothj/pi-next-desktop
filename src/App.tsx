@@ -5,6 +5,7 @@ import {
   CopyIcon,
   FilesIcon,
   GlobeIcon,
+  ListTreeIcon,
   Minimize2Icon,
   MinusIcon,
   RocketIcon,
@@ -47,6 +48,7 @@ import { PLAN_PREFIX, stripDirective } from "@/lib/promptPrefixes";
 import { TerminalPanel } from "@/components/terminal-panel";
 import { FilesPanel } from "@/components/files-panel";
 import { BoardPanel } from "@/components/board-panel";
+import { SessionTreePanel } from "@/components/session-tree";
 import { AgentsPanel } from "@/components/agents-panel";
 import { BrowserPanel } from "@/components/browser-panel";
 import { CommandPalette, type PanelTab } from "@/components/command-palette";
@@ -92,6 +94,7 @@ function Shell() {
     refreshSessions,
     renameSession,
     compact,
+    fork,
     forkAt,
   } = usePi();
   const controller = usePromptInputController();
@@ -294,6 +297,18 @@ function Shell() {
     [forkAt, controller],
   );
 
+  // 会话树：按 entryId 从任意节点重走（与编辑重发同一条 fork 通路）
+  const handleForkEntry = useCallback(
+    async (entryId: string) => {
+      const res = await fork(entryId);
+      if (res.ok && res.text) {
+        controller.textInput.setInput(res.text);
+        document.querySelector<HTMLTextAreaElement>('[data-editor="main"]')?.focus();
+      }
+    },
+    [fork, controller],
+  );
+
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
       <SessionSidebar
@@ -366,6 +381,14 @@ function Shell() {
               variant="ghost"
             >
               <RocketIcon className="size-3.5" />
+            </Button>
+            <Button
+              className={cn("h-7 px-2 text-xs", panel === "tree" && "bg-accent")}
+              onClick={() => setPanel(panel === "tree" ? null : "tree")}
+              title="会话树"
+              variant="ghost"
+            >
+              <ListTreeIcon className="size-3.5" />
             </Button>
             <Button
               className={cn("h-7 px-2 text-xs", panel === "browser" && "bg-accent")}
@@ -560,6 +583,9 @@ function Shell() {
             {panel === "files" ? <FilesPanel changes={git?.changes} cwd={state.cwd} /> : null}
             {panel === "agents" ? <AgentsPanel cwd={state.cwd} state={state} /> : null}
             {panel === "board" ? <BoardPanel cwd={state.cwd} onPromote={openSession} /> : null}
+            {panel === "tree" ? (
+              <SessionTreePanel onForkEntry={handleForkEntry} sessionFile={state.sessionFile} />
+            ) : null}
             {panel === "browser" ? <BrowserPanel cwd={state.cwd} /> : null}
           </div>
         </aside>
