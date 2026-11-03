@@ -264,17 +264,17 @@ async function main() {
     if (!hasNode) throw new Error("树面板无内容");
   });
 
-  // 10. 计划工作台：落盘一份计划 → 面板列出并可读取
+  // 10. 计划工作台：在应用当前工作区落盘一份计划 → 面板列出、点开可读
   await check("计划工作台", async () => {
     await evaluate(
-      `window.pi.plans.save(${JSON.stringify(agentDir)}, '# 计划\\n\\n1. e2e 步骤一\\n2. e2e 步骤二\\n').then(r => JSON.stringify(r))`,
+      `(async () => { const cwd = window.__pi?.cwd; await window.pi.plans.save(cwd, '# 计划\\n\\n1. e2e 步骤一\\n2. e2e 步骤二\\n'); })()`,
     );
     await evaluate(`[...document.querySelectorAll('header button[title]')].find(b => b.title === '计划').click()`);
     await waitForExpr(`document.body.textContent.includes('plan-')`, 10_000, "plan listed");
     await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent.trim().startsWith('plan-')).click()`);
     await waitForExpr(`document.body.textContent.includes('步骤一')`, 10_000, "plan content");
     const read = await evaluate(
-      `(async () => { const l = await window.pi.plans.list(${JSON.stringify(agentDir)}); return (await window.pi.plans.read(${JSON.stringify(agentDir)}, l[0].path)).ok; })()`,
+      `(async () => { const cwd = window.__pi?.cwd; const l = await window.pi.plans.list(cwd); return (await window.pi.plans.read(cwd, l[0].path)).ok; })()`,
     );
     if (read !== true) throw new Error("plans:read 失败");
   });
