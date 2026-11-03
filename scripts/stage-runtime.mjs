@@ -69,7 +69,17 @@ async function stageNode() {
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pi-node-"));
   try {
-    execFileSync("tar", ["-xf", archive, "-C", tmp], { stdio: "inherit" });
+    // Windows 的 tar 对 "C:\..." 路径不可靠（GNU 报 remote host、bsdtar 缺开关），
+    // zip 直接走 Expand-Archive；类 Unix 用系统 tar。
+    if (process.platform === "win32") {
+      execFileSync(
+        "powershell",
+        ["-NoProfile", "-Command", `Expand-Archive -LiteralPath '${archive}' -DestinationPath '${tmp}' -Force`],
+        { stdio: "inherit" },
+      );
+    } else {
+      execFileSync("tar", ["-xf", archive, "-C", tmp], { stdio: "inherit" });
+    }
     const inner = fs.readdirSync(tmp).find((name) => name.startsWith("node-v"));
     if (!inner) throw new Error("node tarball 结构异常");
     const binPath = process.platform === "win32"
@@ -89,12 +99,11 @@ async function stageNode() {
 function locateBundle() {
   try {
     const version = fs.readFileSync(path.join(install, "current-version"), "utf8").trim();
-    const bundle = path.join(
-      install, "releases", version, "node_modules", PI_PACKAGE, "dist", "bundle",
-    );
-    const jiti = path.join(install, "releases", version, "node_modules", "jiti");
+    const modules = path.join(install, "releases", version, "node_modules");
+    const bundle = path.join(modules, PI_PACKAGE, "dist", "bundle");
+    const jiti = path.join(modules, "jiti");
     if (fs.existsSync(path.join(bundle, "cli.js"))) {
-      return { version, bundle, jiti: fs.existsSync(jiti) ? jiti : null };
+      return { version, bundle, modules, jiti: fs.existsSync(jiti) ? jiti : null };
     }
   } catch {
     // fall through to npm
@@ -115,6 +124,7 @@ function locateBundle() {
   return {
     version,
     bundle: path.join(pkgDir, "dist", "bundle"),
+    modules,
     jiti: fs.existsSync(path.join(modules, "jiti")) ? path.join(modules, "jiti") : null,
   };
 }
@@ -139,11 +149,68 @@ if (staged.jiti) {
   // electron-builder drops node_modules from extraResources, so use vendor/ + NODE_PATH.
   fs.mkdirSync(path.join(out, "vendor"), { recursive: true });
   fs.cpSync(staged.jiti, path.join(out, "vendor", "jiti"), { recursive: true });
-  // pi 的扩展加载 chunk 是 ESM：import('jiti') 不走 NODE_PATH，只沿目录向上找
-  // node_modules。vendor 副本留给 CJS require，再放一份到 runtime/node_modules
-  // 让 ESM 解析命中——否则所有 TS 第三方扩展都会因 jiti 解析失败而加载不了。
+}
+
+// ---------------------------------------------------------------- 外部依赖补全
+
+// bundle 是 externalize 打包：运行时 require 的 npm 包不进 chunks。逐个手补
+// 会漏（jiti、quickjs-wasi 就是这么漏掉的），所以扫描 bundle 里的
+// require("<bare>") 调用，把命中且存在于安装树的包自动补进 runtime/node_modules
+// ——ESM 解析只认 node_modules 目录，NODE_PATH 对它无效。
+const NODE_BUILTINS =
+  /^(assert|async_hooks|buffer|child_process|cluster|console|constants|crypto|dgram|diagnostics_channel|dns|domain|events|fs|http|http2|https|inspector|module|net|os|path|perf_hooks|process|punycode|querystring|readline|repl|stream|string_decoder|sys|timers|tls|trace_events|tty|url|util|v8|vm|wasi|worker_threads|zlib)(\/|$)/;
+
+function bareRequiresOf(dir) {
+  const found = new Set();
+  const visit = (d) => {
+    for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
+      const full = path.join(d, entry.name);
+      if (entry.isDirectory()) {
+        visit(full);
+        continue;
+      }
+      if (!/\.(js|mjs|cjs)$/.test(entry.name)) continue;
+      const src = fs.readFileSync(full, "utf8");
+      // require("pkg/sub") 与 createRequire(...).resolve("pkg/sub")（codemode 的
+      // quickjs-wasi/quickjs.wasm 就是这种形态）都算
+      for (const m of src.matchAll(
+        /(?:\brequire|\.resolve)\(\s*["']([@a-z0-9][@a-z0-9._/-]*)["']\s*\)/gi,
+      )) {
+        const spec = m[1];
+        if (spec.startsWith(".") || spec.startsWith("/") || spec.startsWith("node:")) continue;
+        const bare = spec.startsWith("@")
+          ? spec.split("/").slice(0, 2).join("/")
+          : spec.split("/")[0];
+        if (!NODE_BUILTINS.test(bare)) found.add(bare);
+      }
+    }
+  };
+  visit(dir);
+  return found;
+}
+
+// 平台相关的原生可选模块（ws 的加速依赖，有纯 JS 回退），交叉平台 stage 不带
+const SKIP_VENDOR = new Set(["bufferutil", "utf-8-validate"]);
+
+if (staged.modules) {
+  const externals = bareRequiresOf(out);
+  externals.add("jiti"); // 扩展加载器兜底（即使某天 bundle 形态变化也不漏）
   fs.mkdirSync(path.join(out, "node_modules"), { recursive: true });
-  fs.cpSync(staged.jiti, path.join(out, "node_modules", "jiti"), { recursive: true });
+  const vendored = [];
+  for (const name of [...externals].sort()) {
+    if (SKIP_VENDOR.has(name)) continue;
+    const src = path.join(staged.modules, name);
+    if (!fs.existsSync(src)) continue;
+    fs.cpSync(src, path.join(out, "node_modules", name), { recursive: true });
+    vendored.push(name);
+  }
+  // vendor 里同步一份 jiti：CJS 侧（NODE_PATH）兜底，ESM 侧用 node_modules 副本
+  const jitiCopy = path.join(out, "node_modules", "jiti");
+  if (fs.existsSync(jitiCopy)) {
+    fs.mkdirSync(path.join(out, "vendor"), { recursive: true });
+    fs.cpSync(jitiCopy, path.join(out, "vendor", "jiti"), { recursive: true });
+  }
+  console.log(`vendored runtime deps: ${vendored.join(", ") || "(none)"}`);
 }
 
 fs.writeFileSync(path.join(out, "VERSION"), `${staged.version}\n`);
