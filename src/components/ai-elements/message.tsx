@@ -47,7 +47,10 @@ export const MessageContent = ({
 }: MessageContentProps) => (
   <div
     className={cn(
-      "is-user:dark flex w-fit max-w-full min-w-0 flex-col gap-2 overflow-hidden text-sm",
+      "is-user:dark flex max-w-full min-w-0 flex-col gap-2 overflow-hidden text-sm",
+      // 用户消息是不流式的气泡，按内容收缩；助手消息流式输出，占满列宽——
+      // 否则逐 token 增宽会让 loading 图标、代码块等水平方向来回抖
+      "group-[.is-user]:w-fit group-[.is-assistant]:w-full",
       "group-[.is-user]:ml-auto group-[.is-user]:rounded-lg group-[.is-user]:bg-secondary group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-foreground",
       "group-[.is-assistant]:text-foreground",
       className
