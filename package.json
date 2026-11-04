@@ -75,6 +75,10 @@
       {
         "from": "build/icon.png",
         "to": "pi.png"
+      },
+      {
+        "from": "build/icon.ico",
+        "to": "pi.ico"
       }
     ],
     "mac": {

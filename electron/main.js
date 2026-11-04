@@ -242,6 +242,22 @@ function trayIcon() {
   return img.isEmpty() ? img : img.resize({ width: 16, height: 16 });
 }
 
+// Windows 任务栏按钮跟随窗口图标；不显式设置时从 exe 资源解析，而 Windows 的
+// 图标缓存按路径缓存，频繁覆盖安装后经常回落到旧的 Electron 默认图标。显式给
+// 多尺寸 .ico，绕开缓存。macOS 由 .icns/Dock 负责；Linux 读不了 .ico 时返回
+// undefined，维持原状（AppImage 自带图标）。
+function windowIcon() {
+  if (process.platform === "darwin") return undefined;
+  const file = app.isPackaged
+    ? path.join(process.resourcesPath ?? "", "pi.ico")
+    : path.join(import.meta.dirname, "..", "build", "icon.ico");
+  try {
+    const img = nativeImage.createFromPath(file);
+    if (!img.isEmpty()) return img;
+  } catch {}
+  return undefined;
+}
+
 function showWindow() {
   if (!win || win.isDestroyed()) {
     createWindow();
@@ -282,6 +298,7 @@ function createWindow() {
     frame: process.platform === "darwin",
     titleBarStyle: "hiddenInset",
     backgroundColor: "#14151a",
+    icon: windowIcon(),
     webPreferences: {
       preload: path.join(import.meta.dirname, "preload.cjs"),
       contextIsolation: true,
@@ -668,8 +685,12 @@ app.whenReady().then(() => {
       app.dock.setIcon(path.join(import.meta.dirname, "..", "build", "icon.png"));
     } catch {}
   }
-  // Windows 系统通知需要 AppUserModelID 与开始菜单快捷方式一致
-  if (process.platform === "win32") app.setAppUserModelId("dev.pi.desktop");
+  // Windows 系统通知需要 AppUserModelID 与开始菜单快捷方式一致。dev/E2E 跑的
+  // 是 electron.exe（Electron 默认图标），若与安装版共用同一个 AUMID，Windows 会
+  // 把任务栏的该 AUMID 关联到 electron.exe 的图标——必须拆开。
+  if (process.platform === "win32") {
+    app.setAppUserModelId(app.isPackaged ? "dev.pi.desktop" : "dev.pi.desktop.dev");
+  }
   // First run: create ~/.pi-desktop and migrate the user's pi config/sessions
   // so the app is fully self-contained. Must happen before pi starts.
   ensureAppHome();
