@@ -462,6 +462,13 @@ export type PiBridge = {
     truncatedSheets?: boolean;
     error?: string;
   }>;
+  writeTable: (
+    cwd: string,
+    file: string,
+    abs: string | undefined,
+    sheetName: string,
+    rows: string[][],
+  ) => Promise<{ ok: boolean; bytes?: number; error?: string }>;
   readDoc: (cwd: string, file: string, abs?: string) => Promise<{ ok: boolean; html?: string; error?: string }>;
   readPdf: (cwd: string, file: string, abs?: string) => Promise<{ ok: boolean; data?: Uint8Array; error?: string }>;
   extractText: (cwd: string, file: string, abs?: string) => Promise<{ ok: boolean; text?: string; error?: string }>;

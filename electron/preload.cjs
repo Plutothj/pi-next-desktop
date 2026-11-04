@@ -96,6 +96,8 @@ contextBridge.exposeInMainWorld("pi", {
   recordAttachments: (payload) => ipcRenderer.invoke("attachments:record", payload),
   listAttachments: (cwd) => ipcRenderer.invoke("attachments:list", { cwd }),
   readTable: (cwd, file, abs) => ipcRenderer.invoke("files:readTable", { cwd, file, abs }),
+  writeTable: (cwd, file, abs, sheetName, rows) =>
+    ipcRenderer.invoke("files:writeTable", { cwd, file, abs, sheetName, rows }),
   readDoc: (cwd, file, abs) => ipcRenderer.invoke("files:readDoc", { cwd, file, abs }),
   readPdf: (cwd, file, abs) => ipcRenderer.invoke("files:readPdf", { cwd, file, abs }),
   extractText: (cwd, file, abs) => ipcRenderer.invoke("files:extractText", { cwd, file, abs }),

@@ -604,6 +604,42 @@ async function main() {
     } catch {}
   });
 
+  // 18b. 表格可编辑 + 保存回 xlsx（公式按 = 前缀识别）
+  await check("表格编辑保存", async () => {
+    const work = path.join(agentDir, "..", `pi-e2e-edit-${process.pid}`);
+    fs.mkdirSync(work, { recursive: true });
+    const XLSX = (await import("xlsx")).default ?? (await import("xlsx"));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
+        ["姓名", "工资"],
+        ["张三", "18000"],
+      ]),
+      "Sheet1",
+    );
+    const file = path.join(work, "编辑.xlsx");
+    XLSX.writeFile(wb, file);
+
+    // 走 IPC 验证写回（与 UI 保存按钮同一条路径）
+    const res = await evaluate(
+      `window.pi.writeTable(${JSON.stringify(work)}, "编辑.xlsx", undefined, "Sheet1", [["姓名","工资"],["张三","=18000*2"]]).then(r => JSON.stringify(r))`,
+    );
+    if (!JSON.parse(res).ok) throw new Error("writeTable 失败: " + res);
+
+    const back = XLSX.read(fs.readFileSync(file), { type: "buffer", cellFormula: true, sheetStubs: true });
+    const cell = back.Sheets.Sheet1?.B2;
+    if (cell?.f !== "18000*2") throw new Error(`公式未写入: ${JSON.stringify(cell)}`);
+
+    // 越界写必须拒绝
+    const denied = await evaluate(
+      `window.pi.writeTable(${JSON.stringify(work)}, "../evil.xlsx", undefined, "Sheet1", [["a"]]).then(r => JSON.stringify(r))`,
+    );
+    if (!JSON.parse(denied).error?.includes("越界")) throw new Error("越界写未被拒: " + denied);
+
+    fs.rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  });
+
   // 19. 侧栏折叠：收起后消失、头部出现展开按钮、再展开回来
   await check("侧栏折叠/展开", async () => {
     // 注意：右侧面板也是 <aside>，这里只认左侧栏（含「项目」标题的那块）

@@ -234,6 +234,7 @@ reject（调用方 `.catch` 语义不变）。启动期预期错误（`pi 未运
 | `files:tree` | `{cwd,dir?}` | `{name,path,dir}[]`（≤500） |
 | `files:read` | `{cwd,file,abs?}` | `{content,size}` 或 `{error}`（限工作区、≤1MB） |
 | `files:readTable` | `{cwd,file,abs?}` | xlsx/xls → `{ok,sheets:[{name,rows,truncatedRows}],truncatedSheets}`（SheetJS，`raw:false`；上限 30 sheet / 2000 行 / 80 列 / 20MB） |
+| `files:writeTable` | `{cwd,file,abs?,sheetName,rows}` | 预览编辑写回：只重建指定 sheet（其余保留），`=xxx` 文本写成公式；先写临时文件再替换 |
 | `files:readDoc` | `{cwd,file,abs?}` | docx → `{ok,html}`（mammoth 转 HTML，≤20MB；渲染层必过 DOMPurify） |
 | `files:readPdf` | `{cwd,file,abs?}` | pdf → `{ok,data:Uint8Array}`（≤50MB；渲染层 page.js 画 canvas） |
 | `files:extractText` | `{cwd,file,abs?}` | docx/pdf → `{ok,text}`（复用 `attachments:parse`，供预览面板「问 AI」内联） |
@@ -435,6 +436,10 @@ pi 内部档位解析顺序：会话内 > `settings.modelThinkingLevels[provider
 **外部文件**：工作区外的文件（下载目录、微信接收）走文件面板的「打开文件」按钮——
 `files:pickPreview` 弹系统选择器，选中的绝对路径登记进**仅本次运行有效**的白名单；
 `read*` / `extractText` 用 `abs` 参数读它。未登记路径一律拒（`resolveReadTarget`）。
+
+**可编辑**：xlsx 网格可直接改单元格，脏了出现保存条 →「保存到 xlsx」写回同一文件
+（只重建当前 sheet；以 `=` 开头的输入写成公式，注意公式格必须带缓存值 `v`，否则
+SheetJS 写盘会丢该单元格）。拆分后预览器组件都在 `src/components/preview-views.tsx`。
 
 两个闭环：
 

@@ -219,6 +219,40 @@ export function registerWorkspaceHandlers() {
     }
   });
 
+  // 预览面板编辑后的写回：只重建指定 sheet，其余 sheet 原样保留。
+  // 与读同一条路径守卫；只写 .xlsx；先写临时文件再替换（中断不留半个坏文件）。
+  safeHandle("files:writeTable", async (_e, { cwd, file, abs, sheetName, rows } = {}) => {
+    const resolved = resolveReadTarget(resolveRoot(cwd), file, abs);
+    if (resolved.error) return { ok: false, error: resolved.error };
+    const { target } = resolved;
+    if (!target.toLowerCase().endsWith(".xlsx")) return { ok: false, error: "只能写回 .xlsx 文件" };
+    if (!Array.isArray(rows) || rows.length === 0) return { ok: false, error: "没有可保存的数据" };
+    if (typeof sheetName !== "string" || !sheetName) return { ok: false, error: "缺少工作表名" };
+    try {
+      const XLSX = await import("xlsx");
+      const wb = XLSX.read(fs.readFileSync(target), { type: "buffer", cellFormula: true, sheetStubs: true });
+      if (!wb.SheetNames.includes(sheetName)) return { ok: false, error: `找不到工作表 ${sheetName}` };
+      // 用二维数组反建：先 aoa_to_sheet 拿到规整结构，再把 "=xxx" 文本升级成公式格
+      const clean = rows.map((row) => (Array.isArray(row) ? row.map((v) => (v == null ? "" : String(v))) : []));
+      const ws = XLSX.utils.aoa_to_sheet(clean);
+      for (const addr of Object.keys(ws)) {
+        const cell = ws[addr];
+        if (cell?.t === "s" && typeof cell.v === "string" && /^=[^=]/.test(cell.v)) {
+          // 公式格：保留原文本进 f，给占位缓存值 v（否则 SheetJS 写盘会丢）
+          ws[addr] = { t: "n", f: cell.v.slice(1), v: 0 };
+        }
+      }
+      wb.Sheets[sheetName] = ws;
+      const tmp = `${target}.tmp-${process.pid}`;
+      XLSX.writeFile(wb, tmp);
+      fs.copyFileSync(tmp, target);
+      fs.unlinkSync(tmp);
+      return { ok: true, bytes: fs.statSync(target).size };
+    } catch (err) {
+      return { ok: false, error: `保存失败: ${err.message}` };
+    }
+  });
+
   safeHandle("agents:list", (_e, { cwd } = {}) => {
     const out = [];
     for (const [i, dir] of agentDirs(cwd).entries()) {

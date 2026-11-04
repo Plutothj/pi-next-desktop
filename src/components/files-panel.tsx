@@ -1,17 +1,6 @@
-import { AllCommunityModule, ModuleRegistry, themeQuartz } from "ag-grid-community";
-import { AgGridReact } from "ag-grid-react";
-import DOMPurify from "dompurify";
-import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BundledLanguage } from "shiki";
-
-// pdf.js 需要 worker；Vite 把 worker 作为静态资源交给主进程 file:// 加载
-GlobalWorkerOptions.workerSrc = workerUrl;
-
-// docx 预览要把 mammoth 的 HTML 塞进 DOM：文档内容不可信（外链、内嵌 HTML），
-// 一律先净化（DOMPurify，HTML profile，禁脚本/事件属性）。
-const sanitizeHtml = (html: string) => DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+import { AskAiButton, DelimitedTable, DocView, PdfView, TableGrid } from "@/components/preview-views";
 
 import {
   BracesIcon,
@@ -40,8 +29,6 @@ import { Button } from "@/components/ui/button";
 import type { GitStatus, TreeEntry } from "@/lib/pi";
 import { baseName, cn } from "@/lib/utils";
 
-// AG Grid v33+：模块注册一次（全量 Community 包，桌面应用不差这点体积）
-ModuleRegistry.registerModules([AllCommunityModule]);
 
 const LANGS: Record<string, string> = {
   ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx", json: "json",
@@ -151,6 +138,11 @@ export function FilesPanel({
     truncatedSheets?: boolean;
   } | null>(null);
   const [sheetIndex, setSheetIndex] = useState(0);
+  // 表格编辑：脏标记 / 保存中 / 最近错误；saveSnapshot 由 TableGrid 注入
+  const [sheetDirty, setSheetDirty] = useState(false);
+  const [savingSheet, setSavingSheet] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const saveSnapshot = useRef<(() => string[][]) | undefined>(undefined);
   // docx → HTML 预览
   const [doc, setDoc] = useState<{ path: string; abs?: string; html: string } | null>(null);
   // pdf → 渲染层 pdf.js 预览
@@ -323,12 +315,7 @@ export function FilesPanel({
           <span className="truncate font-mono text-[11px]">{doc.path}</span>
           {onAskAi ? <AskAiButton abs={doc.abs} cwd={cwd} onAsk={(text) => onAskAi(text)} path={doc.path} /> : null}
         </div>
-        {/* mammoth 的 HTML 先过 DOMPurify（文档里的外链/内嵌 HTML 不可信） */}
-        <div
-          className="doc-preview min-h-0 flex-1 overflow-auto px-4 py-3 text-[13px] leading-relaxed"
-          // biome-ignore lint/security/noDangerouslySetInnerHtml: 内容已经 DOMPurify 净化（html profile，无脚本/事件属性）
-          dangerouslySetInnerHTML={{ __html: sanitizeHtml(doc.html) }}
-        />
+        <DocView html={doc.html} />
       </div>
     );
   }
@@ -395,15 +382,63 @@ export function FilesPanel({
           {sheet ? (
             <TableGrid
               dark={dark}
+              editable
               note={
                 sheet.truncatedRows
-                  ? "行数较多，仅显示前 2000 行"
+                  ? "行数较多，仅显示前 2000 行（改动请另存副本）"
                   : workbook.truncatedSheets
                     ? "工作表较多，仅显示前 30 个"
                     : undefined
               }
+              onDirtyChange={setSheetDirty}
+              snapshotRef={saveSnapshot}
               rows={sheet.rows}
             />
+          ) : null}
+          {sheetDirty ? (
+            <div className="flex shrink-0 items-center gap-2 border-t bg-amber-500/10 px-2 py-1.5">
+              <span className="text-[11px] text-amber-600 dark:text-amber-400">
+                单元格已修改（保存会重写该工作表，公式按 = 开头识别）
+              </span>
+              <Button
+                className="ml-auto h-6 px-2 text-[11px]"
+                disabled={savingSheet}
+                onClick={async () => {
+                  const rowsNow = saveSnapshot.current?.();
+                  if (!rowsNow || !sheet) return;
+                  setSavingSheet(true);
+                  const res = await window.pi
+                    .writeTable(cwd, workbook.path, workbook.abs, sheet.name, rowsNow)
+                    .catch((e) => ({ ok: false, error: String(e) }));
+                  setSavingSheet(false);
+                  if (!res.ok) {
+                    setSaveError(res.error ?? "保存失败");
+                    return;
+                  }
+                  setSaveError(null);
+                  setSheetDirty(false);
+                  // 重新载入以显示公式计算后的结构
+                  void open(workbook.path, workbook.abs);
+                }}
+                size="sm"
+              >
+                {savingSheet ? "保存中…" : "保存到 xlsx"}
+              </Button>
+              <Button
+                className="h-6 px-2 text-[11px]"
+                onClick={() => {
+                  setSheetDirty(false);
+                  void open(workbook.path, workbook.abs);
+                }}
+                size="sm"
+                variant="ghost"
+              >
+                放弃改动
+              </Button>
+            </div>
+          ) : null}
+          {saveError ? (
+            <p className="shrink-0 border-t px-2 py-1 text-[11px] text-destructive">{saveError}</p>
           ) : null}
         </div>
       </div>
@@ -596,256 +631,5 @@ export function FilesPanel({
       </div>
       ) : null}
     </div>
-  );
-}
-
-/** CSV/TSV preview, the way ZCode's preview panel renders spreadsheets. */
-/** 表格网格（AG Grid Community）：虚拟滚动、列宽拖拽、排序、quick filter。
- * xlsx sheet 和 csv/tsv 文本共用。主题参数跟随应用深浅色。 */
-function TableGrid({ rows, note, dark }: { rows: string[][]; note?: string; dark: boolean }) {
-  const [q, setQ] = useState("");
-  const [head, ...body] = rows;
-  const maxCols = Math.max(head?.length ?? 0, ...rows.slice(0, 200).map((r) => r.length), 1);
-
-  const columnDefs = useMemo(
-    () =>
-      Array.from({ length: maxCols }, (_, i) => ({
-        headerName: head?.[i] ?? String.fromCharCode(65 + (i % 26)),
-        field: `c${i}`,
-        sortable: true,
-        resizable: true,
-        flex: 1,
-        minWidth: 72,
-        cellClass: "font-mono",
-      })),
-    [maxCols, head],
-  );
-  const rowData = useMemo(
-    () => body.map((row) => Object.fromEntries(Array.from({ length: maxCols }, (_, c) => [`c${c}`, row[c] ?? ""]))),
-    [body, maxCols],
-  );
-  const theme = useMemo(
-    () =>
-      themeQuartz.withParams(
-        dark
-          ? {
-              backgroundColor: "#1b1c22",
-              headerBackgroundColor: "#232429",
-              foregroundColor: "#cfd2da",
-              oddRowBackgroundColor: "#1f2026",
-              borderColor: "#2e3038",
-              headerTextColor: "#9aa0ac",
-              accentColor: "#7aa2f7",
-            }
-          : {
-              backgroundColor: "#ffffff",
-              headerBackgroundColor: "#f3f4f6",
-              foregroundColor: "#1f2328",
-              oddRowBackgroundColor: "#fafafa",
-              borderColor: "#e5e7eb",
-              headerTextColor: "#57606a",
-              accentColor: "#0969da",
-            },
-      ),
-    [dark],
-  );
-
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5">
-        <div className="flex h-6 items-center gap-1.5 rounded border bg-muted/30 px-2">
-          <SearchIcon className="size-3 shrink-0 text-muted-foreground" />
-          <input
-            className="w-36 bg-transparent text-[11px] outline-none placeholder:text-muted-foreground"
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="筛选行…"
-            value={q}
-          />
-        </div>
-        <span className="text-[10px] text-muted-foreground">
-          {rows.length - 1} 行 × {maxCols} 列
-        </span>
-        {note ? <span className="text-[10px] text-amber-500/80">{note}</span> : null}
-        <Button
-          className="ml-auto h-6 px-1.5 text-[11px]"
-          onClick={() => void navigator.clipboard.writeText(rows.map((r) => r.join(",")).join("\n"))}
-          size="sm"
-          variant="ghost"
-        >
-          复制为 CSV
-        </Button>
-      </div>
-      <div className="min-h-0 flex-1">
-        <AgGridReact
-          columnDefs={columnDefs}
-          onGridReady={(e) => {
-            e.api.autoSizeAllColumns?.();
-          }}
-          quickFilterText={q.trim() || undefined}
-          rowData={rowData}
-          theme={theme}
-        />
-      </div>
-    </div>
-  );
-}
-
-/** 预览头部的「问 AI」：把当前文件（及其内容）预填进输入框。
- * - xlsx：让模型用 table 工具读（它读得懂公式与多 sheet）
- * - docx/pdf：主进程抽文本内联（pi 的 read 读不懂二进制） */
-function AskAiButton({
-  abs,
-  cwd,
-  path,
-  sheets,
-  onAsk,
-}: {
-  abs?: string;
-  cwd: string;
-  path: string;
-  sheets?: string[];
-  onAsk: (text: string) => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const build = async () => {
-    const ext = path.split(".").pop()?.toLowerCase() ?? "";
-    if (ext === "xlsx" || ext === "xls") {
-      onAsk(
-        `用 table 工具 action=read 读取「${path}」${sheets?.length ? `（工作表：${sheets.join("、")}）` : ""}，然后：\n`,
-      );
-      return;
-    }
-    if (ext === "pdf" || ext === "docx") {
-      setBusy(true);
-      const res = await window.pi.extractText(cwd, path, abs).catch(() => null);
-      setBusy(false);
-      if (res?.ok && res.text) {
-        const text = res.text.length > 15000 ? `${res.text.slice(0, 15000)}\n…（后略）` : res.text;
-        onAsk(`以下是我打开的文档「${path}」的内容：\n\n${text}\n\n请基于以上内容：\n`);
-        return;
-      }
-    }
-    onAsk(`请分析文件「${path}」：\n`);
-  };
-  return (
-    <Button
-      className="ml-auto h-6 shrink-0 px-1.5 text-[11px]"
-      disabled={busy}
-      onClick={() => void build()}
-      size="sm"
-      title="把该文件带进输入框问 AI（xlsx 走 table 工具读取，docx/pdf 自动抽取文本）"
-      variant="ghost"
-    >
-      {busy ? "读取中…" : "问 AI"}
-    </Button>
-  );
-}
-
-// pdf.js 的类型对外很难引用，简单包一层
-type PdfDoc = Awaited<ReturnType<typeof getDocument>["promise"]>;
-const loadPdf = async (data: Uint8Array): Promise<PdfDoc> => {
-  const task = getDocument({ data });
-  task.onPassword = () => {
-    throw new Error("加密 PDF 暂不支持预览");
-  };
-  return task.promise;
-};
-
-/** PDF 预览：pdf.js 逐页渲染 canvas + 翻页。 */
-function PdfView({ data }: { data: Uint8Array }) {
-  const [doc, setDoc] = useState<Awaited<ReturnType<typeof loadPdf>> | null>(null);
-  const [page, setPage] = useState(1);
-  const [error, setError] = useState<string | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    loadPdf(data)
-      .then((d) => {
-        if (!cancelled) setDoc(d);
-      })
-      .catch((e) => {
-        if (!cancelled) setError(String(e?.message ?? e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [data]);
-
-  useEffect(() => {
-    if (!doc || !canvasRef.current) return;
-    let cancelled = false;
-    doc
-      .getPage(page)
-      .then(async (pdfPage) => {
-        if (cancelled || !canvasRef.current) return;
-        const width = canvasRef.current.parentElement?.clientWidth ?? 340;
-        const scale = width / pdfPage.getViewport({ scale: 1 }).width;
-        const viewport = pdfPage.getViewport({ scale });
-        const canvas = canvasRef.current;
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        await pdfPage.render({ canvas, canvasContext: canvas.getContext("2d")!, viewport }).promise;
-      })
-      .catch(() => null);
-    return () => {
-      cancelled = true;
-    };
-  }, [doc, page]);
-
-  if (error) return <p className="p-3 text-xs text-destructive">PDF 加载失败：{error}</p>;
-  if (!doc) return <p className="p-3 text-xs text-muted-foreground">PDF 加载中…</p>;
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center justify-center gap-2 border-b px-2 py-1">
-        <Button
-          className="size-6 p-0"
-          disabled={page <= 1}
-          onClick={() => setPage((p) => Math.max(1, p - 1))}
-          size="icon-sm"
-          variant="ghost"
-        >
-          <ChevronLeftIcon className="size-3.5" />
-        </Button>
-        <span className="font-mono text-[11px] text-muted-foreground">
-          {page} / {doc.numPages}
-        </span>
-        <Button
-          className="size-6 p-0"
-          disabled={page >= doc.numPages}
-          onClick={() => setPage((p) => Math.min(doc.numPages, p + 1))}
-          size="icon-sm"
-          variant="ghost"
-        >
-          <ChevronRightIcon className="size-3.5" />
-        </Button>
-      </div>
-      <div className="min-h-0 flex-1 overflow-auto bg-muted/30 p-2">
-        <canvas className="mx-auto block rounded bg-white shadow" ref={canvasRef} />
-      </div>
-    </div>
-  );
-}
-
-function DelimitedTable({
-  content,
-  delimiter,
-  dark,
-}: {
-  content: string;
-  delimiter: string;
-  dark: boolean;
-}) {
-  const rows = content
-    .trim()
-    .split(/\r?\n/)
-    .slice(0, 2000)
-    .map((line) => line.split(delimiter));
-  return (
-    <TableGrid
-      dark={dark}
-      note={content.split(/\r?\n/).length > 2000 ? "行数较多，仅显示前 2000 行" : undefined}
-      rows={rows}
-    />
   );
 }
