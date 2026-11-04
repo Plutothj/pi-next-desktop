@@ -1,0 +1,431 @@
+tests\table-extension.test.mjs:92:24 lint/complexity/useLiteralKeys  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━
+
+  i The computed expression can be simplified without the use of a string literal.
+  
+    90 │   const wb = XLSX.read(fs.readFileSync(target), { type: "buffer", cellFormula: true, sheetStubs: true });
+    91 │   assert.deepEqual(wb.SheetNames, ["薪资构成", "参数"], "多 sheet 按顺序写入");
+  > 92 │   const ws = wb.Sheets["薪资构成"];
+       │                        ^^^^^^^^^^
+    93 │   assert.equal(ws.D2.f, "B2+C2", "公式去掉前导 = 后写入");
+    94 │   assert.equal(ws.E2.f, "ROUND(D2*0.105,2)", "ROUND 公式原样保留");
+  
+  i A literal key is easier to read, and tools such as type checkers and minifiers can understand the property name.
+  
+  i Unsafe fix: Use a literal key instead.
+  
+     90  90 │     const wb = XLSX.read(fs.readFileSync(target), { type: "buffer", cellFormula: true, sheetStubs: true });
+     91  91 │     assert.deepEqual(wb.SheetNames, ["薪资构成", "参数"], "多 sheet 按顺序写入");
+     92     │ - ··const·ws·=·wb.Sheets["薪资构成"];
+         92 │ + ··const·ws·=·wb.Sheets.薪资构成;
+     93  93 │     assert.equal(ws.D2.f, "B2+C2", "公式去掉前导 = 后写入");
+     94  94 │     assert.equal(ws.E2.f, "ROUND(D2*0.105,2)", "ROUND 公式原样保留");
+  
+
+electron\agents.js:7:8 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This import is unused.
+  
+    5 │ import { PiProcess, PI_BG_INSTRUCTIONS, probeCli, resolveRuntime } from "./pi-process.js";
+    6 │ import { logLine } from "./logs.js";
+  > 7 │ import path from "node:path";
+      │        ^^^^
+    8 │ 
+    9 │ let nextId = 1;
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+      5   5 │   import { PiProcess, PI_BG_INSTRUCTIONS, probeCli, resolveRuntime } from "./pi-process.js";
+      6   6 │   import { logLine } from "./logs.js";
+      7     │ - import·path·from·"node:path";
+      8   7 │   
+      9   8 │   let nextId = 1;
+  
+
+electron\agents.js:137:9 lint/complexity/useOptionalChain  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Change to an optional chain.
+  
+    135 │   async function message(id, text) {
+    136 │     const agent = agents.get(id);
+  > 137 │     if (!agent || !agent.proc?.running) return { ok: false, error: "会话不在运行" };
+        │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    138 │     const payload = { type: "prompt", message: text };
+    139 │     if (agent.status === "running" && !agent.settled) payload.streamingBehavior = "steer";
+  
+  i An optional chain is shorter, and it avoids repeating the same expression in each check.
+  
+  i Unsafe fix: Change to an optional chain.
+  
+    135 135 │     async function message(id, text) {
+    136 136 │       const agent = agents.get(id);
+    137     │ - ····if·(!agent·||·!agent.proc?.running)·return·{·ok:·false,·error:·"会话不在运行"·};
+        137 │ + ····if·(!agent?.proc?.running)·return·{·ok:·false,·error:·"会话不在运行"·};
+    138 138 │       const payload = { type: "prompt", message: text };
+    139 139 │       if (agent.status === "running" && !agent.settled) payload.streamingBehavior = "steer";
+  
+
+electron\agents.js:153:9 lint/complexity/useOptionalChain  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Change to an optional chain.
+  
+    151 │   async function abort(id) {
+    152 │     const agent = agents.get(id);
+  > 153 │     if (!agent || !agent.proc?.running) return { ok: false, error: "会话不在运行" };
+        │         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    154 │     await agent.proc.command({ type: "abort" }, 5000).catch(() => null);
+    155 │     return { ok: true };
+  
+  i An optional chain is shorter, and it avoids repeating the same expression in each check.
+  
+  i Unsafe fix: Change to an optional chain.
+  
+    151 151 │     async function abort(id) {
+    152 152 │       const agent = agents.get(id);
+    153     │ - ····if·(!agent·||·!agent.proc?.running)·return·{·ok:·false,·error:·"会话不在运行"·};
+        153 │ + ····if·(!agent?.proc?.running)·return·{·ok:·false,·error:·"会话不在运行"·};
+    154 154 │       await agent.proc.command({ type: "abort" }, 5000).catch(() => null);
+    155 155 │       return { ok: true };
+  
+
+electron\main.js:23:3 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Several of these imports are unused.
+  
+    21 │   cliVersion,
+    22 │   PI_BG_INSTRUCTIONS,
+  > 23 │   PiProcess,
+       │   ^^^^^^^^^
+    24 │   probeCli,
+    25 │   resolveRuntime,
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+     20  20 │   import {␍
+     21  21 │     cliVersion,␍
+     22     │ - ··PI_BG_INSTRUCTIONS,␍
+     23     │ - ··PiProcess,␍
+         22 │ + ··PI_BG_INSTRUCTIONS,␍
+     24  23 │     probeCli,␍
+     25  24 │     resolveRuntime,␍
+  
+
+electron\main.js:241:7 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This variable trayNotified is unused.
+  
+    239 │ let tray = null;
+    240 │ let quitting = false;
+  > 241 │ const trayNotified = false;
+        │       ^^^^^^^^^^^^
+    242 │ 
+    243 │ function trayIcon() {
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend trayNotified with an underscore.
+  
+    239 239 │   let tray = null;␍
+    240 240 │   let quitting = false;␍
+    241     │ - const·trayNotified·=·false;␍
+        241 │ + const·_trayNotified·=·false;␍
+    242 242 │   ␍
+    243 243 │   function trayIcon() {␍
+  
+
+electron\main.js:645:22 lint/correctness/noUnusedFunctionParameters  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This parameter timeoutMs is unused.
+  
+    643 │ // 这里把它们代理到当前活动会话的进程上。
+    644 │ const pi = {
+  > 645 │   command: (payload, timeoutMs) => pool.command(activeSession, payload),
+        │                      ^^^^^^^^^
+    646 │   write: (payload) => pool.write(activeSession, payload),
+    647 │   get running() {
+  
+  i Unused parameters might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: If this is intentional, prepend timeoutMs with an underscore.
+  
+    643 643 │   // 这里把它们代理到当前活动会话的进程上。␍
+    644 644 │   const pi = {␍
+    645     │ - ··command:·(payload,·timeoutMs)·=>·pool.command(activeSession,·payload),␍
+        645 │ + ··command:·(payload,·_timeoutMs)·=>·pool.command(activeSession,·payload),␍
+    646 646 │     write: (payload) => pool.write(activeSession, payload),␍
+    647 647 │     get running() {␍
+  
+
+electron\projects.js:33:9 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This variable readProjects is unused.
+  
+    31 │   };
+    32 │ 
+  > 33 │   const readProjects = () => readStore().projects;
+       │         ^^^^^^^^^^^^
+    34 │ 
+    35 │   safeHandle("projects:list", () => {
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend readProjects with an underscore.
+  
+    31 31 │     };␍
+    32 32 │   ␍
+    33    │ - ··const·readProjects·=·()·=>·readStore().projects;␍
+       33 │ + ··const·_readProjects·=·()·=>·readStore().projects;␍
+    34 34 │   ␍
+    35 35 │     safeHandle("projects:list", () => {␍
+  
+
+src\App.tsx:394:9 lint/a11y/noStaticElementInteractions ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Unexpected event handler on static element.
+  
+    393 │       <main className="flex min-w-0 flex-1 flex-col">
+  > 394 │         <header
+        │         ^^^^^^^
+  > 395 │           className="drag flex h-12 shrink-0 items-center gap-2 border-b px-4"
+         ...
+  > 401 │           }}
+  > 402 │         >
+        │         ^
+    403 │           <span className="max-w-56 truncate text-xs text-muted-foreground" title={headerTitle}>
+    404 │             {headerTitle}
+  
+  i Static elements should not be interactive. To add interactivity such as a mouse or key event listener to a static element, give the element an appropriate role value.
+  
+
+src\components\changes-panel.tsx:68:10 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━
+
+  ! This variable tab is unused.
+  
+    66 │   onReverted?: () => void;
+    67 │ }) {
+  > 68 │   const [tab, setTab] = useState<"changes" | "tree">("changes");
+       │          ^^^
+    69 │   const [open, setOpen] = useState<string | null>(null);
+    70 │   const [diffs, setDiffs] = useState<Record<string, DiffData>>({});
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend tab with an underscore.
+  
+     66  66 │     onReverted?: () => void;
+     67  67 │   }) {
+     68     │ - ··const·[tab,·setTab]·=·useState<"changes"·|·"tree">("changes");
+         68 │ + ··const·[_tab,·setTab]·=·useState<"changes"·|·"tree">("changes");
+     69  69 │     const [open, setOpen] = useState<string | null>(null);
+     70  70 │     const [diffs, setDiffs] = useState<Record<string, DiffData>>({});
+  
+
+src\components\changes-panel.tsx:68:15 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━
+
+  ! This variable setTab is unused.
+  
+    66 │   onReverted?: () => void;
+    67 │ }) {
+  > 68 │   const [tab, setTab] = useState<"changes" | "tree">("changes");
+       │               ^^^^^^
+    69 │   const [open, setOpen] = useState<string | null>(null);
+    70 │   const [diffs, setDiffs] = useState<Record<string, DiffData>>({});
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend setTab with an underscore.
+  
+     66  66 │     onReverted?: () => void;
+     67  67 │   }) {
+     68     │ - ··const·[tab,·setTab]·=·useState<"changes"·|·"tree">("changes");
+         68 │ + ··const·[tab,·_setTab]·=·useState<"changes"·|·"tree">("changes");
+     69  69 │     const [open, setOpen] = useState<string | null>(null);
+     70  70 │     const [diffs, setDiffs] = useState<Record<string, DiffData>>({});
+  
+
+src\components\chat.tsx:453:7 lint/a11y/useKeyWithClickEvents ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Enforce to have the onClick mouse event with the onKeyUp, the onKeyDown, or the onKeyPress keyboard event.
+  
+    451 │   return (
+    452 │     <>
+  > 453 │       <img
+        │       ^^^^
+  > 454 │         alt="attachment"
+  > 455 │         className={cn("cursor-zoom-in", className)}
+  > 456 │         onClick={() => setZoom(true)}
+  > 457 │         src={src}
+  > 458 │       />
+        │       ^^
+    459 │       {zoom ? (
+    460 │         <div
+  
+  i Actions triggered using mouse events should have corresponding keyboard events to account for keyboard-only navigation.
+  
+
+src\components\chat.tsx:460:9 lint/a11y/noStaticElementInteractions ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Unexpected event handler on static element.
+  
+    458 │       />
+    459 │       {zoom ? (
+  > 460 │         <div
+        │         ^^^^
+  > 461 │           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-8"
+  > 462 │           onClick={() => setZoom(false)}
+  > 463 │         >
+        │         ^
+    464 │           <img alt="attachment" className="max-h-full max-w-full object-contain" src={src} />
+    465 │         </div>
+  
+  i Static elements should not be interactive. To add interactivity such as a mouse or key event listener to a static element, give the element an appropriate role value.
+  
+
+src\components\chat.tsx:460:9 lint/a11y/useKeyWithClickEvents ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Enforce to have the onClick mouse event with the onKeyUp, the onKeyDown, or the onKeyPress keyboard event.
+  
+    458 │       />
+    459 │       {zoom ? (
+  > 460 │         <div
+        │         ^^^^
+  > 461 │           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-8"
+  > 462 │           onClick={() => setZoom(false)}
+  > 463 │         >
+        │         ^
+    464 │           <img alt="attachment" className="max-h-full max-w-full object-contain" src={src} />
+    465 │         </div>
+  
+  i Actions triggered using mouse events should have corresponding keyboard events to account for keyboard-only navigation.
+  
+
+src\components\context-usage.tsx:64:11 lint/a11y/noSvgWithoutTitle ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Alternative text title element cannot be empty
+  
+    62 │           }
+    63 │         >
+  > 64 │           <svg className="-rotate-90" height="16" viewBox="0 0 20 20" width="16">
+       │           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    65 │             <circle
+    66 │               className="stroke-muted"
+  
+  i For accessibility purposes, SVGs should have an alternative text, provided via title element. If the svg element has role="img", you should add the aria-label or aria-labelledby attribute.
+  
+
+src\components\settings\packages.tsx:78:7 lint/correctness/useExhaustiveDependencies ━━━━━━━━━━━━━━━
+
+  ! search changes on every re-render and should not be used as a hook dependency.
+  
+    76 │   useEffect(() => {
+    77 │     search("");
+  > 78 │   }, [search]);
+       │       ^^^^^^
+    79 │ 
+    80 │   // 哨兵进入视口（外层滚动容器接近底部）时加载下一页
+  
+  i To fix this, wrap the definition of search in its own useCallback() hook.
+  
+
+src\components\settings\schedules.tsx:28:3 lint/correctness/useExhaustiveDependencies  FIXABLE  ━━━━━━━━━━
+
+  ! This hook does not specify its dependency on refresh.
+  
+    27 │   const refresh = () => window.pi.schedules.list().then(setItems).catch(() => {});
+  > 28 │   useEffect(() => {
+       │   ^^^^^^^^^
+    29 │     refresh();
+    30 │   }, []);
+  
+  i This dependency is being used here, but is not specified in the hook dependency list.
+  
+    27 │   const refresh = () => window.pi.schedules.list().then(setItems).catch(() => {});
+    28 │   useEffect(() => {
+  > 29 │     refresh();
+       │     ^^^^^^^
+    30 │   }, []);
+    31 │ 
+  
+  i React relies on hook dependencies to determine when to re-compute Effects.
+    Failing to specify dependencies can result in Effects not updating correctly when state changes.
+    These "stale closures" are a common source of surprising bugs.
+  
+  i Either include it or remove the dependency array.
+  
+  i Unsafe fix: Add the missing dependency refresh to the list.
+  
+    30 │ ··},·[refresh]);
+       │       +++++++   
+
+src\components\ui\button-group.tsx:31:7 lint/a11y/useSemanticElements ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! The elements with this role can be changed to the following elements:
+    <fieldset>
+  
+    29 │   return (
+    30 │     <div
+  > 31 │       role="group"
+       │       ^^^^^^^^^^^^
+    32 │       data-slot="button-group"
+    33 │       data-orientation={orientation}
+  
+  i For examples and more information, see WAI-ARIA Roles
+  
+  i Replace with one of these elements:
+  
+  - <fieldset>
+  
+
+tests\hr-skills.test.mjs:9:8 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This import is unused.
+  
+     7 │ import path from "node:path";
+     8 │ import { installHrSkills } from "../electron/hr-skills.js";
+   > 9 │ import { listSkills } from "../electron/config.js";
+       │        ^^^^^^^^^^^^^^
+    10 │ 
+    11 │ test("hr-skills：安装后三套技能可被 listSkills 解析", async () => {
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+     7  7 │   import path from "node:path";
+     8  8 │   import { installHrSkills } from "../electron/hr-skills.js";
+     9    │ - import·{·listSkills·}·from·"../electron/config.js";
+    10  9 │   
+    11 10 │   test("hr-skills：安装后三套技能可被 listSkills 解析", async () => {
+  
+
+tests\tasks-bridge.test.mjs:117:9 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━
+
+  ! This variable piBgDone is unused.
+  
+    115 │   fs.mkdirSync(runDir, { recursive: true });
+    116 │ 
+  > 117 │   const piBgDone = new Promise((resolve) => {
+        │         ^^^^^^^^
+    118 │     const child = spawn(
+    119 │       process.execPath,
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend piBgDone with an underscore.
+  
+    115 115 │     fs.mkdirSync(runDir, { recursive: true });␍
+    116 116 │   ␍
+    117     │ - ··const·piBgDone·=·new·Promise((resolve)·=>·{␍
+        117 │ + ··const·_piBgDone·=·new·Promise((resolve)·=>·{␍
+    118 118 │       const child = spawn(␍
+    119 119 │         process.execPath,␍
+  
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 16.
+Checked 121 files in 248ms. No fixes applied.
+Found 35 warnings.
+Found 1 info.

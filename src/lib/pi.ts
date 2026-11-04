@@ -435,6 +435,21 @@ export type PiBridge = {
   readFile: (cwd: string, file: string, abs?: string) => Promise<{ content?: string; size?: number; error?: string }>;
   pickPreview: () => Promise<{ ok: boolean; path?: string; name?: string; canceled?: boolean }>;
   debugApproveFile?: (abs: string) => Promise<{ ok: boolean }>;
+  saveAttachment: (payload: { name: string; dataBase64: string }) => Promise<{
+    ok: boolean;
+    path?: string;
+    name?: string;
+    size?: number;
+    error?: string;
+  }>;
+  recordAttachments: (payload: {
+    cwd: string;
+    ts: number;
+    files: { name: string; path: string; kind?: string }[];
+  }) => Promise<{ ok: boolean; error?: string }>;
+  listAttachments: (cwd: string) => Promise<
+    { ts: number; files: { name: string; path: string; kind: string }[] }[]
+  >;
   readTable: (
     cwd: string,
     file: string,

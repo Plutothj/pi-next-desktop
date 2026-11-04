@@ -266,6 +266,8 @@ reject（调用方 `.catch` 语义不变）。启动期预期错误（`pi 未运
 | `pi:debugWidget` | **仅 `PI_DEBUG=1`**：注入一条 widget 事件（与扩展 `setWidget` 同一条渲染通路） |
 | `pi:debugQuit` | **仅 `PI_DEBUG=1`**：走真实 `app.quit()` 退出路径（验证"退出时钩子"类逻辑；硬杀不会给主进程跑钩子的机会） |
 | `ui:getThinkingPrefs` / `ui:setThinkingPref` | 每模型思考档位记忆，存 `<userData>/ui.json` 的 `thinkingLevels`（键 `provider/modelId`）。**不要写进 pi 的 settings.json**，见 §7.9 |
+| `attachments:save` | `{name,dataBase64}` | 原件落盘到 `<APP_HOME>/attachments/<YYYY-MM>/`，并登记进预览白名单；聊天 chip 据此点开预览 |
+| `attachments:record` / `attachments:list` | `{cwd,ts,files}` / `{cwd}` | 按 (cwd,ts) 记账/查询消息附件（新会话首条消息前还没有 sessionFile，按会话键会漏） |
 | `attachments:parse` | 附件解析：pdf/docx 提取纯文本（unpdf/mammoth），zip 解压到临时目录并返回清单（防 zip-slip/超限）；渲染层将结果内联进 prompt |
 
 ---
@@ -424,6 +426,10 @@ pi 内部档位解析顺序：会话内 > `settings.modelThinkingLevels[provider
 | csv / tsv | `files:read`（文本） | 同一套 `TableGrid`（`DelimitedTable` 切分后复用） |
 | docx | `files:readDoc`（mammoth → HTML） | `.doc-preview` 排版样式 + **DOMPurify 净化后** `dangerouslySetInnerHTML` |
 | pdf | `files:readPdf`（字节） | **pdfjs-dist** 渲染 canvas、翻页、适宽（worker 经 Vite `?url` 走 `file://`） |
+
+**聊天附件**：发送时原件落盘（`attachments:save`）+ 按 `(cwd, ts)` 记入
+`<APP_HOME>/attachments/index.json`；聊天里的 user 消息渲染可点击 chip，点击派发
+`pi:preview-file` → App 打开右侧面板 → 文件面板用 `abs` 读它（白名单已由落盘登记）。
 
 **外部文件**：工作区外的文件（下载目录、微信接收）走文件面板的「打开文件」按钮——
 `files:pickPreview` 弹系统选择器，选中的绝对路径登记进**仅本次运行有效**的白名单；
@@ -593,6 +599,7 @@ npm run stage             # 把本机 pi bundle 复制进 runtime/
   pdfjs-dist / DOMPurify（见 §7.10）；预览「问 AI」与回合结束自动重读
 - **table 扩展**：模型可读写带公式的 xlsx；依赖复制到 `<agent>/extensions/node_modules`
 - **todo 扩展**：`turn_end` 仍有未完成项时自动注入提醒（同批防循环）
+- **附件落盘**：发送时原件存 `<APP_HOME>/attachments`，聊天 chip 可点开预览
 - **内置技能包**：HR 文案三件套（员工沟通 / 会议纪要 / 活动方案），启动时写入 <agent>/skills
 - **侧栏**：去掉顶部搜索输入框；"新建会话"下沉到项目行悬停 ＋；driver.js 首启引导
   （`pi:tour` 事件可从 设置→版本 重放）

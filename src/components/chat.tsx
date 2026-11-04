@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { mermaid } from "@streamdown/mermaid";
 import { stripDirective } from "@/lib/promptPrefixes";
 import {
@@ -8,6 +8,7 @@ import {
   CopyIcon,
   FilePenLineIcon,
   FileTextIcon,
+  PaperclipIcon,
   GitForkIcon,
   Loader2Icon,
   PencilLineIcon,
@@ -243,10 +244,78 @@ const BADGES: Record<"plan" | "dualPlan" | "dualExec", string> = {
   dualExec: "执行阶段",
 };
 
+// 已落盘附件的索引：按消息时间戳就近匹配（附件在发送前落盘，与 pi 记录的
+// user 消息 timestamp 相差几百毫秒内）。发送/索引变化通过 window 事件刷新。
+type SavedFile = { name: string; path: string; kind: string };
+type AttachmentRecord = { ts: number; files: SavedFile[] };
+const ATTACH_TOLERANCE_MS = 10_000;
+
+function useSavedAttachments(cwd: string) {
+  const [records, setRecords] = useState<AttachmentRecord[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      window.pi
+        .listAttachments(cwd)
+        .then((list) => {
+          if (alive) setRecords(list);
+        })
+        .catch(() => null);
+    };
+    load();
+    window.addEventListener("pi:attachments-changed", load);
+    return () => {
+      alive = false;
+      window.removeEventListener("pi:attachments-changed", load);
+    };
+  }, [cwd]);
+
+  return useCallback(
+    (ts?: number): SavedFile[] => {
+      if (!ts) return [];
+      let best: AttachmentRecord | null = null;
+      for (const r of records) {
+        const d = Math.abs(r.ts - ts);
+        if (d > ATTACH_TOLERANCE_MS) continue;
+        if (!best || d < Math.abs(best.ts - ts)) best = r;
+      }
+      return best?.files ?? [];
+    },
+    [records],
+  );
+}
+
+/** 聊天里的附件 chip：点击派发到 App → 右侧预览面板加载该文件 */
+function AttachmentChips({ files }: { files: SavedFile[] }) {
+  if (!files.length) return null;
+  return (
+    <div className="mb-1.5 flex flex-wrap gap-1.5">
+      {files.map((file) => (
+        <button
+          className="flex max-w-56 items-center gap-1 rounded-full border bg-background/60 px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          key={file.path}
+          onClick={() =>
+            window.dispatchEvent(
+              new CustomEvent("pi:preview-file", { detail: { abs: file.path, name: file.name } }),
+            )
+          }
+          title={`点击预览：${file.path}`}
+          type="button"
+        >
+          <PaperclipIcon className="size-3 shrink-0" />
+          <span className="truncate">{file.name}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 const UserMessage = memo(function UserMessage({
+  files,
   message,
   onFork,
 }: {
+  files?: SavedFile[];
   message: PiMessage;
   onFork?: (message: PiMessage) => void;
 }) {
@@ -263,6 +332,7 @@ const UserMessage = memo(function UserMessage({
             {badge}
           </span>
         ) : null}
+        <AttachmentChips files={files ?? []} />
         {text ? (
           <MessageResponse
             className="chat-md"
@@ -457,6 +527,7 @@ export function Transcript({
   // Long sessions get one page at a time: the DOM stays small no matter how
   // many turns the transcript holds.
   const [limit, setLimit] = useState(PAGE);
+  const resolveAttachments = useSavedAttachments(cwd);
 
   // toolResult messages live in the transcript but render inside their card.
   const results = useMemo(() => {
@@ -495,7 +566,14 @@ export function Transcript({
 
         {windowed.map((message, i) => {
           if (message.role === "user") {
-            return <UserMessage key={start + i} message={message} onFork={onFork} />;
+            return (
+              <UserMessage
+                files={resolveAttachments(message.timestamp)}
+                key={start + i}
+                message={message}
+                onFork={onFork}
+              />
+            );
           }
           if (message.role === "assistant") {
             return (

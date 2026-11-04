@@ -195,6 +195,8 @@ function Shell() {
   });
 
   const [panel, setPanel] = useState<PanelTab | null>(null);
+  // 聊天附件 chip 点开预览：{abs,name,seq} 传给文件面板
+  const [previewFile, setPreviewFile] = useState<{ abs: string; name: string; seq: number } | null>(null);
   const { tasks, run: runTask, kill: killTask, remove: removeTask, hosts } = useTasks();
   useNotifications(state.isStreaming, state.sessionName, tasks);
   const { git, refresh: refreshGit } = useGit(state.cwd, state.isStreaming);
@@ -283,11 +285,31 @@ function Shell() {
     return () => window.removeEventListener("pi:tour", onTour);
   }, []);
 
+  // 聊天附件 chip → 打开右侧文件面板并预览该文件
+  useEffect(() => {
+    const onPreview = (event: Event) => {
+      const detail = (event as CustomEvent<{ abs: string; name: string }>).detail;
+      if (!detail?.abs) return;
+      setPanel("files");
+      setPreviewFile({ abs: detail.abs, name: detail.name, seq: Date.now() });
+    };
+    window.addEventListener("pi:preview-file", onPreview);
+    return () => window.removeEventListener("pi:preview-file", onPreview);
+  }, []);
+
   const submit = async (message: PromptInputMessage, behavior?: "steer" | "followUp") => {
     const text = message.text.trim();
     if (!text) return;
     // 附件分流：图片走原生 image part，其余解析为文本块内联进 prompt
-    const { images, extraText } = await expandAttachments(message.files);
+    const { images, extraText, saved } = await expandAttachments(message.files);
+    // 附件落盘索引：按 (cwd, ts) 记账，聊天里的 chip 据此点开预览
+    if (saved.length) {
+      const ts = Date.now();
+      window.pi
+        .recordAttachments({ cwd: state.cwd, ts, files: saved })
+        .then(() => window.dispatchEvent(new CustomEvent("pi:attachments-changed")))
+        .catch(() => null);
+    }
     // A fresh task with dual-model enabled starts the planning turn.
     if (dual.config.enabled && dualChain.phase === "idle" && !state.isStreaming) {
       const planner = dual.find(state.models, dual.config.planner);
@@ -642,6 +664,7 @@ function Shell() {
                 onAskAi={(text) => {
                   controller.textInput.setInput(text);
                 }}
+                previewRequest={previewFile}
                 refreshToken={previewTick}
               />
             ) : null}

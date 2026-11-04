@@ -50,10 +50,27 @@ const wrap = (name: string, note: string, body?: string) =>
 
 export async function expandAttachments(
   files?: FileUIPart[],
-): Promise<{ images: FileUIPart[]; extraText: string }> {
+): Promise<{
+  images: FileUIPart[];
+  extraText: string;
+  // 落盘副本（聊天 chip 点开预览用）；失败不影响发送
+  saved: { name: string; path: string; kind: string }[];
+}> {
   const images: FileUIPart[] = [];
   const blocks: string[] = [];
+  const saved: { name: string; path: string; kind: string }[] = [];
   let total = 0;
+
+  // 原件落盘：附件发送后用户还能在预览面板重新打开（图片/表格/文档都存）
+  const persist = async (part: FileUIPart, name: string, kind: string) => {
+    try {
+      const bytes = await decode(part);
+      const res = await window.pi.saveAttachment({ name, dataBase64: toBase64(bytes) });
+      if (res.ok && res.path) saved.push({ name: res.name ?? name, path: res.path, kind });
+    } catch {
+      // 落盘失败（配额/权限）静默降级：附件本身照常发送
+    }
+  };
 
   for (const part of files ?? []) {
     const name = part.filename || "attachment";
@@ -62,6 +79,7 @@ export async function expandAttachments(
 
     if (mime.startsWith("image/") || IMAGE_EXT.has(ext)) {
       images.push(part);
+      void persist(part, name, "image");
       continue;
     }
     if (total >= MAX_TOTAL_CHARS) {
@@ -77,6 +95,7 @@ export async function expandAttachments(
         const text = cap(res.text, 60_000);
         total += text.length;
         blocks.push(wrap(name, "PDF 提取的纯文本，版式与图片未保留", text || "（未提取到文本，可能是扫描件）"));
+        await persist(part, name, "pdf");
       } else if (ext === "docx" || mime.includes("wordprocessingml")) {
         const bytes = await decode(part);
         const res = await window.pi.parseAttachment({ name, dataBase64: toBase64(bytes) });
@@ -84,6 +103,7 @@ export async function expandAttachments(
         const text = cap(res.text, 60_000);
         total += text.length;
         blocks.push(wrap(name, "docx 提取的纯文本，格式信息未保留", text || "（空文档）"));
+        await persist(part, name, "docx");
       } else if (["xlsx", "xls", "xlsm"].includes(ext) || mime.includes("spreadsheetml")) {
         const bytes = await decode(part);
         const res = await window.pi.parseAttachment({ name, dataBase64: toBase64(bytes) });
@@ -91,6 +111,7 @@ export async function expandAttachments(
         const text = cap(res.text, 60_000);
         total += text.length;
         blocks.push(wrap(name, "表格转 CSV（按 Sheet 分节，公式与样式未保留）", text || "（空表格）"));
+        await persist(part, name, "table");
       } else if (ext === "zip" || mime === "application/zip") {
         const bytes = await decode(part);
         const res = await window.pi.parseAttachment({ name, dataBase64: toBase64(bytes) });
@@ -113,6 +134,7 @@ export async function expandAttachments(
           const capped = cap(text);
           total += capped.length;
           blocks.push(wrap(name, "", capped));
+          await persist(part, name, "text");
         }
       } else {
         blocks.push(wrap(name, "暂不支持解析此类型"));
@@ -122,5 +144,5 @@ export async function expandAttachments(
     }
   }
 
-  return { images, extraText: blocks.join("\n\n") };
+  return { images, extraText: blocks.join("\n\n"), saved };
 }

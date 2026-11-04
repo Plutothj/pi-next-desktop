@@ -37,6 +37,11 @@ import { installTodoExtension } from "./todo-extension.js";
 import { registerUpdater } from "./updater.js";
 import { registerUsageHandlers } from "./usage-ipc.js";
 import { approvePreviewFile, registerWorkspaceHandlers } from "./workspace.js";
+import {
+  listMessageAttachments,
+  recordMessageAttachments,
+  saveAttachment,
+} from "./attachments-store.js";
 
 // ---------------------------------------------------------------- wiring
 
@@ -556,6 +561,20 @@ safeHandle("pi:send", async (_e, payload) => {
 });
 
 // 附件解析：pdf/docx 提取文本、zip 解压到临时目录（渲染层把结果内联进 prompt）
+// 附件落盘（聊天 chip 可点开预览）与按 (cwd, ts) 的消息索引
+safeHandle("attachments:save", (_e, payload) => {
+  const { name, dataBase64 } = requireObject(payload, "payload");
+  return saveAttachment({ name: optionalString(name, "name"), dataBase64: requireString(dataBase64, "dataBase64") });
+});
+safeHandle("attachments:record", (_e, payload) => {
+  const p = requireObject(payload, "payload");
+  return recordMessageAttachments(p);
+});
+safeHandle("attachments:list", (_e, payload) => {
+  const { cwd } = requireObject(payload, "payload");
+  return listMessageAttachments({ cwd: optionalString(cwd, "cwd") });
+});
+
 safeHandle("attachments:parse", async (_e, payload) => {
   requireObject(payload, "payload");
   return parseAttachment(payload).catch((err) => ({ ok: false, error: err.message }));

@@ -124,12 +124,15 @@ export function FilesPanel({
   changes,
   dark = true,
   onAskAi,
+  previewRequest,
   refreshToken,
 }: {
   cwd: string;
   changes?: GitStatus["changes"];
   dark?: boolean;
   onAskAi?: (prompt: string) => void;
+  // 聊天附件 chip 点开：{abs,name,seq} 每次请求递增 seq
+  previewRequest?: { abs: string; name: string; seq: number } | null;
   // 每回合结束 +1：预览中的文件若被 AI 改写，自动重新读取
   refreshToken?: number;
 }) {
@@ -285,6 +288,14 @@ export function FilesPanel({
     const res = await window.pi.readFile(cwd, path, abs);
     setFile({ path, abs, content: res.content ?? res.error ?? "" });
   };
+
+  // 聊天附件 chip：收到请求就打开该绝对路径文件（预览面板直接展示）
+  const lastPreviewSeq = useRef(0);
+  useEffect(() => {
+    if (!previewRequest?.abs || previewRequest.seq === lastPreviewSeq.current) return;
+    lastPreviewSeq.current = previewRequest.seq;
+    void open(previewRequest.abs, previewRequest.abs);
+  }, [previewRequest, open]);
 
   // 当前预览的路径（自动刷新用）
   const currentPreview = file ?? workbook ?? doc ?? pdf;
