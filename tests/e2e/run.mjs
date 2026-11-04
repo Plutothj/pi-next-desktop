@@ -594,8 +594,8 @@ async function main() {
     if (!p.ok || p.bytes < 200) throw new Error(`readPdf: ${pdf}`);
 
     // 越界守卫
-    const escape = await evaluate(`window.pi.readTable(${JSON.stringify(work)}, "../evil.xlsx").then(r => JSON.stringify(r.error))`);
-    if (!String(escape).includes("越界")) throw new Error(`越界未被拒: ${escape}`);
+    const escapeGuard = await evaluate(`window.pi.readTable(${JSON.stringify(work)}, "../evil.xlsx").then(r => JSON.stringify(r.error))`);
+    if (!String(escapeGuard).includes("越界")) throw new Error(`越界未被拒: ${escapeGuard}`);
 
     // 清理失败（Windows 句柄延迟）不该让用例失败：吞掉即可
     try {

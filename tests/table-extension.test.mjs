@@ -109,9 +109,9 @@ test("table 扩展：路径与类型守卫", async () => {
   const { tool, work, dir } = await loadTableExtension();
   const sheets = [{ name: "S", rows: [["a"]] }];
 
-  const escape = await tool.execute("c1", { action: "write", path: "../evil.xlsx", sheets }, null, null, { cwd: work });
-  assert.equal(escape.isError, true, "越界路径必须拒绝");
-  assert.match(cellText(escape), /escapes/);
+  const escapeGuard = await tool.execute("c1", { action: "write", path: "../evil.xlsx", sheets }, null, null, { cwd: work });
+  assert.equal(escapeGuard.isError, true, "越界路径必须拒绝");
+  assert.match(cellText(escapeGuard), /escapes/);
 
   const badExt = await tool.execute("c2", { action: "write", path: "x.csv", sheets }, null, null, { cwd: work });
   assert.equal(badExt.isError, true, "非 xlsx 必须拒绝");
