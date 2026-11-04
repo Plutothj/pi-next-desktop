@@ -64,6 +64,8 @@ contextBridge.exposeInMainWorld("pi", {
     abort: (id) => ipcRenderer.invoke("board:abort", id),
   },
   zoom: (delta) => ipcRenderer.invoke("ui:zoom", { delta }),
+  getPref: (key) => ipcRenderer.invoke("ui:getPref", { key }),
+  setPref: (key, value) => ipcRenderer.invoke("ui:setPref", { key, value }),
   zoomReset: () => ipcRenderer.invoke("ui:zoomReset"),
   zoomSet: (factor) => ipcRenderer.invoke("ui:zoomSet", { factor }),
   zoomGet: () => ipcRenderer.invoke("ui:zoomGet"),

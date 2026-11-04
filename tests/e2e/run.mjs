@@ -194,6 +194,7 @@ async function main() {
         PI_CLI: cli,
         PI_NODE: node,
         PI_DESKTOP_HOME: `${agentDir}-home`, // projects.json 等也隔离，别污染真实 ~/.pi-desktop
+        PI_USER_DATA: `${agentDir}-userdata`, // ui.json（侧栏折叠/缩放）也别污染开发者环境
         PI_AGENT_DIR: agentDir,
         PI_E2E: "1",
         PI_DEBUG: "1", // 启用 debugWidget 等测试注入通道
@@ -603,6 +604,27 @@ async function main() {
     } catch {}
   });
 
+  // 19. 侧栏折叠：收起后消失、头部出现展开按钮、再展开回来
+  await check("侧栏折叠/展开", async () => {
+    // 注意：右侧面板也是 <aside>，这里只认左侧栏（含「项目」标题的那块）
+    const hasSidebar = () => evaluate("Boolean(document.querySelector('aside.w-64'))");
+    if (!(await hasSidebar())) throw new Error("起始状态侧栏不存在");
+    await evaluate(
+      "[...document.querySelectorAll('aside button')].find(b => (b.title||'').includes('收起侧栏'))?.click()",
+    );
+    await sleep(500);
+    if (await hasSidebar()) throw new Error("收起后侧栏仍然存在");
+    const expand = await evaluate(
+      "Boolean([...document.querySelectorAll('header button')].find(b => (b.title||'').includes('展开侧栏')))",
+    );
+    if (!expand) throw new Error("收起后头部没有展开按钮");
+    await evaluate(
+      "[...document.querySelectorAll('header button')].find(b => (b.title||'').includes('展开侧栏'))?.click()",
+    );
+    await sleep(500);
+    if (!(await hasSidebar())) throw new Error("展开后侧栏没回来");
+  });
+
   ws.close();
 }
 
@@ -623,6 +645,7 @@ main()
     // 隔离的 APP_HOME 目录一并清掉（projects.json 等测试期间写入的都在里面）
     try {
       fs.rmSync(`${agentDir}-home`, { recursive: true, force: true });
+      fs.rmSync(`${agentDir}-userdata`, { recursive: true, force: true });
     } catch {}
     setTimeout(() => process.exit(process.exitCode ?? 0), 500);
   });

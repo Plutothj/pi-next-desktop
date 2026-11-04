@@ -382,6 +382,8 @@ export type PiBridge = {
     abort: (id: string) => Promise<{ ok: boolean; error?: string }>;
   };
   zoom: (delta: number) => Promise<{ ok: boolean; factor?: number }>;
+  getPref: (key: string) => Promise<{ value: unknown }>;
+  setPref: (key: string, value: unknown) => Promise<{ ok: boolean }>;
   zoomReset: () => Promise<{ ok: boolean; factor?: number }>;
   zoomSet: (factor: number) => Promise<{ ok: boolean; factor?: number; error?: string }>;
   zoomGet: () => Promise<number>;

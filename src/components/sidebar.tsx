@@ -5,6 +5,7 @@ import {
   FolderPlusIcon,
   MessageSquarePlusIcon,
   MoonIcon,
+  PanelLeftCloseIcon,
   SearchIcon,
   Settings2Icon,
   SunIcon,
@@ -241,6 +242,7 @@ export function SessionSidebar({
   onOpenSettings,
   onCreateProject,
   onToggleTheme,
+  onCollapse,
   openProject,
   openSession,
   deleteSession,
@@ -256,6 +258,8 @@ export function SessionSidebar({
   onOpenSettings: () => void;
   onCreateProject: () => void;
   onToggleTheme: () => void;
+  // 收起侧栏（⌘B / 头部按钮），状态持久化在 ui.json
+  onCollapse: () => void;
   openProject: (path: string) => void;
   openSession: (path: string, cwd?: string) => void | Promise<void>;
   deleteSession: (path: string) => Promise<void>;
@@ -317,6 +321,15 @@ export function SessionSidebar({
         </Button>
         <Button className="no-drag" onClick={onOpenSkills} size="icon-sm" title="技能" variant="ghost">
           <WrenchIcon />
+        </Button>
+        <Button
+          className="no-drag"
+          onClick={onCollapse}
+          size="icon-sm"
+          title="收起侧栏（⌘B）"
+          variant="ghost"
+        >
+          <PanelLeftCloseIcon />
         </Button>
       </div>
 

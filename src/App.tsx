@@ -8,6 +8,7 @@ import {
   ListTreeIcon,
   Minimize2Icon,
   MinusIcon,
+  PanelLeftOpenIcon,
   RocketIcon,
   SquareIcon,
   TerminalIcon,
@@ -195,6 +196,21 @@ function Shell() {
   });
 
   const [panel, setPanel] = useState<PanelTab | null>(null);
+  // 侧栏折叠：持久化在 ui.json（与缩放/思考档位同一层 app prefs）
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  useEffect(() => {
+    window.pi
+      .getPref("sidebarCollapsed")
+      .then((r) => {
+        if (typeof r.value === "boolean") setSidebarCollapsed(r.value);
+      })
+      .catch(() => null);
+  }, []);
+  const toggleSidebar = useCallback((next: boolean) => {
+    setSidebarCollapsed(next);
+    window.pi.setPref("sidebarCollapsed", next).catch(() => null);
+  }, []);
+
   // 聊天附件 chip 点开预览：{abs,name,seq} 传给文件面板
   const [previewFile, setPreviewFile] = useState<{ abs: string; name: string; seq: number } | null>(null);
   const { tasks, run: runTask, kill: killTask, remove: removeTask, hosts } = useTasks();
@@ -269,6 +285,14 @@ function Shell() {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n") {
         event.preventDefault();
         newSession();
+      }
+      // ⌘B / Ctrl+B：收起/展开侧栏
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "b") {
+        event.preventDefault();
+        setSidebarCollapsed((prev) => {
+          window.pi.setPref("sidebarCollapsed", !prev).catch(() => null);
+          return !prev;
+        });
       }
     };
     window.addEventListener("keydown", onKey);
@@ -370,7 +394,9 @@ function Shell() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
+      {sidebarCollapsed ? null : (
       <SessionSidebar
+        onCollapse={() => toggleSidebar(true)}
         state={state}
         theme={theme}
         update={updater.state}
@@ -389,6 +415,7 @@ function Shell() {
         deleteSession={deleteSession}
         renameSession={renameSession}
       />
+      )}
 
       <main className="flex min-w-0 flex-1 flex-col">
         <header
@@ -400,6 +427,17 @@ function Shell() {
             void window.pi.win.toggleMaximize();
           }}
         >
+          {sidebarCollapsed ? (
+            <Button
+              className="h-7 shrink-0 px-2 text-muted-foreground"
+              onClick={() => toggleSidebar(false)}
+              size="sm"
+              title="展开侧栏（⌘B）"
+              variant="ghost"
+            >
+              <PanelLeftOpenIcon className="size-3.5" />
+            </Button>
+          ) : null}
           <span className="max-w-56 truncate text-xs text-muted-foreground" title={headerTitle}>
             {headerTitle}
           </span>

@@ -416,6 +416,17 @@ safeHandle("ui:zoomReset", () => {
   return factor === null ? { ok: false } : { ok: true, factor };
 });
 
+// 通用 UI 偏好（侧栏折叠等）：键值都进 ui.json，启动时读回
+safeHandle("ui:getPref", (_e, { key } = {}) => {
+  const k = requireString(key, "key");
+  return { value: readUiPrefs()[k] ?? null };
+});
+safeHandle("ui:setPref", (_e, { key, value } = {}) => {
+  const k = requireString(key, "key");
+  writeUiPrefs({ [k]: value });
+  return { ok: true };
+});
+
 safeHandle("ui:zoomSet", (_e, { factor } = {}) => {
   const value = Number(factor);
   if (!Number.isFinite(value)) return { ok: false, error: "无效缩放值" };
@@ -703,7 +714,11 @@ safeHandle("term:remove", (_e, id) => taskManager.removeTask(id));
 
 // dev 与打包版共用 app name "pi-desktop"，默认会共用 %APPDATA%/pi-desktop：
 // 缓存互斥报错，单实例锁也会被对方进程占住。dev 指到独立目录。
-if (!app.isPackaged) {
+// PI_USER_DATA 优先：E2E 用独立目录，避免测试期间的 UI 偏好（侧栏折叠等）
+// 写进开发者的真实 userData。
+if (process.env.PI_USER_DATA) {
+  app.setPath("userData", process.env.PI_USER_DATA);
+} else if (!app.isPackaged) {
   app.setPath("userData", path.join(app.getPath("appData"), "pi-desktop-dev"));
 }
 // 单实例（按 userData 目录隔离：dev 与打包版互不冲突）。二次启动时唤起已有

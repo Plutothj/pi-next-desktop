@@ -265,6 +265,7 @@ reject（调用方 `.catch` 语义不变）。启动期预期错误（`pi 未运
 | `pi:debugDialog` | **仅 `PI_DEBUG=1`**：注入一个假的扩展对话框用于调试 |
 | `pi:debugWidget` | **仅 `PI_DEBUG=1`**：注入一条 widget 事件（与扩展 `setWidget` 同一条渲染通路） |
 | `pi:debugQuit` | **仅 `PI_DEBUG=1`**：走真实 `app.quit()` 退出路径（验证"退出时钩子"类逻辑；硬杀不会给主进程跑钩子的机会） |
+| `ui:getPref` / `ui:setPref` | `{key}` / `{key,value}` | 通用 UI 偏好（侧栏折叠 `sidebarCollapsed` 等），读写 `<userData>/ui.json` |
 | `ui:getThinkingPrefs` / `ui:setThinkingPref` | 每模型思考档位记忆，存 `<userData>/ui.json` 的 `thinkingLevels`（键 `provider/modelId`）。**不要写进 pi 的 settings.json**，见 §7.9 |
 | `attachments:save` | `{name,dataBase64}` | 原件落盘到 `<APP_HOME>/attachments/<YYYY-MM>/`，并登记进预览白名单；聊天 chip 据此点开预览 |
 | `attachments:record` / `attachments:list` | `{cwd,ts,files}` / `{cwd}` | 按 (cwd,ts) 记账/查询消息附件（新会话首条消息前还没有 sessionFile，按会话键会漏） |
@@ -534,6 +535,7 @@ npm run stage             # 把本机 pi bundle 复制进 runtime/
 | `PI_DEV_URL` | 渲染层加载 Vite dev server（热更新） |
 | `PI_CLI` / `PI_NODE` | 覆盖 pi CLI / 解释器 |
 | `PI_DEBUG` | 打开 `pi:debugDialog` / `pi:debugWidget` / `pi:debugQuit`、boot 轮询日志 |
+| `PI_USER_DATA` | 覆盖 Electron userData（ui.json / 单实例锁）。**E2E 必须设**，否则测试改的 UI 偏好会写进开发者环境 |
 | `PI_DESKTOP_HOME` | 覆盖 APP_HOME（默认 `~/.pi-desktop`）：projects.json、bin/、ui.json 都在这一层。**E2E 必须设**，否则测试会把 fixture 目录写进用户真实 projects.json |
 | `PI_AGENT_DIR` | 覆盖 agent 目录（默认 `<APP_HOME>/agent`） |
 | `PI_DESKTOP_TERM_SOCK` | 由主进程注入给子进程，指向任务桥 |
@@ -599,6 +601,7 @@ npm run stage             # 把本机 pi bundle 复制进 runtime/
   pdfjs-dist / DOMPurify（见 §7.10）；预览「问 AI」与回合结束自动重读
 - **table 扩展**：模型可读写带公式的 xlsx；依赖复制到 `<agent>/extensions/node_modules`
 - **todo 扩展**：`turn_end` 仍有未完成项时自动注入提醒（同批防循环）
+- **侧栏折叠**：头部「收起侧栏」按钮 / ⌘B（Ctrl+B），状态持久化在 ui.json；折叠后由主界面头部按钮展开
 - **附件落盘**：发送时原件存 `<APP_HOME>/attachments`，聊天 chip 可点开预览
 - **内置技能包**：HR 文案三件套（员工沟通 / 会议纪要 / 活动方案），启动时写入 <agent>/skills
 - **侧栏**：去掉顶部搜索输入框；"新建会话"下沉到项目行悬停 ＋；driver.js 首启引导
