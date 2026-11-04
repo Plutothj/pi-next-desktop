@@ -233,6 +233,10 @@ reject（调用方 `.catch` 语义不变）。启动期预期错误（`pi 未运
 | `files:search` | `{cwd,query}` | `string[]`（≤40，深度/数量受限） |
 | `files:tree` | `{cwd,dir?}` | `{name,path,dir}[]`（≤500） |
 | `files:read` | `{cwd,file}` | `{content,size}` 或 `{error}`（限工作区、≤1MB） |
+| `files:readTable` | `{cwd,file}` | xlsx/xls → `{ok,sheets:[{name,rows,truncatedRows}],truncatedSheets}`（SheetJS，`raw:false`；上限 30 sheet / 2000 行 / 80 列 / 20MB） |
+| `files:readDoc` | `{cwd,file}` | docx → `{ok,html}`（mammoth 转 HTML，≤20MB；渲染层必过 DOMPurify） |
+| `files:readPdf` | `{cwd,file}` | pdf → `{ok,data:Uint8Array}`（≤50MB；渲染层 page.js 画 canvas） |
+| `files:extractText` | `{cwd,file}` | docx/pdf → `{ok,text}`（复用 `attachments:parse`，供预览面板「问 AI」内联） |
 | `agents:list` | `{cwd?}` | `AgentProfile[]` |
 | `ssh:hosts` | – | `string[]`（解析 `~/.ssh/config`） |
 
@@ -257,6 +261,9 @@ reject（调用方 `.catch` 语义不变）。启动期预期错误（`pi 未运
 | `cfg:install` / `cfg:uninstall` | shell out `pi install/remove`，输出经 `cfg_progress` 流式回传 |
 | `diag:export` | 保存诊断 txt（版本/平台/运行时/会话/任务/日志），完成后可显示于 Finder |
 | `pi:debugDialog` | **仅 `PI_DEBUG=1`**：注入一个假的扩展对话框用于调试 |
+| `pi:debugWidget` | **仅 `PI_DEBUG=1`**：注入一条 widget 事件（与扩展 `setWidget` 同一条渲染通路） |
+| `pi:debugQuit` | **仅 `PI_DEBUG=1`**：走真实 `app.quit()` 退出路径（验证"退出时钩子"类逻辑；硬杀不会给主进程跑钩子的机会） |
+| `ui:getThinkingPrefs` / `ui:setThinkingPref` | 每模型思考档位记忆，存 `<userData>/ui.json` 的 `thinkingLevels`（键 `provider/modelId`）。**不要写进 pi 的 settings.json**，见 §7.9 |
 | `attachments:parse` | 附件解析：pdf/docx 提取纯文本（unpdf/mammoth），zip 解压到临时目录并返回清单（防 zip-slip/超限）；渲染层将结果内联进 prompt |
 
 ---
@@ -390,11 +397,49 @@ submit（enabled && idle && 未流式）
 
 ### 7.9 模型与思考等级持久化
 
-选择模型/思考等级时同时写 pi 全局设置（`defaultProvider` / `defaultModel` /
-`defaultThinkingLevel`）。pi 新建会话时读取这些键，因此**应用重启后保持选择**。
-内部切换（双模型、会话切换）**不写**默认值。
+**模型**：选择模型时写 pi 全局设置（`defaultProvider` / `defaultModel`）。pi 新建会话
+时读取这些键，因此应用重启后保持选择。内部切换（双模型、会话切换）**不写**默认值。
 
-### 7.10 应用内更新
+**思考等级（每模型记忆）**：**不能旁路写 pi 的 `settings.json`**——pi 把整份设置握在
+进程内存里，任何我们写入的键都会被 pi 下一次 `save()`（如切模型）整文件覆盖；RPC
+`set_thinking_level` 也没有 `persist` 选项（`options.persist` 只给 CLI TUI 用）。
+所以桌面端自己记账：
+
+1. `setThinking` 把 `provider/modelId → level` 写进 `<userData>/ui.json`（`ui:setThinkingPref`），pi 永不碰这个文件
+2. `applyThinkingPref`（`usePi.ts`）在 **boot / 打开会话 / fork 之后 / 新建会话 / 切模型** 时读记忆，与当前档位不同就 `set_thinking_level` 注入
+3. 只记用户**显式选择**过的档位：没动过的模型继续跟随 pi 的全局默认，避免把继承值冻结成 per-model 键
+
+pi 内部档位解析顺序：会话内 > `settings.modelThinkingLevels[provider/model]` > 全局
+`defaultThinkingLevel`；模型没声明 `reasoning` 时可用档位只有 `off`（设置会被钳位）。
+
+### 7.10 文件预览（xlsx / docx / pdf）
+
+右侧文件面板 = 预览器入口（`files-panel.tsx`），按扩展名路由：
+
+| 类型 | 主进程 | 渲染层 |
+|---|---|---|
+| xlsx / xls | `files:readTable`（SheetJS，`raw:false` 取显示值） | **AG Grid Community**：虚拟滚动、列宽/排序、quick filter；多 sheet 标签 |
+| csv / tsv | `files:read`（文本） | 同一套 `TableGrid`（`DelimitedTable` 切分后复用） |
+| docx | `files:readDoc`（mammoth → HTML） | `.doc-preview` 排版样式 + **DOMPurify 净化后** `dangerouslySetInnerHTML` |
+| pdf | `files:readPdf`（字节） | **pdfjs-dist** 渲染 canvas、翻页、适宽（worker 经 Vite `?url` 走 `file://`） |
+
+两个闭环：
+
+- **问 AI**：预览头部按钮把当前文件带进输入框——xlsx 预填 `table` 工具指令（模型读得懂公式和多 sheet）；docx/pdf 走 `files:extractText` 内联正文（pi 的 `read` 读不懂二进制），上限 15k 字
+- **自动刷新**：`App` 在 `isStreaming` 由 true→false 时 `previewTick+1`，预览面板据此重读当前文件（AI 用 `table` 工具重写文件后立刻可见）
+
+**`table` 扩展**（`electron/table-extension.js`，随应用分发到 `<agent>/extensions/table.ts`）：
+
+- `write`：`sheets:[{name, rows:[[值 | {v,f:"=SUM(B2:B5)"}]]}]` → 真 xlsx，公式写进 `cell.f`（SheetJS 不认前导 `=`），由 Excel 打开时计算
+- `read`：逐 sheet 输出制表符文本，公式显示为 `=表达式`（读时需要 `cellFormula + sheetStubs` 才看得到"只有公式、无缓存值"的格子）
+
+⚠️ **扩展依赖解析以扩展文件为基准**（pi 只把 `typebox` / `@earendil-works/*` 别名进
+runtime）。所以 SheetJS 必须落到 `<agent>/extensions/node_modules/xlsx`：
+`installTableExtension(agentDir, xlsxSource)` 按版本号幂等复制（源码目录在打包后位于
+asar 内，复制走 `readFile/writeFile` 而不是 `cpSync`）。新的自研扩展如果还要引别的
+npm 包，照这个模式办，**不要指望 stage 脚本 vendor**（那是给 pi bundle 自己的外部依赖用的）。
+
+### 7.11 应用内更新
 
 `electron-updater` + GitHub Releases（`build.publish`）。状态机：
 `idle → checking → up-to-date | available → downloading → ready`（error 随时可能进入）。
@@ -403,7 +448,7 @@ submit（enabled && idle && 未流式）
 启动 8 秒后自动静默检查一次；`--version` 语义比较避免同版本误报。
 未打包（dev）时返回 `dev` 状态，UI 仅显示当前版本。
 
-### 7.11 主题 / 快捷键 / 导出 / 诊断
+### 7.12 主题 / 快捷键 / 导出 / 诊断
 
 - 主题：`useTheme` 切 `<html>.dark`，`localStorage: pi-desktop-theme`
 - 快捷键：⌘K 面板、⌘N 新建任务；完整列表在「快捷键」对话框
@@ -462,7 +507,9 @@ npm run stage             # 把本机 pi bundle 复制进 runtime/
 |---|---|
 | `PI_DEV_URL` | 渲染层加载 Vite dev server（热更新） |
 | `PI_CLI` / `PI_NODE` | 覆盖 pi CLI / 解释器 |
-| `PI_DEBUG` | 打开 `pi:debugDialog`、boot 轮询日志 |
+| `PI_DEBUG` | 打开 `pi:debugDialog` / `pi:debugWidget` / `pi:debugQuit`、boot 轮询日志 |
+| `PI_DESKTOP_HOME` | 覆盖 APP_HOME（默认 `~/.pi-desktop`）：projects.json、bin/、ui.json 都在这一层。**E2E 必须设**，否则测试会把 fixture 目录写进用户真实 projects.json |
+| `PI_AGENT_DIR` | 覆盖 agent 目录（默认 `<APP_HOME>/agent`） |
 | `PI_DESKTOP_TERM_SOCK` | 由主进程注入给子进程，指向任务桥 |
 
 调试技巧：
@@ -470,9 +517,15 @@ npm run stage             # 把本机 pi bundle 复制进 runtime/
 - `--remote-debugging-port=9222` 启动后可用 CDP 读取 `window.__pi`（渲染层状态快照，
   每次渲染时挂到 window）并模拟输入/点击
 - 扩展对话框可用 `PI_DEBUG=1` + `window.pi.debugDialog({method, title, options})` 直接预览
+- 退出流程（pool.stopAll → 子进程 onExit → app.quit）用 `PI_DEBUG=1` + `window.pi.debugQuit()`
+  验证；硬杀主进程不会给退出钩子留机会，别拿它验退出逻辑
 - 任务桥可直接用 CLI 验证：`PI_DESKTOP_TERM_SOCK=… pi-bg --list`
+- 自研扩展加载失败先直接跑 CLI（`PI_CODING_AGENT_DIR=<agent> runtime/bin/node runtime/cli.js --mode rpc`
+  喂一行 `{"id":1,"type":"get_state"}`），stderr 会给出 `Cannot find module '…'` 的真实原因
 
-测试：`npm test`（`node --test tests/`）覆盖会话标题/扫描排序/fork 构建/版本守卫与任务桥（真实 spawn + socket 收发）。CI 见 `.github/workflows/ci.yml`（tsc --noEmit + build + test）。
+测试：`npm test`（`node --test tests/`）覆盖会话标题/扫描排序/fork 构建/版本守卫、任务桥（真实 spawn + socket），
+以及 todo / table 扩展（jiti 加载真实 TS 源码 + SheetJS 回读断言公式）。CI 见 `.github/workflows/ci.yml`
+（stage（扩展测试要 runtime/node_modules）→ tsc --noEmit → build → test；e2e 用 xvfb + `ELECTRON_DISABLE_SANDBOX`）。
 
 常见冒烟清单：
 
@@ -484,6 +537,8 @@ npm run stage             # 把本机 pi bundle 复制进 runtime/
 6. `pi-bg` 创建/列表/停止，面板出现 agent 任务
 7. 扩展 `ask_user_question` 弹卡片、选择后 agent 继续
 8. 主题切换、⌘N、⌘K、导出 HTML/诊断
+9. 文件面板点开 xlsx（AG Grid 网格 + 多 sheet）、docx（正文）、pdf（canvas 页）
+10. 预览「问 AI」把文件带进输入框；AI 改写文件后回合结束预览自动重读
 
 ---
 
@@ -497,14 +552,33 @@ npm run stage             # 把本机 pi bundle 复制进 runtime/
 | ~~中~~ 已收口 | ~~安全面~~ | openExternal 仅 http(s)；webview 禁 window.open/独立校验 src；readSkill 限定技能目录 + 1MB 上限 |
 | ~~中~~ 部分完成 | ~~渲染层单体~~ | App.tsx ~370 行（Sidebar/双模型链已抽出）；settings-dialog 拆分仍待做 |
 | ~~中~~ 已建 | ~~测试/CI 缺失~~ | 8 个 node:test 冒烟全绿；CI（tsc/build/test）已配置；存量 tsc 错误清零 |
-| 低 | 偏好存储分散 | localStorage / projects.json / pi settings 三处；建议统一 app prefs |
-| 低 | 打包分发 | 三平台 dmg/zip/nsis/AppImage + GitHub Releases 发布已配置（push v* tag）；自动更新已实现；macOS 未签名（自动更新受限）、无公证 |
-| 低 | Windows 未真机验证 | 见 §9 |
-| 低 | 扩展 `ui_widget` / `ui_notify` | 已转发，UI 尚未渲染（不影响 agent） |
+| 低 | 偏好存储分散 | localStorage / projects.json / ui.json / pi settings 四处；建议统一 app prefs |
+| 低 | 打包分发 | 三平台 dmg/zip/nsis/AppImage + GitHub Releases 发布已配置（push v* tag）；自动更新已实现；macOS 未签名（自动更新受限）、无公证；Windows 未签名（SmartScreen 提示，README 有说明） |
+| ~~低~~ 已改 | ~~Windows 未真机验证~~ | Windows 已是日常主力平台（任务栏图标、命名管道、pi-bg.cmd 均实测） |
+| 低 | 扩展 `ui_widget` / `ui_notify` | 已转发并渲染（widget 卡片串 + 通知） |
+| 中 | 扩展依赖解析以扩展文件为基准 | 自研扩展引第三方包必须装到 `<agent>/extensions/node_modules`（见 §7.10）；stage 脚本的 vendor 只管 pi bundle 自身 |
+| 低 | xlsx 依赖随扩展复制 | 每个版本号首次启动往 `<agent>/extensions/node_modules` 拷 7MB SheetJS；换版本会重拷一次（幂等，可接受） |
+| 低 | 预览只覆盖 xlsx/docx/pdf/csv | 图片走原图、其余按文本/代码；docx 的复杂版式（分栏/页眉页脚）mammoth 会丢 |
 
 ---
 
 ## 12. 变更记录
+
+### v0.2.30 – v0.2.34 — 预览体系、表格工具、思考档位记忆、首启引导
+
+- **思考档位**：改为桌面端自持（`ui.json` 记忆 + boot/切会话/切模型注入），pi 的
+  `settings.json` 视作 pi 私有（见 §7.9）；`PiProcess.exit` 修复了"主动停止的进程不触发
+  onExit"（重启竞态护栏误伤，槽清理/退出钩子都挂在它上面）；`before-quit` 等子进程死透再退
+- **文件预览**：`files:readTable/readDoc/readPdf/extractText` + AG Grid / mammoth /
+  pdfjs-dist / DOMPurify（见 §7.10）；预览「问 AI」与回合结束自动重读
+- **table 扩展**：模型可读写带公式的 xlsx；依赖复制到 `<agent>/extensions/node_modules`
+- **todo 扩展**：`turn_end` 仍有未完成项时自动注入提醒（同批防循环）
+- **侧栏**：去掉顶部搜索输入框；"新建会话"下沉到项目行悬停 ＋；driver.js 首启引导
+  （`pi:tour` 事件可从 设置→版本 重放）
+- **CI**：check 任务补 `npm run stage`；e2e 在 CI 关 sandbox 并倒 stderr；E2E 隔离
+  `PI_DESKTOP_HOME`；`PI_DEBUG` 新增 `pi:debugQuit`
+- **Windows**：显式窗口图标（`pi.ico` extraResources）+ dev/prod AUMID 拆分（任务栏不再
+  回落 Electron 默认图标）
 
 ### 2181e09 — Split main process, add diagnostics/dialogs safeguards, dual-model mode
 

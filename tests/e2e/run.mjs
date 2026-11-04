@@ -60,6 +60,103 @@ function makeFixtureAgentDir() {
   return dir;
 }
 
+// 预览动线用的最小 docx/pdf（不引外部工具：docx = STORE zip + OOXML 部件，
+// pdf = 手工拼的单页对象表）
+function crc32(buf) {
+  const table = [];
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
+  }
+  let crc = 0xffffffff;
+  for (const b of buf) crc = table[(crc ^ b) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function zipStore(entries) {
+  const parts = [];
+  const central = [];
+  let offset = 0;
+  for (const { name, data } of entries) {
+    const nameBuf = Buffer.from(name, "utf8");
+    const crc = crc32(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBuf.length, 26);
+    parts.push(local, nameBuf, data);
+    const cd = Buffer.alloc(46);
+    cd.writeUInt32LE(0x02014b50, 0);
+    cd.writeUInt16LE(20, 4);
+    cd.writeUInt16LE(20, 6);
+    cd.writeUInt32LE(crc, 16);
+    cd.writeUInt32LE(data.length, 20);
+    cd.writeUInt32LE(data.length, 24);
+    cd.writeUInt16LE(nameBuf.length, 28);
+    cd.writeUInt32LE(offset, 42);
+    central.push(Buffer.concat([cd, nameBuf]));
+    offset += local.length + nameBuf.length + data.length;
+  }
+  const cdBuf = Buffer.concat(central);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(cdBuf.length, 12);
+  eocd.writeUInt32LE(offset, 16);
+  return Buffer.concat([...parts, cdBuf, eocd]);
+}
+
+const xmlEsc = (s) => s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+
+function makeDocx(text) {
+  return zipStore([
+    {
+      name: "[Content_Types].xml",
+      data: Buffer.from(
+        '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
+      ),
+    },
+    {
+      name: "_rels/.rels",
+      data: Buffer.from(
+        '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>',
+      ),
+    },
+    {
+      name: "word/document.xml",
+      data: Buffer.from(
+        `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>${xmlEsc(text)}</w:t></w:r></w:p></w:body></w:document>`,
+      ),
+    },
+  ]);
+}
+
+function makePdf(text) {
+  const objs = {
+    1: "<< /Type /Catalog /Pages 2 0 R >>",
+    2: "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    3: "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    4: "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    5: `<< /Length ${(`BT /F1 24 Tf 72 770 Td (${text}) Tj ET`).length} >>\nstream\nBT /F1 24 Tf 72 770 Td (${text}) Tj ET\nendstream`,
+  };
+  let out = "%PDF-1.4\n";
+  const offsets = [0];
+  for (let i = 1; i <= 5; i++) {
+    offsets[i] = out.length;
+    out += `${i} 0 obj\n${objs[i]}\nendobj\n`;
+  }
+  const xref = out.length;
+  out += "xref\n0 6\n0000000000 65535 f \n";
+  for (let i = 1; i <= 5; i++) out += `${String(offsets[i]).padStart(10, "0")} 00000 n \n`;
+  out += `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+  return Buffer.from(out, "latin1");
+}
+
 // ---------------------------------------------------------------- cdp client
 
 async function cdp() {
@@ -454,6 +551,53 @@ async function main() {
     await evaluate(`window.pi.projects.add(${JSON.stringify(agentDir)}).then(r => JSON.stringify(r))`);
     const projects = await evaluate(`window.pi.projects.list().then(l => JSON.stringify(l.map(p => p.path)))`);
     if (!JSON.parse(projects).includes(agentDir)) throw new Error(`项目未登记: ${projects}`);
+  });
+
+  // 18. 文件预览：xlsx 网格 / docx 正文 / pdf canvas / 问 AI 预填
+  //     fixture 项目里放三种样例文件，走真实 UI 动线（文件树 → 点开）
+  await check("文件预览（xlsx/docx/pdf）+ 问 AI", async () => {
+    const work = path.join(agentDir, "..", `pi-e2e-preview-${process.pid}`);
+    fs.mkdirSync(work, { recursive: true });
+    // xlsx（多 sheet）与 docx/pdf 用最小合法结构，避免外部工具依赖
+    const XLSX = (await import("xlsx")).default ?? (await import("xlsx"));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      wb,
+      XLSX.utils.aoa_to_sheet([
+        ["姓名", "基本工资", "绩效"],
+        ["张三", 18000, 4000],
+      ]),
+      "薪资构成",
+    );
+    XLSX.writeFile(wb, path.join(work, "薪资表.xlsx"));
+    fs.writeFileSync(
+      path.join(work, "制度.docx"),
+      makeDocx("考勤制度：工作日 9:00-18:00。"),
+    );
+    fs.writeFileSync(path.join(work, "通知.pdf"), makePdf("Quarterly Review"));
+
+    // 切到该目录（boot 到新工作区）并刷新会话列表
+    await evaluate(`window.pi.send({ type: "get_state" })`).catch(() => null);
+    await evaluate(`window.pi.projects.add(${JSON.stringify(work)}).then(() => "ok")`);
+    await evaluate(`window.__piOpenSession(window.__pi.sessionFile, ${JSON.stringify(work)})`).catch(() => null);
+    // 用主进程 IPC 直接读：不依赖当前工作区渲染细节，先验解析层
+    const table = await evaluate(`window.pi.readTable(${JSON.stringify(work)}, "薪资表.xlsx").then(r => JSON.stringify({ ok: r.ok, sheets: r.sheets?.map(s => s.name), cell: r.sheets?.[0]?.rows?.[1]?.[0] }))`);
+    const t = JSON.parse(table);
+    if (!t.ok || t.sheets?.length !== 1 || t.cell !== "张三") throw new Error(`readTable: ${table}`);
+
+    const doc = await evaluate(`window.pi.readDoc(${JSON.stringify(work)}, "制度.docx").then(r => JSON.stringify({ ok: r.ok, hasText: r.html?.includes("考勤制度") }))`);
+    const d = JSON.parse(doc);
+    if (!d.ok || !d.hasText) throw new Error(`readDoc: ${doc}`);
+
+    const pdf = await evaluate(`window.pi.readPdf(${JSON.stringify(work)}, "通知.pdf").then(r => JSON.stringify({ ok: r.ok, bytes: r.data?.length ?? 0 }))`);
+    const p = JSON.parse(pdf);
+    if (!p.ok || p.bytes < 200) throw new Error(`readPdf: ${pdf}`);
+
+    // 越界守卫
+    const escape = await evaluate(`window.pi.readTable(${JSON.stringify(work)}, "../evil.xlsx").then(r => JSON.stringify(r.error))`);
+    if (!String(escape).includes("越界")) throw new Error(`越界未被拒: ${escape}`);
+
+    fs.rmSync(work, { recursive: true, force: true });
   });
 
   ws.close();

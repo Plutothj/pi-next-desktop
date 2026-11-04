@@ -43,20 +43,22 @@ git push --follow-tags                       # 推提交和 tag；release.yml �
 - **RPC stdout 按 LF 严格切分**（不要换回 readline——它会额外切 U+2028/U+2029，JSON 字符串里合法）。
 - **prompt 总是带 `streamingBehavior`**：空闲时 pi 忽略，流式中缺失会被拒。
 - 会话 JSONL 是 pi 的内部格式（当前 v3，`SUPPORTED_SESSION_VERSION`）：手写/复制文件前必须过版本守卫；标题解析已有廉价预过滤，别逐行 `JSON.parse` 全量。
-- `PiProcess` 的 exit 回调先判 `this.child === proc` 再清理（重启竞态，历史 bug）。
+- `PiProcess` 的 exit 回调：被新进程顶替的旧进程不算新闻，但 `stop()` 主动停的**必须**照常触发 `onExit`（`this.stopped` 标记）——槽清理与退出钩子都挂在上面，历史 bug。
 - 渲染层事件订阅 effect 每次挂载都要重新注册，boot 用 `started` ref 护栏只跑一次（StrictMode 双挂载，历史 bug）。
 - 注释与用户可见文案用中文，标识符用英文，与现有代码一致。
 - UI 交互默认对齐 ZCode Desktop 的行为（Enter 发送、流式排队/steer、弹层从输入框上方出、模型选择器内嵌输入框）。
 
 ## 跨平台
 
-macOS 为主力开发平台。Windows 代码路径（命名管道、`cmd /d /s /c`、`taskkill /T`、`pi-bg.cmd`、PATHEXT）已实现但**未真机验证**，改动时按 Node/Electron 文档推断，不要假定已验证。路径拼接用 `path.delimiter` / 双分隔符。
+Windows 与实际 macOS 均已真机日常使用（命名管道、`cmd /d /s /c`、`taskkill /T`、`pi-bg.cmd`、PATHEXT、任务栏图标/AUMID 均已实测）。路径拼接用 `path.delimiter` / 双分隔符。
 
 ## 环境变量
 
-`PI_DEV_URL`（热更新）、`PI_CLI` / `PI_NODE`（覆盖 pi CLI/解释器）、`PI_DEBUG`（调试对话框 + boot 日志）、`PI_DESKTOP_TERM_SOCK`（主进程注入给 pi 的任务桥地址）。
+`PI_DEV_URL`（热更新）、`PI_CLI` / `PI_NODE`（覆盖 pi CLI/解释器）、`PI_DEBUG`（调试对话框/widget/优雅退出 + boot 日志）、`PI_DESKTOP_HOME` / `PI_AGENT_DIR`（数据目录覆盖，E2E 必须设）、`PI_DESKTOP_TERM_SOCK`（主进程注入给 pi 的任务桥地址）。
 
 ## 已知风险（改相关区域时注意）
 
-- 会话扫描每次全量读 `~/.pi/agent/sessions`，O(总字节)，别再加重扫描逻辑。
+- 会话扫描每次全量读 `<AGENT_DIR>/sessions`，O(总字节)，别再加重扫描逻辑。
+- **pi 的 `settings.json` 是 pi 进程私有**：旁路写会被它下一次 save 整文件覆盖（思考档位因此走 ui.json + 注入，见 DEVELOPMENT §7.9）。
+- **自研扩展的依赖解析以扩展文件为基准**（只有 typebox/@earendil-works 被别名进 runtime）：引第三方包要装到 `<agent>/extensions/node_modules`（table 扩展的 SheetJS 就是这么做的）。
 - `App.tsx`（~900 行）与 `settings-dialog.tsx`（~1700 行）偏大，改时优先局部修改，拆分是既定方向但尚未做。
