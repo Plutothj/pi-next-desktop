@@ -432,19 +432,22 @@ export type PiBridge = {
   };
   files: (cwd: string, query: string) => Promise<string[]>;
   tree: (cwd: string, dir?: string) => Promise<TreeEntry[]>;
-  readFile: (cwd: string, file: string) => Promise<{ content?: string; size?: number; error?: string }>;
+  readFile: (cwd: string, file: string, abs?: string) => Promise<{ content?: string; size?: number; error?: string }>;
+  pickPreview: () => Promise<{ ok: boolean; path?: string; name?: string; canceled?: boolean }>;
+  debugApproveFile?: (abs: string) => Promise<{ ok: boolean }>;
   readTable: (
     cwd: string,
     file: string,
+    abs?: string,
   ) => Promise<{
     ok: boolean;
     sheets?: { name: string; rows: string[][]; truncatedRows?: boolean }[];
     truncatedSheets?: boolean;
     error?: string;
   }>;
-  readDoc: (cwd: string, file: string) => Promise<{ ok: boolean; html?: string; error?: string }>;
-  readPdf: (cwd: string, file: string) => Promise<{ ok: boolean; data?: Uint8Array; error?: string }>;
-  extractText: (cwd: string, file: string) => Promise<{ ok: boolean; text?: string; error?: string }>;
+  readDoc: (cwd: string, file: string, abs?: string) => Promise<{ ok: boolean; html?: string; error?: string }>;
+  readPdf: (cwd: string, file: string, abs?: string) => Promise<{ ok: boolean; data?: Uint8Array; error?: string }>;
+  extractText: (cwd: string, file: string, abs?: string) => Promise<{ ok: boolean; text?: string; error?: string }>;
   agents: (cwd?: string) => Promise<AgentProfile[]>;
   git: {
     status: (cwd: string) => Promise<GitStatus>;

@@ -232,11 +232,13 @@ reject（调用方 `.catch` 语义不变）。启动期预期错误（`pi 未运
 | `git:checkout` | `{cwd,branch}` | `{ok,error?}`（`switch` 失败回退 `checkout`） |
 | `files:search` | `{cwd,query}` | `string[]`（≤40，深度/数量受限） |
 | `files:tree` | `{cwd,dir?}` | `{name,path,dir}[]`（≤500） |
-| `files:read` | `{cwd,file}` | `{content,size}` 或 `{error}`（限工作区、≤1MB） |
-| `files:readTable` | `{cwd,file}` | xlsx/xls → `{ok,sheets:[{name,rows,truncatedRows}],truncatedSheets}`（SheetJS，`raw:false`；上限 30 sheet / 2000 行 / 80 列 / 20MB） |
-| `files:readDoc` | `{cwd,file}` | docx → `{ok,html}`（mammoth 转 HTML，≤20MB；渲染层必过 DOMPurify） |
-| `files:readPdf` | `{cwd,file}` | pdf → `{ok,data:Uint8Array}`（≤50MB；渲染层 page.js 画 canvas） |
-| `files:extractText` | `{cwd,file}` | docx/pdf → `{ok,text}`（复用 `attachments:parse`，供预览面板「问 AI」内联） |
+| `files:read` | `{cwd,file,abs?}` | `{content,size}` 或 `{error}`（限工作区、≤1MB） |
+| `files:readTable` | `{cwd,file,abs?}` | xlsx/xls → `{ok,sheets:[{name,rows,truncatedRows}],truncatedSheets}`（SheetJS，`raw:false`；上限 30 sheet / 2000 行 / 80 列 / 20MB） |
+| `files:readDoc` | `{cwd,file,abs?}` | docx → `{ok,html}`（mammoth 转 HTML，≤20MB；渲染层必过 DOMPurify） |
+| `files:readPdf` | `{cwd,file,abs?}` | pdf → `{ok,data:Uint8Array}`（≤50MB；渲染层 page.js 画 canvas） |
+| `files:extractText` | `{cwd,file,abs?}` | docx/pdf → `{ok,text}`（复用 `attachments:parse`，供预览面板「问 AI」内联） |
+| `files:pickPreview` | – | 系统文件选择器（工作区外的下载/微信接收文件）→ `{ok,path,name}`；选中的绝对路径进本次运行的白名单 |
+| `files:debugApprove` | `abs` | **仅 `PI_DEBUG=1`**：把绝对路径登记进白名单（等价于用户在选择器里选中，供 E2E 验正向路径） |
 | `agents:list` | `{cwd?}` | `AgentProfile[]` |
 | `ssh:hosts` | – | `string[]`（解析 `~/.ssh/config`） |
 
@@ -422,6 +424,10 @@ pi 内部档位解析顺序：会话内 > `settings.modelThinkingLevels[provider
 | csv / tsv | `files:read`（文本） | 同一套 `TableGrid`（`DelimitedTable` 切分后复用） |
 | docx | `files:readDoc`（mammoth → HTML） | `.doc-preview` 排版样式 + **DOMPurify 净化后** `dangerouslySetInnerHTML` |
 | pdf | `files:readPdf`（字节） | **pdfjs-dist** 渲染 canvas、翻页、适宽（worker 经 Vite `?url` 走 `file://`） |
+
+**外部文件**：工作区外的文件（下载目录、微信接收）走文件面板的「打开文件」按钮——
+`files:pickPreview` 弹系统选择器，选中的绝对路径登记进**仅本次运行有效**的白名单；
+`read*` / `extractText` 用 `abs` 参数读它。未登记路径一律拒（`resolveReadTarget`）。
 
 两个闭环：
 

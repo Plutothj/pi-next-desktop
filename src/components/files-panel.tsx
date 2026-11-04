@@ -22,6 +22,7 @@ import {
   FileIcon,
   FileImageIcon,
   FileSpreadsheetIcon,
+  FolderOpenIcon,
   FileTextIcon,
   FileTypeIcon,
   GitBranchIcon,
@@ -138,18 +139,19 @@ export function FilesPanel({
   const [_loading, setLoading] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<string[]>([]);
-  const [file, setFile] = useState<{ path: string; content: string } | null>(null);
+  const [file, setFile] = useState<{ path: string; abs?: string; content: string } | null>(null);
   // xlsx/xls 结构化预览（多 sheet）
   const [workbook, setWorkbook] = useState<{
     path: string;
+    abs?: string;
     sheets: { name: string; rows: string[][]; truncatedRows?: boolean }[];
     truncatedSheets?: boolean;
   } | null>(null);
   const [sheetIndex, setSheetIndex] = useState(0);
   // docx → HTML 预览
-  const [doc, setDoc] = useState<{ path: string; html: string } | null>(null);
+  const [doc, setDoc] = useState<{ path: string; abs?: string; html: string } | null>(null);
   // pdf → 渲染层 pdf.js 预览
-  const [pdf, setPdf] = useState<{ path: string; data: Uint8Array } | null>(null);
+  const [pdf, setPdf] = useState<{ path: string; abs?: string; data: Uint8Array } | null>(null);
 
   const loadDir = useCallback(
     async (dir: string) => {
@@ -232,8 +234,8 @@ export function FilesPanel({
     [changes, fileStatus],
   );
 
-  const open = async (path: string) => {
-    const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  const open = async (path: string, abs?: string) => {
+    const ext = (abs ?? path).split(".").pop()?.toLowerCase() ?? "";
     setDoc(null);
     setPdf(null);
     if (ext === "xlsx" || ext === "xls") {
@@ -241,7 +243,7 @@ export function FilesPanel({
       setWorkbook(null);
       setSheetIndex(0);
       const res = (await window.pi
-        .readTable(cwd, path)
+        .readTable(cwd, path, abs)
         .catch((e) => ({ ok: false, error: String(e) }))) as {
         ok: boolean;
         sheets?: { name: string; rows: string[][]; truncatedRows?: boolean }[];
@@ -249,9 +251,9 @@ export function FilesPanel({
         error?: string;
       };
       if (res.ok && res.sheets?.length) {
-        setWorkbook({ path, sheets: res.sheets, truncatedSheets: res.truncatedSheets });
+        setWorkbook({ path, abs, sheets: res.sheets, truncatedSheets: res.truncatedSheets });
       } else {
-        setFile({ path, content: `无法预览表格：${res.error ?? "未知错误"}` });
+        setFile({ path, abs, content: `无法预览表格：${res.error ?? "未知错误"}` });
       }
       return;
     }
@@ -259,33 +261,34 @@ export function FilesPanel({
     if (ext === "docx") {
       setFile(null);
       const res = (await window.pi
-        .readDoc(cwd, path)
+        .readDoc(cwd, path, abs)
         .catch((e) => ({ ok: false, error: String(e) }))) as { ok: boolean; html?: string; error?: string };
       if (res.ok && res.html) {
-        setDoc({ path, html: res.html });
+        setDoc({ path, abs, html: res.html });
       } else {
-        setFile({ path, content: `无法预览文档：${res.error ?? "未知错误"}` });
+        setFile({ path, abs, content: `无法预览文档：${res.error ?? "未知错误"}` });
       }
       return;
     }
     if (ext === "pdf") {
       setFile(null);
       const res = (await window.pi
-        .readPdf(cwd, path)
+        .readPdf(cwd, path, abs)
         .catch((e) => ({ ok: false, error: String(e) }))) as { ok: boolean; data?: Uint8Array; error?: string };
       if (res.ok && res.data) {
-        setPdf({ path, data: res.data });
+        setPdf({ path, abs, data: res.data });
       } else {
-        setFile({ path, content: `无法预览 PDF：${res.error ?? "未知错误"}` });
+        setFile({ path, abs, content: `无法预览 PDF：${res.error ?? "未知错误"}` });
       }
       return;
     }
-    const res = await window.pi.readFile(cwd, path);
-    setFile({ path, content: res.content ?? res.error ?? "" });
+    const res = await window.pi.readFile(cwd, path, abs);
+    setFile({ path, abs, content: res.content ?? res.error ?? "" });
   };
 
   // 当前预览的路径（自动刷新用）
-  const currentPath = file?.path ?? workbook?.path ?? doc?.path ?? pdf?.path ?? null;
+  const currentPreview = file ?? workbook ?? doc ?? pdf;
+  const currentPath = currentPreview?.path ?? null;
   const lastRefresh = useRef<number | undefined>(undefined);
   useEffect(() => {
     if (refreshToken === undefined) return;
@@ -295,7 +298,7 @@ export function FilesPanel({
     }
     if (lastRefresh.current === refreshToken || !currentPath) return;
     lastRefresh.current = refreshToken;
-    void open(currentPath);
+    void open(currentPath, currentPreview?.abs);
     // open 依赖 cwd/setState，闭包已是最新；effect 只在 token 变化时跑，不必追依赖
   }, [refreshToken, currentPath, open]);
 
@@ -307,7 +310,7 @@ export function FilesPanel({
             <ChevronLeftIcon className="size-3.5" />
           </Button>
           <span className="truncate font-mono text-[11px]">{doc.path}</span>
-          {onAskAi ? <AskAiButton cwd={cwd} onAsk={(text) => onAskAi(text)} path={doc.path} /> : null}
+          {onAskAi ? <AskAiButton abs={doc.abs} cwd={cwd} onAsk={(text) => onAskAi(text)} path={doc.path} /> : null}
         </div>
         {/* mammoth 的 HTML 先过 DOMPurify（文档里的外链/内嵌 HTML 不可信） */}
         <div
@@ -334,7 +337,7 @@ export function FilesPanel({
             <ChevronLeftIcon className="size-3.5" />
           </Button>
           <span className="truncate font-mono text-[11px]">{pdf.path}</span>
-          {onAskAi ? <AskAiButton cwd={cwd} onAsk={(text) => onAskAi(text)} path={pdf.path} /> : null}
+          {onAskAi ? <AskAiButton abs={pdf.abs} cwd={cwd} onAsk={(text) => onAskAi(text)} path={pdf.path} /> : null}
         </div>
         <PdfView data={pdf.data} />
       </div>
@@ -358,7 +361,7 @@ export function FilesPanel({
             <ChevronLeftIcon className="size-3.5" />
           </Button>
           <span className="truncate font-mono text-[11px]">{workbook.path}</span>
-          {onAskAi ? <AskAiButton cwd={cwd} onAsk={(text) => onAskAi(text)} path={workbook.path} sheets={workbook.sheets.map((s) => s.name)} /> : null}
+          {onAskAi ? <AskAiButton abs={workbook.abs} cwd={cwd} onAsk={(text) => onAskAi(text)} path={workbook.path} sheets={workbook.sheets.map((s) => s.name)} /> : null}
         </div>
         {workbook.sheets.length > 1 ? (
           <div className="flex shrink-0 gap-0.5 overflow-x-auto border-b px-1 py-1">
@@ -530,6 +533,19 @@ export function FilesPanel({
         </span>
         <Button
           className="size-6 shrink-0 text-muted-foreground"
+          onClick={async () => {
+            // 工作区外的文件（下载/微信接收）：系统选择器挑一个，直接预览
+            const picked = await window.pi.pickPreview().catch(() => null);
+            if (picked?.ok && picked.path) void open(picked.path, picked.path);
+          }}
+          size="icon-sm"
+          title="打开工作区外的文件（xlsx / docx / pdf / csv…）"
+          variant="ghost"
+        >
+          <FolderOpenIcon className="size-3.5" />
+        </Button>
+        <Button
+          className="size-6 shrink-0 text-muted-foreground"
           onClick={refresh}
           size="icon-sm"
           title="刷新"
@@ -667,11 +683,13 @@ function TableGrid({ rows, note, dark }: { rows: string[][]; note?: string; dark
  * - xlsx：让模型用 table 工具读（它读得懂公式与多 sheet）
  * - docx/pdf：主进程抽文本内联（pi 的 read 读不懂二进制） */
 function AskAiButton({
+  abs,
   cwd,
   path,
   sheets,
   onAsk,
 }: {
+  abs?: string;
   cwd: string;
   path: string;
   sheets?: string[];
@@ -688,7 +706,7 @@ function AskAiButton({
     }
     if (ext === "pdf" || ext === "docx") {
       setBusy(true);
-      const res = await window.pi.extractText(cwd, path).catch(() => null);
+      const res = await window.pi.extractText(cwd, path, abs).catch(() => null);
       setBusy(false);
       if (res?.ok && res.text) {
         const text = res.text.length > 15000 ? `${res.text.slice(0, 15000)}\n…（后略）` : res.text;

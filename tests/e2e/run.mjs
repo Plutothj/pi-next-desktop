@@ -597,7 +597,10 @@ async function main() {
     const escape = await evaluate(`window.pi.readTable(${JSON.stringify(work)}, "../evil.xlsx").then(r => JSON.stringify(r.error))`);
     if (!String(escape).includes("越界")) throw new Error(`越界未被拒: ${escape}`);
 
-    fs.rmSync(work, { recursive: true, force: true });
+    // 清理失败（Windows 句柄延迟）不该让用例失败：吞掉即可
+    try {
+      fs.rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    } catch {}
   });
 
   ws.close();

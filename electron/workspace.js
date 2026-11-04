@@ -4,6 +4,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { dialog } from "electron";
 import * as config from "./config.js";
 import { safeHandle } from "./ipc.js";
 
@@ -42,6 +43,31 @@ function agentDirs(cwd) {
 
 const resolveRoot = (cwd) => (cwd && fs.existsSync(cwd) ? cwd : os.homedir());
 
+// 「打开外部文件」：只认用户在系统文件选择器里亲手挑过的绝对路径（下载目录、
+// 微信接收文件夹等都不在工作区内）。白名单只在本次运行内有效，不落盘。
+const approvedFiles = new Set();
+
+/** 解析要读取的目标：abs 走白名单；否则按工作区根目录做越界守卫。 */
+function resolveReadTarget(root, file, abs) {
+  if (typeof abs === "string" && abs) {
+    const target = path.resolve(abs);
+    if (!approvedFiles.has(target)) return { error: "未授权的路径（请通过「打开文件」选择）" };
+    return { target };
+  }
+  if (typeof file !== "string" || !file) return { error: "缺少文件路径" };
+  const target = path.resolve(root, file);
+  // + path.sep：/foo/bar-evil/x 不能因前缀相同而通过 /foo/bar 的守卫
+  if (target !== root && !target.startsWith(root + path.sep)) return { error: "越界路径" };
+  return { target };
+}
+
+/** 供 PI_DEBUG 测试通道授权一个绝对路径（等价于用户在文件选择器里选中它）。 */
+export function approvePreviewFile(absPath) {
+  if (typeof absPath !== "string" || !absPath) return false;
+  approvedFiles.add(path.resolve(absPath));
+  return true;
+}
+
 export function registerWorkspaceHandlers() {
   safeHandle("files:search", (_e, { cwd, query } = {}) => {
     const root = resolveRoot(cwd);
@@ -73,13 +99,28 @@ export function registerWorkspaceHandlers() {
       .slice(0, 500);
   });
 
+  // 「打开文件」：系统文件选择器挑一个工作区外的文件（下载目录、微信接收…），
+  // 选中即登记进白名单，之后 read*/extractText 可用 abs 读它。
+  safeHandle("files:pickPreview", async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      properties: ["openFile"],
+      title: "打开文件预览",
+      filters: [
+        { name: "可预览文件", extensions: ["xlsx", "xls", "csv", "tsv", "docx", "pdf", "md", "txt", "json"] },
+        { name: "全部文件", extensions: ["*"] },
+      ],
+    });
+    if (canceled || !filePaths?.[0]) return { ok: false, canceled: true };
+    const abs = path.resolve(filePaths[0]);
+    approvedFiles.add(abs);
+    return { ok: true, path: abs, name: path.basename(abs) };
+  });
+
   // Preview only: refuse anything outside the workspace or over 1 MB.
-  safeHandle("files:read", (_e, { cwd, file } = {}) => {
-    const root = resolveRoot(cwd);
-    if (typeof file !== "string" || !file) return { error: "缺少文件路径" };
-    const target = path.resolve(root, file);
-    // + path.sep：/foo/bar-evil/x 不能因前缀相同而通过 /foo/bar 的守卫
-    if (target !== root && !target.startsWith(root + path.sep)) return { error: "越界路径" };
+  safeHandle("files:read", (_e, { cwd, file, abs } = {}) => {
+    const resolved = resolveReadTarget(resolveRoot(cwd), file, abs);
+    if (resolved.error) return { error: resolved.error };
+    const { target } = resolved;
     try {
       const stat = fs.statSync(target);
       if (stat.size > 1_000_000) return { error: "文件过大" };
@@ -90,12 +131,11 @@ export function registerWorkspaceHandlers() {
   });
 
   // docx 预览：mammoth 转 HTML（保留标题/列表/表格结构，图片转 base64 内联）。
-  safeHandle("files:readDoc", async (_e, { cwd, file } = {}) => {
-    const root = resolveRoot(cwd);
-    if (typeof file !== "string" || !file) return { ok: false, error: "缺少文件路径" };
-    if (!file.toLowerCase().endsWith(".docx")) return { ok: false, error: "仅支持 .docx" };
-    const target = path.resolve(root, file);
-    if (target !== root && !target.startsWith(root + path.sep)) return { ok: false, error: "越界路径" };
+  safeHandle("files:readDoc", async (_e, { cwd, file, abs } = {}) => {
+    const resolved = resolveReadTarget(resolveRoot(cwd), file, abs);
+    if (resolved.error) return { ok: false, error: resolved.error };
+    const { target } = resolved;
+    if (!target.toLowerCase().endsWith(".docx")) return { ok: false, error: "仅支持 .docx" };
     try {
       const stat = fs.statSync(target);
       if (stat.size > 20_000_000) return { ok: false, error: "文件超过 20MB" };
@@ -108,12 +148,11 @@ export function registerWorkspaceHandlers() {
   });
 
   // pdf 预览：字节直接给渲染层的 pdf.js（渲染比文本提取保真）。
-  safeHandle("files:readPdf", (_e, { cwd, file } = {}) => {
-    const root = resolveRoot(cwd);
-    if (typeof file !== "string" || !file) return { ok: false, error: "缺少文件路径" };
-    if (!file.toLowerCase().endsWith(".pdf")) return { ok: false, error: "仅支持 .pdf" };
-    const target = path.resolve(root, file);
-    if (target !== root && !target.startsWith(root + path.sep)) return { ok: false, error: "越界路径" };
+  safeHandle("files:readPdf", (_e, { cwd, file, abs } = {}) => {
+    const resolved = resolveReadTarget(resolveRoot(cwd), file, abs);
+    if (resolved.error) return { ok: false, error: resolved.error };
+    const { target } = resolved;
+    if (!target.toLowerCase().endsWith(".pdf")) return { ok: false, error: "仅支持 .pdf" };
     try {
       const stat = fs.statSync(target);
       if (stat.size > 50_000_000) return { ok: false, error: "文件超过 50MB" };
@@ -125,17 +164,16 @@ export function registerWorkspaceHandlers() {
 
   // 预览面板「问 AI」：docx/pdf 抽文本回填进输入框（pi 的 read 读不懂二进制，
   // 与附件解析共用同一套提取器）。
-  safeHandle("files:extractText", async (_e, { cwd, file } = {}) => {
-    const root = resolveRoot(cwd);
-    if (typeof file !== "string" || !file) return { ok: false, error: "缺少文件路径" };
-    const target = path.resolve(root, file);
-    if (target !== root && !target.startsWith(root + path.sep)) return { ok: false, error: "越界路径" };
+  safeHandle("files:extractText", async (_e, { cwd, file, abs } = {}) => {
+    const resolved = resolveReadTarget(resolveRoot(cwd), file, abs);
+    if (resolved.error) return { ok: false, error: resolved.error };
+    const { target } = resolved;
     try {
       const stat = fs.statSync(target);
       if (stat.size > 20_000_000) return { ok: false, error: "文件超过 20MB" };
       const { parseAttachment } = await import("./attachments.js");
       const res = await parseAttachment({
-        name: file,
+        name: abs || file,
         dataBase64: fs.readFileSync(target).toString("base64"),
       });
       if (!res.ok) return { ok: false, error: res.error };
@@ -150,13 +188,12 @@ export function registerWorkspaceHandlers() {
   // csv/tsv 走 files:read 的文本路径（现有 DelimitedTable），不在此列。
   const TABLE_EXT = new Set(["xlsx", "xls"]);
   const TABLE_LIMITS = { sheets: 30, rows: 2000, cols: 80, bytes: 20_000_000 };
-  safeHandle("files:readTable", async (_e, { cwd, file } = {}) => {
-    const root = resolveRoot(cwd);
-    if (typeof file !== "string" || !file) return { ok: false, error: "缺少文件路径" };
-    const ext = file.split(".").pop()?.toLowerCase() ?? "";
+  safeHandle("files:readTable", async (_e, { cwd, file, abs } = {}) => {
+    const resolved = resolveReadTarget(resolveRoot(cwd), file, abs);
+    if (resolved.error) return { ok: false, error: resolved.error };
+    const { target } = resolved;
+    const ext = (abs || file || "").split(".").pop()?.toLowerCase() ?? "";
     if (!TABLE_EXT.has(ext)) return { ok: false, error: `不支持的表格类型: .${ext}` };
-    const target = path.resolve(root, file);
-    if (target !== root && !target.startsWith(root + path.sep)) return { ok: false, error: "越界路径" };
     try {
       const stat = fs.statSync(target);
       if (stat.size > TABLE_LIMITS.bytes) return { ok: false, error: "文件超过 20MB" };

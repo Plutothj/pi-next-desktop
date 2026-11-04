@@ -35,7 +35,7 @@ import { installTableExtension } from "./table-extension.js";
 import { installTodoExtension } from "./todo-extension.js";
 import { registerUpdater } from "./updater.js";
 import { registerUsageHandlers } from "./usage-ipc.js";
-import { registerWorkspaceHandlers } from "./workspace.js";
+import { approvePreviewFile, registerWorkspaceHandlers } from "./workspace.js";
 
 // ---------------------------------------------------------------- wiring
 
@@ -608,6 +608,9 @@ if (process.env.PI_DEBUG) {
 
   // 调试/测试：优雅退出（走真实 quit 路径：stopAll → 进程退出钩子 → app.quit），
   // 供验证"退出时回写"类逻辑；硬杀不会给主进程跑退出钩子的机会。
+  // 调试/测试：把某个绝对路径登记进预览白名单（等价于用户在文件选择器里选中）
+  safeHandle("files:debugApprove", (_e, absPath) => ({ ok: approvePreviewFile(absPath) }));
+
   safeHandle("pi:debugQuit", () => {
     setImmediate(() => app.quit());
     return { ok: true };
