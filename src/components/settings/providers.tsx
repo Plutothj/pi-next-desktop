@@ -4,6 +4,7 @@ import {
   Loader2Icon,
   PlusIcon,
   RefreshCwIcon,
+  ZapIcon,
   Trash2Icon,
 } from "lucide-react";
 import {
@@ -222,6 +223,25 @@ function ProviderForm({
 
   const updateRow = (index: number, patch: Partial<ModelDraft>) =>
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+
+  // 测试连接：向供应商 /models 端点发一次请求，验证 baseUrl + 密钥 + 网络
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const testConnection = async () => {
+    setTesting(true);
+    setTestResult(null);
+    const res = await window.pi.cfg
+      .fetchModels({ name: name.trim(), api, baseUrl: baseUrl.trim(), apiKey: apiKey.trim() || undefined })
+      .catch(() => null);
+    setTesting(false);
+    if (res?.ok && res.models?.length) {
+      setTestResult(`✓ ${res.models.length} 个模型`);
+      setTimeout(() => setTestResult(null), 3000);
+    } else {
+      const err = res && "error" in res ? res.error : "连接失败";
+      setTestResult(`✗ ${err?.slice(0, 60)}`);
+    }
+  };
 
   const fetchList = async () => {
     setFetching(true);
@@ -493,6 +513,16 @@ function ProviderForm({
         <div className="flex items-center justify-between">
           <span className="text-xs text-muted-foreground">模型（{rows.length}）</span>
           <div className="flex gap-1">
+            <Button
+              className="h-7 gap-1 text-xs"
+              disabled={testing}
+              onClick={testConnection}
+              size="sm"
+              variant="ghost"
+            >
+              {testing ? <Loader2Icon className="size-3 animate-spin" /> : <ZapIcon className="size-3" />}
+              {testResult ?? "测试连接"}
+            </Button>
             <Button
               className="h-7 gap-1 text-xs"
               disabled={fetching}

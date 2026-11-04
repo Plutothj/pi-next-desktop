@@ -335,6 +335,16 @@ function AssistantMessageBase({
   return (
     <Message from="assistant">
       <MessageContent className="gap-0.5">
+        {/* 回合级错误（429 限流 / 网络断 / 模型暂停等）：pi 返回空 content +
+            stopReason=error + errorMessage，之前完全静默。 */}
+        {message?.stopReason === "error" ? (
+          <div className="mb-1 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs">
+            <span className="font-medium text-destructive">模型请求失败</span>
+            <p className="mt-0.5 leading-5 text-muted-foreground">
+              {message.errorMessage ?? "未知错误（可能是网络中断或供应商限流）"}
+            </p>
+          </div>
+        ) : null}
         {blocks.map((block, i) => (
           <Block
             key={i}

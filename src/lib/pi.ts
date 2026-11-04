@@ -23,6 +23,7 @@ export type PiMessage = {
   content: string | ContentBlock[];
   usage?: Usage;
   stopReason?: string;
+  errorMessage?: string;
   timestamp?: number;
   // toolResult
   toolCallId?: string;
