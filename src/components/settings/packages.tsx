@@ -13,6 +13,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { CfgSnapshot, GalleryPackage } from "@/lib/pi";
 
+// 推荐扩展：社区里最常与 pi 搭配、且与桌面端能力互补的几个。
+// 只做"一键安装"入口，不内置——装不装、装什么由用户决定。
+const RECOMMENDED: { source: string; name: string; desc: string }[] = [
+  {
+    source: "pi-subagents",
+    name: "子智能体",
+    desc: "把任务派给专门的 agent（调研/写码/审查），主会话只收结论",
+  },
+  {
+    source: "billion-context",
+    name: "长上下文",
+    desc: "超大上下文压缩与检索，长文档/长会话更省 token",
+  },
+];
+
 // extracted from settings-dialog.tsx
 export function PackagesPanel({
   cfg,
@@ -143,6 +158,49 @@ export function PackagesPanel({
           </button>
         ))}
       </div>
+
+      {/* 推荐扩展：已装的显示"已安装"，没装的给一键安装 */}
+      <section className="space-y-2">
+        <h3 className="text-sm font-medium">推荐扩展</h3>
+        <div className="space-y-2">
+          {RECOMMENDED.map((rec) => {
+            const installedPkg = cfg.packages.find(
+              (p) => p.source === rec.source || p.name === rec.source || p.name.includes(rec.source),
+            );
+            return (
+              <div className="flex items-center gap-3 rounded-xl border bg-card/40 px-4 py-3" key={rec.source}>
+                <PackageIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">{rec.name}</span>
+                    <span className="font-mono text-[10px] text-muted-foreground">{rec.source}</span>
+                  </div>
+                  <p className="truncate text-xs text-muted-foreground">{rec.desc}</p>
+                </div>
+                {installedPkg ? (
+                  <Badge className="text-[11px]" variant="outline">
+                    已安装
+                  </Badge>
+                ) : (
+                  <Button
+                    className="h-7 shrink-0 px-2 text-[11px]"
+                    disabled={installing === rec.source}
+                    onClick={() => void install(rec.source)}
+                    size="sm"
+                  >
+                    {installing === rec.source ? (
+                      <Loader2Icon className="size-3 animate-spin" />
+                    ) : (
+                      <DownloadIcon className="size-3" />
+                    )}
+                    <span className="ml-1">一键安装</span>
+                  </Button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </section>
 
       {view === "installed" ? (
       <section className="space-y-2">

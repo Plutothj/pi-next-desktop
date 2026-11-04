@@ -310,6 +310,47 @@ function Shell() {
     return () => window.removeEventListener("pi:tour", onTour);
   }, []);
 
+  // 草稿持久化：输入框内容按会话/工作区记在 ui.json，崩溃或重启后可恢复。
+  // 只恢复"用户最后留下且未发出"的草稿——发送成功会清空并删键。
+  // 按工作区记草稿：会话文件每次启动都会新建（或切会话），用它做键会导致
+  // 重开应用后找不到草稿。工作区是稳定的，且"同一项目里没发出去的那段话"
+  // 正是用户期望恢复的东西。
+  const draftKey = `draft:${state.cwd || "default"}`;
+  const draftLoaded = useRef(false);
+  const draftRestored = useRef(false);
+  useEffect(() => {
+    draftLoaded.current = false;
+    draftRestored.current = false;
+    window.pi
+      .getPref(draftKey)
+      .then((r) => {
+        draftLoaded.current = true;
+        if (typeof r.value === "string" && r.value && !controller.textInput.value) {
+          controller.textInput.setInput(r.value);
+          draftRestored.current = true;
+        }
+      })
+      .catch(() => {
+        draftLoaded.current = true;
+      });
+    // controller.textInput 每次渲染都是新对象，不能进依赖（会把 draftLoaded 打回 false）
+    // biome-ignore lint/correctness/useExhaustiveDependencies: 见上
+  }, [draftKey]);
+
+  // 输入变化 → 防抖写盘（1s）；空内容删除键
+  useEffect(() => {
+    const text = controller.textInput.value;
+    if (!draftLoaded.current) return;
+    // 刚恢复的草稿不要立刻写回，避免覆盖用户正在输入的内容
+    const id = setTimeout(() => {
+      draftRestored.current = false;
+      if (text) window.pi.setPref(draftKey, text).catch(() => null);
+      else window.pi.setPref(draftKey, "").catch(() => null);
+    }, 1000);
+    return () => clearTimeout(id);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: 只追输入值与键
+  }, [controller.textInput.value, draftKey]);
+
   // 聊天附件 chip → 打开右侧文件面板并预览该文件
   useEffect(() => {
     const onPreview = (event: Event) => {
