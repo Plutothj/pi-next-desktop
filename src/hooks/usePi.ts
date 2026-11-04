@@ -1,3 +1,4 @@
+import type { FileUIPart } from "ai";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   CommandInfo,
@@ -5,13 +6,12 @@ import type {
   ModelInfo,
   PiMessage,
   ProjectInfo,
-  UiDialogRequest,
   QueueState,
   RpcEvent,
   SessionInfo,
   ToolExec,
+  UiDialogRequest,
 } from "@/lib/pi";
-import type { FileUIPart } from "ai";
 
 // Transcript windows render a few dozen turns; older tool entries can go.
 const TOOL_LIMIT = 400;
@@ -193,6 +193,9 @@ function reduce(state: State, rec: RpcEvent): State {
 
 export function usePi() {
   const [state, setState] = useState<State>(initialState);
+  // 回调里读最新状态的通道（避免闭包过期 / 依赖抖动）
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const started = useRef(false);
 
   const refreshSessions = useCallback(async () => {
@@ -202,6 +205,26 @@ export function usePi() {
     ]);
     setState((s) => ({ ...s, sessions, projects }));
   }, []);
+
+  // 每模型思考档位记忆：存 ui.json（我们自己的文件，pi 永不覆盖），
+  // boot/切会话/切模型后按记忆注入。pi 的 settings.json 旁路写会被它
+  // 的进程内存覆盖，所以不走那条路。直接走 window.pi.send（不依赖下方
+  // 的 send 包装），可以定义在 boot 之前。
+  const applyThinkingPref = useCallback(
+    async (model: ModelInfo | undefined, current: string | undefined) => {
+      if (!model?.provider || !model?.id) return current ?? null;
+      try {
+        const prefs = await window.pi.getThinkingPrefs();
+        const level = prefs[`${model.provider}/${model.id}`];
+        if (level && level !== current) {
+          await window.pi.send({ type: "set_thinking_level", level });
+          return level;
+        }
+      } catch {}
+      return current ?? null;
+    },
+    [],
+  );
 
   const boot = useCallback(
     async (cwd?: string) => {
@@ -229,6 +252,12 @@ export function usePi() {
           commands: commands?.commands ?? [],
           autoCompact: Boolean((st.autoCompactionEnabled as boolean) ?? true),
         }));
+        // 按记忆注入该模型的思考档位（用户上次为它选的）
+        const applied = await applyThinkingPref(
+          st.model as ModelInfo | undefined,
+          String(st.thinkingLevel ?? "off"),
+        );
+        if (applied) setState((s) => ({ ...s, thinkingLevel: applied }));
         refreshSessions();
       } catch (err) {
         setState((s) => ({
@@ -238,7 +267,7 @@ export function usePi() {
         }));
       }
     },
-    [refreshSessions],
+    [refreshSessions, applyThinkingPref],
   );
 
   // Opening a project pins it to the project list, then boots pi inside it.
@@ -350,9 +379,15 @@ export function usePi() {
       model: state_.model ?? s.model,
       thinkingLevel: state_.thinkingLevel ?? s.thinkingLevel,
     }));
+    // 打开的会话按记忆注入该模型的思考档位（fork/切换后同样生效）
+    const applied = await applyThinkingPref(
+      (state_.model as ModelInfo | undefined) ?? stateRef.current?.model,
+      (state_.thinkingLevel as string | undefined) ?? stateRef.current?.thinkingLevel,
+    );
+    if (applied) setState((s) => ({ ...s, thinkingLevel: applied }));
     refreshSessions();
     return messages as PiMessage[];
-  }, [send, refreshSessions]);
+  }, [send, refreshSessions, applyThinkingPref]);
 
   const fork = useCallback(
     async (entryId: string): Promise<{ ok: boolean; text?: string }> => {
@@ -413,8 +448,13 @@ export function usePi() {
       window.pi.cfg
         .setSetting({ defaultProvider: model.provider, defaultModel: model.id })
         .catch(() => null);
+      // 切模型后按记忆注入该模型的思考档位
+      const applied = await applyThinkingPref(model, stateRef.current?.thinkingLevel);
+      if (applied && applied !== stateRef.current?.thinkingLevel) {
+        setState((s) => ({ ...s, thinkingLevel: applied }));
+      }
     },
-    [send],
+    [send, applyThinkingPref],
   );
 
   // Internal model switch (dual-model chain): updates the live session but
@@ -427,13 +467,21 @@ export function usePi() {
     [send],
   );
 
+  // 每模型思考档位记忆：存 ui.json（我们自己的文件，pi 永不覆盖），
+  // boot/切会话/切模型后按记忆注入。pi 的 settings.json 旁路写会被它
+  // 的进程内存覆盖，所以不走那条路。（注入函数 applyThinkingPref 定义在
+  // boot 之前，见上。）
   const setThinking = useCallback(
     async (level: string) => {
       setState((s) => ({ ...s, thinkingLevel: level }));
       await send({ type: "set_thinking_level", level });
-      window.pi.cfg.setSetting({ defaultThinkingLevel: level }).catch(() => null);
+      if (state.model?.provider && state.model?.id) {
+        window.pi
+          .setThinkingPref({ provider: state.model.provider, modelId: state.model.id, level })
+          .catch(() => null);
+      }
     },
-    [send],
+    [send, state.model],
   );
 
   const newSession = useCallback(async () => {
@@ -452,8 +500,14 @@ export function usePi() {
       sessionFile: fresh.sessionFile as string | undefined,
       sessionName: fresh.sessionName as string | undefined,
     }));
+    // 新会话同样按记忆注入该模型的思考档位
+    const applied = await applyThinkingPref(
+      (fresh.model as ModelInfo | undefined) ?? stateRef.current?.model,
+      (fresh.thinkingLevel as string | undefined) ?? stateRef.current?.thinkingLevel,
+    );
+    if (applied) setState((s) => ({ ...s, thinkingLevel: applied }));
     refreshSessions();
-  }, [send, refreshSessions]);
+  }, [send, refreshSessions, applyThinkingPref]);
 
   const deleteSession = useCallback(
     async (file: string) => {

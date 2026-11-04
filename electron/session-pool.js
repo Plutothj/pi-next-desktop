@@ -47,7 +47,8 @@ export function createSessionPool({ send, makeEnv, buildArgs, activeKey, idleMs 
       },
       onExit({ code, signal }) {
         if (isActive(slot.file)) send({ type: "child_exit", code, signal, sessionFile: slot.file });
-        if (slots.get(file) === slot) slots.delete(file);
+        // 用 slot.file（rebind 后的最新键），闭包里的 file 是 ensure 时的旧键
+        if (slots.get(slot.file) === slot) slots.delete(slot.file);
       },
       onStderr(data) {
         process.stderr.write(data);
@@ -95,8 +96,14 @@ export function createSessionPool({ send, makeEnv, buildArgs, activeKey, idleMs 
   }
 
   function stopAll() {
-    for (const slot of slots.values()) slot.proc.stop();
+    const waits = [];
+    for (const slot of slots.values()) waits.push(slot.proc.stop());
     slots.clear();
+    if (process.env.PI_DEBUG) console.error(`[stopAll] kicked ${waits.length} procs`);
+    // 全部子进程真正退出（含各自的 onSessionExit 钩子）后 resolve
+    return Promise.allSettled(waits).then(() => {
+      if (process.env.PI_DEBUG) console.error("[stopAll] all settled");
+    });
   }
 
   /** 空闲回收：非活动且静默超时的会话进程停掉（文件在磁盘，切回重启即可）。 */

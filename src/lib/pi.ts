@@ -349,6 +349,8 @@ export type PiBridge = {
   send: (payload: Record<string, unknown>) => Promise<unknown>;
   pickFolder: () => Promise<string | null>;
   reveal: (target: string) => Promise<void>;
+  getThinkingPrefs: () => Promise<Record<string, string>>;
+  setThinkingPref: (payload: { provider: string; modelId: string; level: string }) => Promise<{ ok: boolean }>;
   showWindow: () => Promise<{ ok: boolean }>;
   platform: string;
   e2e: boolean;
@@ -404,6 +406,7 @@ export type PiBridge = {
     >;
   debugDialog: (dialog: Omit<UiDialogRequest, "id">) => Promise<{ ok: boolean; id: string }>;
   debugWidget: (payload: { key?: string; lines: string[]; placement?: "above" | "below" }) => Promise<{ ok: boolean }>;
+  debugQuit?: () => Promise<{ ok: boolean }>;
   exportHtml: () => Promise<{ ok: boolean; path?: string; error?: string }>;
   diagExport: () => Promise<{ ok: boolean; path?: string; error?: string }>;
   plans: {

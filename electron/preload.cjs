@@ -32,12 +32,15 @@ contextBridge.exposeInMainWorld("pi", {
   // Only registered when the main process runs with PI_DEBUG.
   debugDialog: (dialog) => ipcRenderer.invoke("pi:debugDialog", dialog),
   debugWidget: (payload) => ipcRenderer.invoke("pi:debugWidget", payload),
+  debugQuit: () => ipcRenderer.invoke("pi:debugQuit"),
   projects: {
     list: () => ipcRenderer.invoke("projects:list"),
     add: (dir) => ipcRenderer.invoke("projects:add", dir),
     remove: (dir) => ipcRenderer.invoke("projects:remove", dir),
   },
   reveal: (target) => ipcRenderer.invoke("pi:reveal", target),
+  getThinkingPrefs: () => ipcRenderer.invoke("ui:getThinkingPrefs"),
+  setThinkingPref: (payload) => ipcRenderer.invoke("ui:setThinkingPref", payload),
   showWindow: () => ipcRenderer.invoke("pi:showWindow"),
   platform: process.platform,
   // E2E 跑测试时不弹新手引导等首次启动 UI

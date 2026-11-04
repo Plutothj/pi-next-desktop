@@ -172,6 +172,7 @@ export function cliVersion(rt) {
 export class PiProcess {
   constructor({ onRecord, onExit, onStderr } = {}) {
     this.child = null;
+    this.stopped = null; // 主动停止中的进程（退出时仍触发 onExit）
     this.nextId = 1;
     this.pending = new Map();
     this.onRecord = onRecord ?? (() => {});
@@ -199,6 +200,8 @@ export class PiProcess {
     // the new one during a restart.
     const proc = spawn(node, argv, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
     this.child = proc;
+    // 新进程接手后，旧进程（即便带着 stop 标记）的退出回到"竞态噪音"语义
+    this.stopped = null;
 
     // Split strictly on LF. Node's readline also splits on U+2028/U+2029,
     // which are legal inside JSON strings.
@@ -221,9 +224,13 @@ export class PiProcess {
     proc.stderr.on("data", (d) => this.onStderr(d));
 
     proc.on("exit", (code, signal) => {
-      // A superseded process exiting during a restart is not news.
-      if (this.child !== proc) return;
+      if (process.env.PI_DEBUG) console.error(`[pexit] code=${code} child=${this.child === proc} stopped=${this.stopped === proc}`);
+      // 重启竞态：被更新的进程顶替的旧进程退出不算新闻。注意 stop() 会把
+      // this.child 置 null（主动停止），那种情况仍要通知 onExit——池的槽清理
+      // 和"退出后回写"钩子都挂在上面，跳过就是漏。
+      if (this.child !== proc && this.stopped !== proc) return;
       this.child = null;
+      this.stopped = null;
       for (const entry of this.pending.values()) {
         clearTimeout(entry.timer);
         entry.reject(new Error("pi exited"));
@@ -234,10 +241,14 @@ export class PiProcess {
     return proc;
   }
 
+  /** 停止子进程；返回的 promise 在进程真正退出后 resolve（上限 ~2.5s），
+   * 让调用方（app 退出）能等"退出钩子"跑完再继续。 */
   stop() {
-    if (!this.child) return;
+    if (!this.child) return Promise.resolve();
     const dying = this.child;
     this.child = null;
+    // 标记主动停止：该进程退出时仍要走 onExit（见 start 里的 exit 处理器）
+    this.stopped = dying;
     try { dying.stdin.end(); } catch {}
     // Commands aimed at the old process will never be answered.
     for (const entry of this.pending.values()) {
@@ -245,7 +256,18 @@ export class PiProcess {
       entry.reject(new Error("pi 重启中"));
     }
     this.pending.clear();
-    setTimeout(() => { try { dying.kill("SIGKILL"); } catch {} }, 1500);
+    setTimeout(() => {
+      try { dying.kill("SIGKILL"); } catch {}
+      if (process.env.PI_DEBUG) console.error(`[pstop] SIGKILL sent pid=${dying.pid}`);
+    }, 1500);
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, 2500);
+      dying.once("exit", () => {
+        clearTimeout(timer);
+        if (process.env.PI_DEBUG) console.error(`[pstop] exited pid=${dying.pid}`);
+        resolve();
+      });
+    });
   }
 
   handleRecord(line) {

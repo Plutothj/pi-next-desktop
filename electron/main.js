@@ -2,39 +2,39 @@
 // between pi's extension UI protocol and the renderer. Feature areas live in
 // their own modules (sessions, projects, git, tasks, workspace, config, diag).
 
-import { app, BrowserWindow, dialog, Menu, nativeImage, Tray, shell } from "electron";
-import { parseAttachment } from "./attachments.js";
-import { createAgentBoard } from "./agents.js";
-import { installAutoRouter } from "./auto-router.js";
-import { installTodoExtension } from "./todo-extension.js";
-import { installBundledExtensions } from "./bundled-extensions.js";
-import { createSessionPool } from "./session-pool.js";
-import { createScheduler } from "./schedules.js";
-import { requireObject, requireString, optionalString } from "./ipc-helpers.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { APP_HOME, AGENT_DIR, ensureAppHome } from "./app-home.js";
+import { app, BrowserWindow, dialog, Menu, nativeImage, shell, Tray } from "electron";
+import { createAgentBoard } from "./agents.js";
+import { AGENT_DIR, APP_HOME, ensureAppHome } from "./app-home.js";
+import { parseAttachment } from "./attachments.js";
+import { installAutoRouter } from "./auto-router.js";
+import { installBundledExtensions } from "./bundled-extensions.js";
 import { registerConfigHandlers } from "./config-ipc.js";
-import { logLine, recordLine } from "./logs.js";
 import { registerDiagHandlers } from "./diag.js";
 import { registerGitHandlers } from "./git.js";
 import { safeHandle } from "./ipc.js";
+import { optionalString, requireObject, requireString } from "./ipc-helpers.js";
+import { logLine, recordLine } from "./logs.js";
 import {
+  cliVersion,
   PI_BG_INSTRUCTIONS,
   PiProcess,
-  cliVersion,
   probeCli,
   resolveRuntime,
   runtimeVersion,
 } from "./pi-process.js";
 import { registerProjectHandlers } from "./projects.js";
+import { createScheduler } from "./schedules.js";
 import { scanSessions } from "./session-files.js";
+import { createSessionPool } from "./session-pool.js";
 import { registerSessionHandlers } from "./sessions.js";
 import { createTaskManager, installTermCli } from "./tasks.js";
-import { registerWorkspaceHandlers } from "./workspace.js";
+import { installTodoExtension } from "./todo-extension.js";
 import { registerUpdater } from "./updater.js";
 import { registerUsageHandlers } from "./usage-ipc.js";
+import { registerWorkspaceHandlers } from "./workspace.js";
 
 // ---------------------------------------------------------------- wiring
 
@@ -231,7 +231,7 @@ function handleExtensionUi(req) {
 // 惯例（红叉只关窗口，Dock 常驻）。
 let tray = null;
 let quitting = false;
-let trayNotified = false;
+const trayNotified = false;
 
 function trayIcon() {
   const file = app.isPackaged
@@ -357,6 +357,21 @@ function setZoomFactorPersisted(factor) {
 }
 
 safeHandle("ui:zoomGet", () => clampZoom(readUiPrefs().zoomFactor ?? 1));
+
+// 每模型思考档位偏好：存在我们自己的 ui.json（pi 不碰这个文件）。
+// pi 的 settings.json 被它的进程内存整个握着，旁路写会被下次保存覆盖、
+// RPC 也没有 persist 选项；改为渲染层在 boot/切会话/切模型后按这里的
+// 记忆主动 set_thinking_level 注入。
+safeHandle("ui:getThinkingPrefs", () => readUiPrefs().thinkingLevels ?? {});
+safeHandle("ui:setThinkingPref", (_e, { provider, modelId, level } = {}) => {
+  requireString(provider, "provider");
+  requireString(modelId, "modelId");
+  requireString(level, "level");
+  const current = readUiPrefs().thinkingLevels ?? {};
+  current[`${provider}/${modelId}`] = level;
+  writeUiPrefs({ thinkingLevels: current });
+  return { ok: true };
+});
 
 // ------------------------------------------------- 自绘标题栏的窗口控制
 
@@ -589,6 +604,13 @@ if (process.env.PI_DEBUG) {
     send({ type: "ui_widget", key, lines, placement });
     return { ok: true };
   });
+
+  // 调试/测试：优雅退出（走真实 quit 路径：stopAll → 进程退出钩子 → app.quit），
+  // 供验证"退出时回写"类逻辑；硬杀不会给主进程跑退出钩子的机会。
+  safeHandle("pi:debugQuit", () => {
+    setImmediate(() => app.quit());
+    return { ok: true };
+  });
 }
 
 // ---------------------------------------------------------------- modules
@@ -723,10 +745,18 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", () => {
+let quitDrained = false;
+app.on("before-quit", (event) => {
   quitting = true;
-  pool.stopAll();
+  // 先拦住退出：等全部 pi 子进程真正死透（各自的退出钩子跑完，槽位清理）
+  // 再继续；2.5s 兜底，不会卡住退出。
+  if (quitDrained) return;
+  event.preventDefault();
+  quitDrained = true;
   taskManager.stopBridge();
   agentBoard.stopAll();
   scheduler.stop();
+  Promise.race([pool.stopAll(), new Promise((r) => setTimeout(r, 2500))]).finally(() =>
+    app.quit(),
+  );
 });
