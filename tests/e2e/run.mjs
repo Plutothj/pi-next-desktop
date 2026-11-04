@@ -100,14 +100,29 @@ async function main() {
         PI_AGENT_DIR: agentDir,
         PI_E2E: "1",
         PI_DEBUG: "1", // 启用 debugWidget 等测试注入通道
+        // CI 的 ubuntu 镜像更新后 chrome-sandbox 常起不来（表现为窗口 90s 不出现）
+        ELECTRON_DISABLE_SANDBOX: process.env.CI ? "1" : undefined,
       },
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
   const stderr = [];
   browserProc.stderr.on("data", (d) => stderr.push(d.toString()));
+  // 启动即死（sandbox/依赖问题）时把现场留在日志里，别只留一个超时
+  browserProc.on("exit", (code) => {
+    if (code !== null && code !== 0) {
+      console.error(`electron 提前退出 code=${code}，stderr 尾部：\n${stderr.join("").slice(-2500)}`);
+    }
+  });
 
-  const target = await cdp();
+  let target;
+  try {
+    target = await cdp();
+  } catch (err) {
+    // 页面目标没出现：electron 可能活着但窗口没开成，stderr 常有线索
+    console.error(`CDP 目标未出现，electron stderr 尾部：\n${stderr.join("").slice(-2500)}`);
+    throw err;
+  }
   const ws = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((res, rej) => {
     ws.onopen = res;

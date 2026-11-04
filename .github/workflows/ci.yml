@@ -18,6 +18,8 @@ jobs:
       - run: npx biome lint src electron tests
       - run: npx tsc --noEmit
       - run: npm run build
+      # 单测里的扩展加载测试直接用 runtime/node_modules 的 jiti/typebox
+      - run: npm run stage
       - run: npm test
 
   # E2E：CDP 驱动真实 Electron（fixture agent 目录，无网络依赖），
