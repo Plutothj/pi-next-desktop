@@ -1,5 +1,6 @@
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
+import DOMPurify from "dompurify";
 import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -7,6 +8,10 @@ import type { BundledLanguage } from "shiki";
 
 // pdf.js 需要 worker；Vite 把 worker 作为静态资源交给主进程 file:// 加载
 GlobalWorkerOptions.workerSrc = workerUrl;
+
+// docx 预览要把 mammoth 的 HTML 塞进 DOM：文档内容不可信（外链、内嵌 HTML），
+// 一律先净化（DOMPurify，HTML profile，禁脚本/事件属性）。
+const sanitizeHtml = (html: string) => DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
 
 import {
   BracesIcon,
@@ -304,10 +309,11 @@ export function FilesPanel({
           <span className="truncate font-mono text-[11px]">{doc.path}</span>
           {onAskAi ? <AskAiButton cwd={cwd} onAsk={(text) => onAskAi(text)} path={doc.path} /> : null}
         </div>
-        {/* mammoth 输出的干净 HTML（无脚本），prose 样式渲染 */}
+        {/* mammoth 的 HTML 先过 DOMPurify（文档里的外链/内嵌 HTML 不可信） */}
         <div
           className="doc-preview min-h-0 flex-1 overflow-auto px-4 py-3 text-[13px] leading-relaxed"
-          dangerouslySetInnerHTML={{ __html: doc.html }}
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: 内容已经 DOMPurify 净化（html profile，无脚本/事件属性）
+          dangerouslySetInnerHTML={{ __html: sanitizeHtml(doc.html) }}
         />
       </div>
     );
