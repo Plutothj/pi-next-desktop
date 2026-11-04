@@ -501,7 +501,9 @@ function Shell() {
         >
           {sidebarCollapsed ? (
             <Button
-              className="h-7 shrink-0 px-2 text-muted-foreground"
+              // 头部整条是拖拽区（-webkit-app-region: drag），按钮必须显式
+              // 标 no-drag，否则 Windows 无边框窗口下点击被系统当成拖动吞掉
+              className="no-drag h-7 shrink-0 px-2 text-muted-foreground"
               onClick={() => toggleSidebar(false)}
               size="sm"
               title="展开侧栏（⌘B）"
