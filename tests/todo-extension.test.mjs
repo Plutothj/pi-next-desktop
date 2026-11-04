@@ -21,11 +21,15 @@ function makePi() {
   return {
     tools,
     handlers,
+    sent: [],
     on(event, fn) {
       handlers.set(event, fn);
     },
     registerTool(def) {
       tools.set(def.name, def);
+    },
+    async sendUserMessage(content) {
+      this.sent.push(content);
     },
   };
 }
@@ -138,4 +142,46 @@ test("todo 扩展：session_tree 从分支 details 重建状态", async () => {
   // 新 id 接着重建的 nextId 走
   const added = await pi.tools.get("todo").execute("c1", { action: "add", text: "丙" }, null, null, ctx);
   assert.equal(added.details.todos.at(-1).id, 3);
+});
+
+test("todo 扩展：turn_end 自动提醒未完成项 + 同批防循环", async () => {
+  const factory = await loadTodoExtension();
+  const pi = makePi();
+  factory(pi);
+  const tool = pi.tools.get("todo");
+  const ctx = makeCtx();
+  const turnEnd = () => pi.handlers.get("turn_end")({}, ctx);
+
+  // 无清单：不提醒
+  await turnEnd();
+  assert.equal(pi.sent.length, 0);
+
+  // 添加一项 → 回合结束 → 提醒一次（内容点名未完成项）
+  await tool.execute("c1", { action: "add", text: "Stage A" }, null, null, ctx);
+  await turnEnd();
+  assert.equal(pi.sent.length, 1);
+  assert.match(pi.sent[0], /#1 Stage A/);
+  assert.match(pi.sent[0], /toggle/);
+
+  // 模型无动于衷回合再次结束：同一批不再重复提醒
+  await turnEnd();
+  assert.equal(pi.sent.length, 1);
+
+  // toggle 完成后：无未完成项不提醒
+  await tool.execute("c2", { action: "toggle", id: 1 }, null, null, ctx);
+  await turnEnd();
+  assert.equal(pi.sent.length, 1);
+
+  // 新的未完成状态（签名变化）可再次提醒
+  await tool.execute("c3", { action: "add", text: "Stage B" }, null, null, ctx);
+  await turnEnd();
+  assert.equal(pi.sent.length, 2);
+  assert.match(pi.sent[1], /#2 Stage B/);
+
+  // clear 后重建：nextId 不回卷，同文案新项的提醒签名不冲突
+  await tool.execute("c4", { action: "clear" }, null, null, ctx);
+  await tool.execute("c5", { action: "add", text: "Stage B" }, null, null, ctx);
+  await turnEnd();
+  assert.equal(pi.sent.length, 3);
+  assert.match(pi.sent[2], /#3 Stage B/);
 });

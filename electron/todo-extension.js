@@ -27,6 +27,10 @@ const Params = Type.Object({
 export default function (pi: ExtensionAPI) {
   let todos: Todo[] = [];
   let nextId = 1;
+  // turn_end 自动提醒的防循环：同一批未完成项（签名相同）只提醒一次；
+  // 模型若依旧不动，说明它有自己的判断，不再打扰。
+  let lastNudgeSig: string | null = null;
+  let nudging = false;
 
   // 从当前分支的 tool result details 重建（fork 后自动正确）
   const reconstruct = (ctx: ExtensionContext) => {
@@ -60,6 +64,27 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_e, ctx) => { reconstruct(ctx); paint(ctx); });
   pi.on("session_tree", async (_e, ctx) => { reconstruct(ctx); paint(ctx); });
 
+  // 回合结束仍有未完成项 → 注入一条提醒让模型收尾（toggle/remove/继续干）。
+  // 这是 Claude Code 同款兜底：模型干完活最容易忘的就是回头打勾。
+  pi.on("turn_end", async () => {
+    if (nudging) return;
+    const pending = todos.filter((t) => !t.done);
+    if (pending.length === 0) return;
+    const sig = pending.map((t) => \`#\${t.id} \${t.text}\`).join(" | ");
+    if (sig === lastNudgeSig) return;
+    lastNudgeSig = sig;
+    nudging = true;
+    try {
+      await pi.sendUserMessage(
+        \`[todo 自动提醒] 清单里还有未完成项：\${pending.map((t) => \`#\${t.id} \${t.text}\`).join("；")}。已完成的请立即用 todo 工具 toggle 对应 id 标记；不再需要的用 remove 移除；确有剩余工作就继续执行，无需解释。\`,
+      );
+    } catch {
+      // 提醒失败不致命：下一轮 turn_end 换了签名还会再试
+    } finally {
+      nudging = false;
+    }
+  });
+
   pi.registerTool({
     name: "todo",
     label: "Todo",
@@ -69,6 +94,7 @@ export default function (pi: ExtensionAPI) {
     // （不能写 "this tool"），否则模型不知道指哪个工具。
     promptGuidelines: [
       "Use the todo tool for any task that needs three or more distinct steps: add the steps first, then toggle each one done as you finish it.",
+      "The moment a todo tool item's work is finished — before moving to the next step or writing your final reply — call the todo tool with action=toggle to mark it done. Never end a reply with completed work still marked pending.",
       "The todo tool's list lives in the conversation, so it survives forking and switching branches; re-read it with action=list when unsure what remains.",
       "Keep the todo tool list short and concrete (one line per step), and clear it with action=clear once the whole task is finished.",
     ],
@@ -116,7 +142,7 @@ export default function (pi: ExtensionAPI) {
         }
         case "clear": {
           todos = [];
-          nextId = 1;
+          // nextId 不回卷：清空后重新添加同文案也能和旧提醒签名区分
           paint(ctx);
           return {
             content: [{ type: "text", text: "清单已清空" }],
