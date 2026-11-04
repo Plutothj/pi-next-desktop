@@ -134,7 +134,7 @@ export function ProvidersPanel({
 
 
 // 每个模型一行的结构化草稿；显示名与 ID 相同时留空。
-// contextWindow/maxTokens/cost 来自 models.dev 元数据：编辑时静默保存，不占版面。
+// contextWindow/maxTokens/cost 默认来自 models.dev 元数据，可点行内「参数」chip 修改。
 type ModelDraft = {
   id: string;
   name: string;
@@ -160,6 +160,13 @@ const toDrafts = (models: ProviderModel[] | undefined): ModelDraft[] =>
 const fmtTokens = (n?: number) => {
   if (!n) return "";
   return n >= 1_000_000 ? `${Math.round(n / 1_000_000)}M` : `${Math.round(n / 1_000)}k`;
+};
+
+// "200k" / "1m" / "128000" → token 数；非法输入返回 undefined（不覆盖已存值）
+const parseTokens = (s: string): number | undefined => {
+  const m = s.trim().toLowerCase().match(/^(\d+(?:\.\d+)?)(k|m)?$/);
+  if (!m) return undefined;
+  return Math.round(parseFloat(m[1]) * (m[2] === "m" ? 1e6 : m[2] === "k" ? 1e3 : 1));
 };
 
 const fmtCost = (c?: ProviderModelCost) => (c ? `$${c.input}/$${c.output}` : "");
@@ -220,6 +227,8 @@ function ProviderForm({
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState("");
   const [fetching, setFetching] = useState(false);
+  // 展开参数编辑的行下标（上下文/输出上限/价格）
+  const [paramsOpen, setParamsOpen] = useState<number | null>(null);
 
   const updateRow = (index: number, patch: Partial<ModelDraft>) =>
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
@@ -621,45 +630,61 @@ function ProviderForm({
         {rows.length ? (
           <div className="space-y-1.5">
             {rows.map((row, i) => (
-              <div className="flex items-center gap-1.5" key={i} title={draftTip(row)}>
-                <Input
-                  aria-label="模型 ID"
-                  className="h-8 flex-1 font-mono text-xs"
-                  onChange={(e) => updateRow(i, { id: e.target.value })}
-                  placeholder="模型 ID，如 deepseek-chat"
-                  value={row.id}
-                />
-                <Input
-                  aria-label="显示名"
-                  className="h-8 w-28 shrink-0 text-xs"
-                  onChange={(e) => updateRow(i, { name: e.target.value })}
-                  placeholder="显示名（可选）"
-                  value={row.name}
-                />
-                {row.contextWindow ? (
-                  <span className="w-9 shrink-0 text-center text-[10px] text-muted-foreground">
-                    {fmtTokens(row.contextWindow)}
-                  </span>
+              <div className="space-y-1" key={i}>
+                <div className="flex items-center gap-1.5" title={draftTip(row)}>
+                  <Input
+                    aria-label="模型 ID"
+                    className="h-8 flex-1 font-mono text-xs"
+                    onChange={(e) => updateRow(i, { id: e.target.value })}
+                    placeholder="模型 ID，如 deepseek-chat"
+                    value={row.id}
+                  />
+                  <Input
+                    aria-label="显示名"
+                    className="h-8 w-28 shrink-0 text-xs"
+                    onChange={(e) => updateRow(i, { name: e.target.value })}
+                    placeholder="显示名（可选）"
+                    value={row.name}
+                  />
+                  <button
+                    className={cn(
+                      "h-8 min-w-9 shrink-0 rounded-md border px-1 text-[11px] transition-colors hover:bg-accent/60",
+                      paramsOpen === i
+                        ? "border-primary/40 bg-primary/10 text-primary"
+                        : "text-muted-foreground",
+                    )}
+                    onClick={() => setParamsOpen(paramsOpen === i ? null : i)}
+                    title="上下文 / 最大输出 / 价格，点击编辑"
+                    type="button"
+                  >
+                    {row.contextWindow ? fmtTokens(row.contextWindow) : "参数"}
+                  </button>
+                  <FlagChip
+                    active={row.reasoning}
+                    label="推理"
+                    onClick={() => updateRow(i, { reasoning: !row.reasoning })}
+                  />
+                  <FlagChip
+                    active={row.image}
+                    label="图片"
+                    onClick={() => updateRow(i, { image: !row.image })}
+                  />
+                  <Button
+                    aria-label="删除模型"
+                    className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                    onClick={() => {
+                      setRows((prev) => prev.filter((_, j) => j !== i));
+                      setParamsOpen(null);
+                    }}
+                    size="icon"
+                    variant="ghost"
+                  >
+                    <Trash2Icon className="size-3.5" />
+                  </Button>
+                </div>
+                {paramsOpen === i ? (
+                  <ModelParamsEditor onChange={(patch) => updateRow(i, patch)} row={row} />
                 ) : null}
-                <FlagChip
-                  active={row.reasoning}
-                  label="推理"
-                  onClick={() => updateRow(i, { reasoning: !row.reasoning })}
-                />
-                <FlagChip
-                  active={row.image}
-                  label="图片"
-                  onClick={() => updateRow(i, { image: !row.image })}
-                />
-                <Button
-                  aria-label="删除模型"
-                  className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
-                  onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))}
-                  size="icon"
-                  variant="ghost"
-                >
-                  <Trash2Icon className="size-3.5" />
-                </Button>
               </div>
             ))}
           </div>
@@ -707,6 +732,91 @@ function FlagChip({
     >
       {label}
     </button>
+  );
+}
+
+// 模型参数编辑行（上下文 / 最大输出 / 价格）：本地字符串草稿，合法时同步回行数据。
+// 不合法的中间态只留在输入框里，不覆盖已存值；清空即删除该参数。
+function ModelParamsEditor({
+  row,
+  onChange,
+}: {
+  row: ModelDraft;
+  onChange: (patch: Partial<ModelDraft>) => void;
+}) {
+  const [ctx, setCtx] = useState(row.contextWindow ? String(row.contextWindow) : "");
+  const [max, setMax] = useState(row.maxTokens ? String(row.maxTokens) : "");
+  const [ci, setCi] = useState(row.cost?.input != null ? String(row.cost.input) : "");
+  const [co, setCo] = useState(row.cost?.output != null ? String(row.cost.output) : "");
+
+  const applyTokens = (field: "contextWindow" | "maxTokens", v: string) => {
+    if (field === "contextWindow") setCtx(v);
+    else setMax(v);
+    const t = v.trim();
+    if (!t) return onChange({ [field]: undefined });
+    const n = parseTokens(t);
+    if (n != null) onChange({ [field]: n });
+  };
+
+  const applyCost = (field: "input" | "output", v: string) => {
+    if (field === "input") setCi(v);
+    else setCo(v);
+    const t = v.trim();
+    const n = t === "" ? undefined : Number(t);
+    // 非数字的中间态不动已存值
+    if (n != null && !Number.isFinite(n)) return;
+    const input = field === "input" ? n : row.cost?.input;
+    const output = field === "output" ? n : row.cost?.output;
+    onChange({
+      cost:
+        input == null && output == null
+          ? undefined
+          : {
+              input: input ?? 0,
+              output: output ?? 0,
+              cacheRead: row.cost?.cacheRead ?? 0,
+              cacheWrite: row.cost?.cacheWrite ?? 0,
+            },
+    });
+  };
+
+  const inputCls = "h-7 w-20 border-transparent bg-muted/50 px-1.5 font-mono text-[11px] focus-visible:bg-background";
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-dashed bg-muted/20 px-2 py-1.5 text-[11px] text-muted-foreground">
+      <label className="flex items-center gap-1">
+        上下文
+        <Input
+          className={inputCls}
+          onChange={(e) => applyTokens("contextWindow", e.target.value)}
+          placeholder="如 200k / 1m"
+          value={ctx}
+        />
+      </label>
+      <label className="flex items-center gap-1">
+        最大输出
+        <Input
+          className={inputCls}
+          onChange={(e) => applyTokens("maxTokens", e.target.value)}
+          placeholder="如 8k"
+          value={max}
+        />
+      </label>
+      <label className="flex items-center gap-1">
+        价格 $/Mtok
+        <Input
+          className={cn(inputCls, "w-16")}
+          onChange={(e) => applyCost("input", e.target.value)}
+          placeholder="输入"
+          value={ci}
+        />
+        <Input
+          className={cn(inputCls, "w-16")}
+          onChange={(e) => applyCost("output", e.target.value)}
+          placeholder="输出"
+          value={co}
+        />
+      </label>
+    </div>
   );
 }
 
