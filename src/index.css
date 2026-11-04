@@ -215,3 +215,18 @@
 .pi-tour-popover .driver-popover-arrow {
   display: none;
 }
+
+/* docx 预览（mammoth 输出的 HTML）排版 */
+.doc-preview h1 { font-size: 1.25rem; font-weight: 600; margin: 1em 0 0.5em; }
+.doc-preview h2 { font-size: 1.1rem; font-weight: 600; margin: 1em 0 0.4em; }
+.doc-preview h3 { font-size: 1rem; font-weight: 600; margin: 0.9em 0 0.35em; }
+.doc-preview p { margin: 0.45em 0; }
+.doc-preview :is(ul, ol) { margin: 0.45em 0; padding-left: 1.4em; }
+.doc-preview ul { list-style: disc; }
+.doc-preview ol { list-style: decimal; }
+.doc-preview table { margin: 0.7em 0; border-collapse: collapse; font-size: 0.85em; width: 100%; }
+.doc-preview :is(th, td) { border: 1px solid var(--border); padding: 3px 7px; text-align: left; }
+.doc-preview th { background: var(--muted); font-weight: 500; }
+.doc-preview img { max-width: 100%; border-radius: 4px; margin: 0.5em 0; }
+.doc-preview a { color: var(--primary); text-decoration: underline; }
+.doc-preview hr { border: 0; border-top: 1px solid var(--border); margin: 1em 0; }

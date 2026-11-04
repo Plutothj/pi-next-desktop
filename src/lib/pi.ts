@@ -442,6 +442,8 @@ export type PiBridge = {
     truncatedSheets?: boolean;
     error?: string;
   }>;
+  readDoc: (cwd: string, file: string) => Promise<{ ok: boolean; html?: string; error?: string }>;
+  readPdf: (cwd: string, file: string) => Promise<{ ok: boolean; data?: Uint8Array; error?: string }>;
   agents: (cwd?: string) => Promise<AgentProfile[]>;
   git: {
     status: (cwd: string) => Promise<GitStatus>;

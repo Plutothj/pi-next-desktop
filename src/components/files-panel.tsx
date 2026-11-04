@@ -1,7 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BundledLanguage } from "shiki";
 import { AgGridReact } from "ag-grid-react";
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from "ag-grid-community";
+import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
+import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+
+// pdf.js 需要 worker；Vite 把 worker 作为静态资源交给主进程 file:// 加载
+GlobalWorkerOptions.workerSrc = workerUrl;
 import {
   BracesIcon,
   ChevronDownIcon,
@@ -12,6 +17,7 @@ import {
   FileImageIcon,
   FileSpreadsheetIcon,
   FileTextIcon,
+  FileTypeIcon,
   GitBranchIcon,
   GlobeIcon,
   Loader2Icon,
@@ -76,6 +82,11 @@ function iconFor(name: string) {
     case "csv":
     case "tsv":
       return <FileSpreadsheetIcon className={cn(base, "text-emerald-500")} />;
+    case "docx":
+    case "doc":
+      return <FileTypeIcon className={cn(base, "text-blue-400")} />;
+    case "pdf":
+      return <FileTextIcon className={cn(base, "text-rose-400")} />;
     case "png":
     case "jpg":
     case "jpeg":
@@ -124,6 +135,10 @@ export function FilesPanel({
     truncatedSheets?: boolean;
   } | null>(null);
   const [sheetIndex, setSheetIndex] = useState(0);
+  // docx → HTML 预览
+  const [doc, setDoc] = useState<{ path: string; html: string } | null>(null);
+  // pdf → 渲染层 pdf.js 预览
+  const [pdf, setPdf] = useState<{ path: string; data: Uint8Array } | null>(null);
 
   const loadDir = useCallback(
     async (dir: string) => {
@@ -208,6 +223,8 @@ export function FilesPanel({
 
   const open = async (path: string) => {
     const ext = path.split(".").pop()?.toLowerCase() ?? "";
+    setDoc(null);
+    setPdf(null);
     if (ext === "xlsx" || ext === "xls") {
       setFile(null);
       setWorkbook(null);
@@ -228,9 +245,72 @@ export function FilesPanel({
       return;
     }
     setWorkbook(null);
+    if (ext === "docx") {
+      setFile(null);
+      const res = (await window.pi
+        .readDoc(cwd, path)
+        .catch((e) => ({ ok: false, error: String(e) }))) as { ok: boolean; html?: string; error?: string };
+      if (res.ok && res.html) {
+        setDoc({ path, html: res.html });
+      } else {
+        setFile({ path, content: `无法预览文档：${res.error ?? "未知错误"}` });
+      }
+      return;
+    }
+    if (ext === "pdf") {
+      setFile(null);
+      const res = (await window.pi
+        .readPdf(cwd, path)
+        .catch((e) => ({ ok: false, error: String(e) }))) as { ok: boolean; data?: Uint8Array; error?: string };
+      if (res.ok && res.data) {
+        setPdf({ path, data: res.data });
+      } else {
+        setFile({ path, content: `无法预览 PDF：${res.error ?? "未知错误"}` });
+      }
+      return;
+    }
     const res = await window.pi.readFile(cwd, path);
     setFile({ path, content: res.content ?? res.error ?? "" });
   };
+
+  if (doc) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1">
+          <Button className="h-6 px-1.5" onClick={() => setDoc(null)} size="sm" variant="ghost">
+            <ChevronLeftIcon className="size-3.5" />
+          </Button>
+          <span className="truncate font-mono text-[11px]">{doc.path}</span>
+        </div>
+        {/* mammoth 输出的干净 HTML（无脚本），prose 样式渲染 */}
+        <div
+          className="doc-preview min-h-0 flex-1 overflow-auto px-4 py-3 text-[13px] leading-relaxed"
+          dangerouslySetInnerHTML={{ __html: doc.html }}
+        />
+      </div>
+    );
+  }
+
+  if (pdf) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1">
+          <Button
+            className="h-6 px-1.5"
+            onClick={() => {
+              setPdf(null);
+            }}
+            size="sm"
+            variant="ghost"
+          >
+            <ChevronLeftIcon className="size-3.5" />
+          </Button>
+          <span className="truncate font-mono text-[11px]">{pdf.path}</span>
+        </div>
+        <PdfView data={pdf.data} />
+      </div>
+    );
+  }
 
   if (workbook) {
     const sheet = workbook.sheets[Math.min(sheetIndex, workbook.sheets.length - 1)];
@@ -548,6 +628,92 @@ function TableGrid({ rows, note, dark }: { rows: string[][]; note?: string; dark
           rowData={rowData}
           theme={theme}
         />
+      </div>
+    </div>
+  );
+}
+
+// pdf.js 的类型对外很难引用，简单包一层
+type PdfDoc = Awaited<ReturnType<typeof getDocument>["promise"]>;
+const loadPdf = async (data: Uint8Array): Promise<PdfDoc> => {
+  const task = getDocument({ data });
+  task.onPassword = () => {
+    throw new Error("加密 PDF 暂不支持预览");
+  };
+  return task.promise;
+};
+
+/** PDF 预览：pdf.js 逐页渲染 canvas + 翻页。 */
+function PdfView({ data }: { data: Uint8Array }) {
+  const [doc, setDoc] = useState<Awaited<ReturnType<typeof loadPdf>> | null>(null);
+  const [page, setPage] = useState(1);
+  const [error, setError] = useState<string | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadPdf(data)
+      .then((d) => {
+        if (!cancelled) setDoc(d);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(String(e?.message ?? e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [data]);
+
+  useEffect(() => {
+    if (!doc || !canvasRef.current) return;
+    let cancelled = false;
+    doc
+      .getPage(page)
+      .then(async (pdfPage) => {
+        if (cancelled || !canvasRef.current) return;
+        const width = canvasRef.current.parentElement?.clientWidth ?? 340;
+        const scale = width / pdfPage.getViewport({ scale: 1 }).width;
+        const viewport = pdfPage.getViewport({ scale });
+        const canvas = canvasRef.current;
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        await pdfPage.render({ canvas, canvasContext: canvas.getContext("2d")!, viewport }).promise;
+      })
+      .catch(() => null);
+    return () => {
+      cancelled = true;
+    };
+  }, [doc, page]);
+
+  if (error) return <p className="p-3 text-xs text-destructive">PDF 加载失败：{error}</p>;
+  if (!doc) return <p className="p-3 text-xs text-muted-foreground">PDF 加载中…</p>;
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center justify-center gap-2 border-b px-2 py-1">
+        <Button
+          className="size-6 p-0"
+          disabled={page <= 1}
+          onClick={() => setPage((p) => Math.max(1, p - 1))}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <ChevronLeftIcon className="size-3.5" />
+        </Button>
+        <span className="font-mono text-[11px] text-muted-foreground">
+          {page} / {doc.numPages}
+        </span>
+        <Button
+          className="size-6 p-0"
+          disabled={page >= doc.numPages}
+          onClick={() => setPage((p) => Math.min(doc.numPages, p + 1))}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <ChevronRightIcon className="size-3.5" />
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto bg-muted/30 p-2">
+        <canvas className="mx-auto block rounded bg-white shadow" ref={canvasRef} />
       </div>
     </div>
   );

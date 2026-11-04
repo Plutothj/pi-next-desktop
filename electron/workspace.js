@@ -89,6 +89,40 @@ export function registerWorkspaceHandlers() {
     }
   });
 
+  // docx 预览：mammoth 转 HTML（保留标题/列表/表格结构，图片转 base64 内联）。
+  safeHandle("files:readDoc", async (_e, { cwd, file } = {}) => {
+    const root = resolveRoot(cwd);
+    if (typeof file !== "string" || !file) return { ok: false, error: "缺少文件路径" };
+    if (!file.toLowerCase().endsWith(".docx")) return { ok: false, error: "仅支持 .docx" };
+    const target = path.resolve(root, file);
+    if (target !== root && !target.startsWith(root + path.sep)) return { ok: false, error: "越界路径" };
+    try {
+      const stat = fs.statSync(target);
+      if (stat.size > 20_000_000) return { ok: false, error: "文件超过 20MB" };
+      const mammoth = (await import("mammoth")).default;
+      const { value: html } = await mammoth.convertToHtml({ buffer: fs.readFileSync(target) });
+      return { ok: true, html };
+    } catch (err) {
+      return { ok: false, error: `文档解析失败: ${err.message}` };
+    }
+  });
+
+  // pdf 预览：字节直接给渲染层的 pdf.js（渲染比文本提取保真）。
+  safeHandle("files:readPdf", (_e, { cwd, file } = {}) => {
+    const root = resolveRoot(cwd);
+    if (typeof file !== "string" || !file) return { ok: false, error: "缺少文件路径" };
+    if (!file.toLowerCase().endsWith(".pdf")) return { ok: false, error: "仅支持 .pdf" };
+    const target = path.resolve(root, file);
+    if (target !== root && !target.startsWith(root + path.sep)) return { ok: false, error: "越界路径" };
+    try {
+      const stat = fs.statSync(target);
+      if (stat.size > 50_000_000) return { ok: false, error: "文件超过 50MB" };
+      return { ok: true, data: new Uint8Array(fs.readFileSync(target)) };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
   // 表格预览：xlsx/xls 结构化解析（SheetJS）→ sheet × 行列，供渲染层画网格。
   // csv/tsv 走 files:read 的文本路径（现有 DelimitedTable），不在此列。
   const TABLE_EXT = new Set(["xlsx", "xls"]);
