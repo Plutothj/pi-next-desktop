@@ -51,8 +51,14 @@ export function TableGrid({
         field: `c${i}`,
         sortable: true,
         resizable: true,
+        // 目标：优先让所有列都能看见（列多时等分压缩），单元格自动换行保证
+        // 内容完整可读；用户可拖宽列或横向滚动查看更宽的内容。
+        minWidth: 48,
         flex: 1,
-        minWidth: 72,
+        wrapText: true,
+        autoHeight: true,
+        wrapHeaderText: true,
+        autoHeaderHeight: true,
         cellClass: "font-mono",
         editable,
       })),
@@ -181,7 +187,15 @@ export function TableGrid({
           onGridReady={(e) => {
             gridApi.current = e.api;
             (window as unknown as Record<string, unknown>).__agGridApi = e.api;
-            e.api.autoSizeAllColumns?.();
+            // 撑满可视宽度，让所有列都落在视野内；列多时均分（flex:1）
+            requestAnimationFrame(() => e.api.sizeColumnsToFit?.());
+          }}
+          onFirstDataRendered={(e) => {
+            e.api.sizeColumnsToFit?.();
+          }}
+          onGridSizeChanged={(e) => {
+            // 面板拖宽/窗口缩放时重新均分
+            e.api.sizeColumnsToFit?.();
           }}
           quickFilterText={q.trim() || undefined}
           rowData={rowData}

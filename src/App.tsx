@@ -196,6 +196,36 @@ function Shell() {
   });
 
   const [panel, setPanel] = useState<PanelTab | null>(null);
+  // 右侧面板宽度：可拖拽调整并持久化（表格预览需要横向空间）
+  const [panelWidth, setPanelWidth] = useState(384);
+  useEffect(() => {
+    window.pi
+      .getPref("panelWidth")
+      .then((r) => {
+        if (typeof r.value === "number" && r.value >= 320 && r.value <= 900) setPanelWidth(r.value);
+      })
+      .catch(() => null);
+  }, []);
+  const startPanelResize = useCallback((event: React.PointerEvent) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = panelWidth;
+    const onMove = (e: PointerEvent) => {
+      // 向左拖 → 变宽
+      const next = Math.min(900, Math.max(320, startWidth + (startX - e.clientX)));
+      setPanelWidth(next);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      setPanelWidth((w) => {
+        window.pi.setPref("panelWidth", w).catch(() => null);
+        return w;
+      });
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, [panelWidth]);
   // 侧栏折叠：持久化在 ui.json（与缩放/思考档位同一层 app prefs）
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   useEffect(() => {
@@ -461,7 +491,7 @@ function Shell() {
 
       <main className="flex min-w-0 flex-1 flex-col">
         <header
-          className="drag flex h-12 shrink-0 items-center gap-2 border-b px-4"
+          className="@container drag flex h-12 shrink-0 items-center gap-2 border-b px-4"
           onDoubleClick={(e) => {
             // 自绘标题栏：双击切换最大化（点在按钮上除外）
             if (window.pi.platform === "darwin") return;
@@ -480,7 +510,7 @@ function Shell() {
               <PanelLeftOpenIcon className="size-3.5" />
             </Button>
           ) : null}
-          <span className="max-w-56 truncate text-xs text-muted-foreground" title={headerTitle}>
+          <span className="min-w-0 max-w-56 truncate text-xs text-muted-foreground" title={headerTitle}>
             {headerTitle}
           </span>
           {planMode ? (
@@ -489,7 +519,8 @@ function Shell() {
             </Badge>
           ) : null}
 
-          <div className="no-drag ml-auto flex items-center gap-1.5 self-stretch">
+          {/* 工具区可收缩：窗口控制块固定不参与压缩，窄了先藏次要按钮 */}
+          <div className="no-drag ml-auto flex min-w-0 items-center gap-1.5 self-stretch">
             <Button
               className={cn("h-7 px-2 text-xs", panel === "terminal" && "bg-accent")}
               onClick={() => setPanel(panel === "terminal" ? null : "terminal")}
@@ -510,7 +541,7 @@ function Shell() {
               <FilesIcon className="size-3.5" />
             </Button>
             <Button
-              className={cn("h-7 px-2 text-xs", panel === "agents" && "bg-accent")}
+              className={cn("hidden h-7 px-2 text-xs @2xl:flex", panel === "agents" && "bg-accent")}
               onClick={() => setPanel(panel === "agents" ? null : "agents")}
               title="子智能体"
               variant="ghost"
@@ -518,7 +549,7 @@ function Shell() {
               <BotIcon className="size-3.5" />
             </Button>
             <Button
-              className={cn("h-7 px-2 text-xs", panel === "board" && "bg-accent")}
+              className={cn("hidden h-7 px-2 text-xs @2xl:flex", panel === "board" && "bg-accent")}
               onClick={() => setPanel(panel === "board" ? null : "board")}
               title="并行任务"
               variant="ghost"
@@ -526,7 +557,7 @@ function Shell() {
               <RocketIcon className="size-3.5" />
             </Button>
             <Button
-              className={cn("h-7 px-2 text-xs", panel === "tree" && "bg-accent")}
+              className={cn("hidden h-7 px-2 text-xs @2xl:flex", panel === "tree" && "bg-accent")}
               onClick={() => setPanel(panel === "tree" ? null : "tree")}
               title="会话树"
               variant="ghost"
@@ -534,7 +565,7 @@ function Shell() {
               <ListTreeIcon className="size-3.5" />
             </Button>
             <Button
-              className={cn("h-7 px-2 text-xs", panel === "plan" && "bg-accent")}
+              className={cn("hidden h-7 px-2 text-xs @3xl:flex", panel === "plan" && "bg-accent")}
               onClick={() => setPanel(panel === "plan" ? null : "plan")}
               title="计划"
               variant="ghost"
@@ -542,7 +573,7 @@ function Shell() {
               <ClipboardListIcon className="size-3.5" />
             </Button>
             <Button
-              className={cn("h-7 px-2 text-xs", panel === "browser" && "bg-accent")}
+              className={cn("hidden h-7 px-2 text-xs @3xl:flex", panel === "browser" && "bg-accent")}
               onClick={() => setPanel(panel === "browser" ? null : "browser")}
               title="内置浏览器"
               variant="ghost"
@@ -550,7 +581,7 @@ function Shell() {
               <GlobeIcon className="size-3.5" />
             </Button>
             <Button
-              className="h-7 px-2 text-xs"
+              className="hidden h-7 px-2 text-xs @3xl:flex"
               onClick={compact}
               title="压缩上下文"
               variant="ghost"
@@ -562,7 +593,7 @@ function Shell() {
                 方角，与应用工具之间用发丝线分界；关闭悬停用系统关闭红。
                 关闭走 close 拦截转托盘，与原生 X 行为一致。 */}
             {window.pi.platform !== "darwin" ? (
-              <div className="-mr-4 ml-2 flex self-stretch border-l border-border/60">
+              <div className="-mr-4 ml-2 flex shrink-0 self-stretch border-l border-border/60">
                 <button
                   className="flex w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                   onClick={() => void window.pi.win.minimize()}
@@ -695,7 +726,17 @@ function Shell() {
       <OnboardingTour state={state} />
 
       {panel ? (
-        <aside className="flex w-96 shrink-0 flex-col border-l bg-sidebar">
+        <aside
+          className="relative flex shrink-0 flex-col border-l bg-sidebar"
+          data-panel
+          style={{ width: panelWidth }}
+        >
+          <button
+            aria-label="调整面板宽度"
+            className="absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize hover:bg-primary/30"
+            onPointerDown={startPanelResize}
+            type="button"
+          />
           <div className="flex h-12 shrink-0 items-center gap-0.5 border-b px-2">
             {([
               ["files", "文件", FilesIcon],

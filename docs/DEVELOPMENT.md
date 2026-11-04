@@ -437,6 +437,13 @@ pi 内部档位解析顺序：会话内 > `settings.modelThinkingLevels[provider
 `files:pickPreview` 弹系统选择器，选中的绝对路径登记进**仅本次运行有效**的白名单；
 `read*` / `extractText` 用 `abs` 参数读它。未登记路径一律拒（`resolveReadTarget`）。
 
+**窄屏/面板打开时的布局**：头部是 `@container`，次要工具按钮（子智能体/并行/会话树 @2xl，
+计划/浏览器/压缩 @3xl）按可用宽度自动隐藏，窗口控制块 `shrink-0` 永不被挤掉。
+右侧面板宽度可拖拽（左缘手柄）并持久化到 ui.json 的 `panelWidth`。
+
+**表格列宽**：`flex:1` + `sizeColumnsToFit`，保证**所有列都落在视野内**、单元格
+`wrapText/autoHeight` 换行显示完整内容；列多时等分压缩，用户可拖宽或横向滚动。
+
 **可编辑**：xlsx 网格可直接改单元格，脏了出现保存条 →「保存到 xlsx」写回同一文件
 （只重建当前 sheet；以 `=` 开头的输入写成公式，注意公式格必须带缓存值 `v`，否则
 SheetJS 写盘会丢该单元格）。拆分后预览器组件都在 `src/components/preview-views.tsx`。
