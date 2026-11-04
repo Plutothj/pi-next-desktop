@@ -31,6 +31,7 @@ import { scanSessions } from "./session-files.js";
 import { createSessionPool } from "./session-pool.js";
 import { registerSessionHandlers } from "./sessions.js";
 import { createTaskManager, installTermCli } from "./tasks.js";
+import { installHrSkills } from "./hr-skills.js";
 import { installTableExtension } from "./table-extension.js";
 import { installTodoExtension } from "./todo-extension.js";
 import { registerUpdater } from "./updater.js";
@@ -728,6 +729,8 @@ app.whenReady().then(() => {
   installTodoExtension(AGENT_DIR);
   // 表格工具扩展：让模型能读写带公式的 xlsx（SheetJS 随应用分发给扩展目录）
   installTableExtension(AGENT_DIR, path.join(import.meta.dirname, "..", "node_modules", "xlsx"));
+  // HR 文案技能包（员工沟通 / 会议纪要 / 活动方案），随应用分发
+  installHrSkills(AGENT_DIR);
   scheduler.start();
   // 空闲会话回收：非活动且静默 10 分钟的 pi 进程停掉（切回时按 --session 重启）
   setInterval(() => pool.sweep(), 60_000).unref();

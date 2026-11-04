@@ -445,7 +445,21 @@ runtime）。所以 SheetJS 必须落到 `<agent>/extensions/node_modules/xlsx`�
 asar 内，复制走 `readFile/writeFile` 而不是 `cpSync`）。新的自研扩展如果还要引别的
 npm 包，照这个模式办，**不要指望 stage 脚本 vendor**（那是给 pi bundle 自己的外部依赖用的）。
 
-### 7.11 应用内更新
+### 7.11 内置技能包（HR 文案）
+
+`electron/hr-skills.js` 在启动时把三套技能写进 `<agent>/skills/<name>/SKILL.md`
+（内容变了才重写，幂等）：
+
+| 技能 | 用途 |
+|---|---|
+| `hr-employee-writing` | 入职/离职/晋升调岗沟通、绩效反馈、PIP、节日关怀文案 |
+| `meeting-notes` | 会议纪要 → 结论/行动项表格，行动项 ≥3 条时用 `todo` 工具建清单 |
+| `event-plan` | 活动方案结构 + 预算表（金额用 `=SUM` 公式，交付表走 `table` 工具） |
+
+技能是"按需检索的领域提示词"：模型仅在相关任务上读到正文，不占常驻上下文，
+也不需要新增代码能力。frontmatter 只依赖 `name` / `description`（`config.js:readSkillMeta` 的解析约定）。
+
+### 7.12 应用内更新
 
 `electron-updater` + GitHub Releases（`build.publish`）。状态机：
 `idle → checking → up-to-date | available → downloading → ready`（error 随时可能进入）。
@@ -454,7 +468,7 @@ npm 包，照这个模式办，**不要指望 stage 脚本 vendor**（那是给 
 启动 8 秒后自动静默检查一次；`--version` 语义比较避免同版本误报。
 未打包（dev）时返回 `dev` 状态，UI 仅显示当前版本。
 
-### 7.12 主题 / 快捷键 / 导出 / 诊断
+### 7.13 主题 / 快捷键 / 导出 / 诊断
 
 - 主题：`useTheme` 切 `<html>.dark`，`localStorage: pi-desktop-theme`
 - 快捷键：⌘K 面板、⌘N 新建任务；完整列表在「快捷键」对话框
@@ -579,6 +593,7 @@ npm run stage             # 把本机 pi bundle 复制进 runtime/
   pdfjs-dist / DOMPurify（见 §7.10）；预览「问 AI」与回合结束自动重读
 - **table 扩展**：模型可读写带公式的 xlsx；依赖复制到 `<agent>/extensions/node_modules`
 - **todo 扩展**：`turn_end` 仍有未完成项时自动注入提醒（同批防循环）
+- **内置技能包**：HR 文案三件套（员工沟通 / 会议纪要 / 活动方案），启动时写入 <agent>/skills
 - **侧栏**：去掉顶部搜索输入框；"新建会话"下沉到项目行悬停 ＋；driver.js 首启引导
   （`pi:tour` 事件可从 设置→版本 重放）
 - **CI**：check 任务补 `npm run stage`；e2e 在 CI 关 sandbox 并倒 stderr；E2E 隔离
