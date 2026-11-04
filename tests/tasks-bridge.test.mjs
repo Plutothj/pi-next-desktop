@@ -11,11 +11,16 @@ import { createTaskManager, installTermCli } from "../electron/tasks.js";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pi-tasks-"));
 const send = () => {};
-// 独立命名管道：不与正在运行的正式实例互抢（Windows 上必须是 pipe 路径）
+// 独立桥地址：不与正在运行的正式实例互抢。Windows 必须是命名管道；Linux/macOS
+// 用绝对路径 unix socket（pi-bg 子进程可能在不同 cwd 连接，相对路径会解析错位）
+const testSock =
+  process.platform === "win32"
+    ? `\\\\.\\pipe\\pi-desktop-term-test-${process.pid}`
+    : path.join(tmp, `term-test-${process.pid}.sock`);
 const manager = createTaskManager({
   userDataDir: tmp,
   send,
-  sock: `\\\\.\\pipe\\pi-desktop-term-test-${process.pid}`,
+  sock: testSock,
 });
 
 function waitFor(manager, id, status = "done", timeoutMs = 10_000) {
