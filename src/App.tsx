@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BotIcon,
   BrainIcon,
@@ -15,6 +14,38 @@ import {
   WorkflowIcon,
   XIcon,
 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AgentsPanel } from "@/components/agents-panel";
+import {
+  PromptInputButton,
+  type PromptInputMessage,
+  PromptInputProvider,
+  PromptInputSelect,
+  PromptInputSelectContent,
+  PromptInputSelectItem,
+  PromptInputSelectTrigger,
+  PromptInputSelectValue,
+  usePromptInputController,
+} from "@/components/ai-elements/prompt-input";
+import { BoardPanel } from "@/components/board-panel";
+import { BranchPicker } from "@/components/branch-picker";
+import { BrowserPanel } from "@/components/browser-panel";
+import { Chat } from "@/components/chat";
+import { CommandPalette, type PanelTab } from "@/components/command-palette";
+import { Composer } from "@/components/composer";
+import { ContextUsage } from "@/components/context-usage";
+import { CreateProjectDialog } from "@/components/create-project-dialog";
+import { DualModelDialog } from "@/components/dual-model-dialog";
+import { ExtensionDialog } from "@/components/extension-dialog";
+import { FilesPanel } from "@/components/files-panel";
+import { ModelPicker } from "@/components/model-picker";
+import { OnboardingTour, startTour } from "@/components/onboarding";
+import { PlanWorkbench } from "@/components/plan-workbench";
+import { SessionTreePanel } from "@/components/session-tree";
+import { SettingsDialog, type SettingsTab } from "@/components/settings-dialog";
+import { ShortcutsDialog } from "@/components/shortcuts-dialog";
+import { SessionSidebar } from "@/components/sidebar";
+import { TerminalPanel } from "@/components/terminal-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,51 +55,21 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  PromptInputButton,
-  PromptInputProvider,
-  PromptInputSelect,
-  PromptInputSelectContent,
-  PromptInputSelectItem,
-  PromptInputSelectTrigger,
-  PromptInputSelectValue,
-  usePromptInputController,
-  type PromptInputMessage,
-} from "@/components/ai-elements/prompt-input";
-import { Chat } from "@/components/chat";
-import { Composer } from "@/components/composer";
-import { BranchPicker } from "@/components/branch-picker";
-import { ContextUsage } from "@/components/context-usage";
-import { ModelPicker } from "@/components/model-picker";
-import { SessionSidebar } from "@/components/sidebar";
-import { SettingsDialog, type SettingsTab } from "@/components/settings-dialog";
 import { UpdateDialog } from "@/components/update-dialog";
-import { expandAttachments } from "@/lib/attachments";
-import { useNotifications } from "@/hooks/notifications";
-import { PLAN_PREFIX, stripDirective } from "@/lib/promptPrefixes";
-import { TerminalPanel } from "@/components/terminal-panel";
-import { FilesPanel } from "@/components/files-panel";
 import { WidgetStrip } from "@/components/widget-strip";
-import { BoardPanel } from "@/components/board-panel";
-import { SessionTreePanel } from "@/components/session-tree";
-import { PlanWorkbench } from "@/components/plan-workbench";
-import { AgentsPanel } from "@/components/agents-panel";
-import { BrowserPanel } from "@/components/browser-panel";
-import { CommandPalette, type PanelTab } from "@/components/command-palette";
-import { CreateProjectDialog } from "@/components/create-project-dialog";
-import { ExtensionDialog } from "@/components/extension-dialog";
-import { DualModelDialog } from "@/components/dual-model-dialog";
-import { ShortcutsDialog } from "@/components/shortcuts-dialog";
-import { usePi } from "@/hooks/usePi";
-import { useTasks } from "@/hooks/useTasks";
-import { useGit } from "@/hooks/useGit";
-import { useSessionStats } from "@/hooks/useSessionStats";
+import { useNotifications } from "@/hooks/notifications";
 import { useDualModel } from "@/hooks/useDualModel";
 import { useDualModelChain } from "@/hooks/useDualModelChain";
-import { useUpdater } from "@/hooks/useUpdater";
+import { useGit } from "@/hooks/useGit";
+import { usePi } from "@/hooks/usePi";
+import { useSessionStats } from "@/hooks/useSessionStats";
+import { useTasks } from "@/hooks/useTasks";
 import { useTheme } from "@/hooks/useTheme";
+import { useUpdater } from "@/hooks/useUpdater";
+import { expandAttachments } from "@/lib/attachments";
+import { lastAssistantTextOf, type PiMessage, textOf } from "@/lib/pi";
+import { PLAN_PREFIX, stripDirective } from "@/lib/promptPrefixes";
 import { cn } from "@/lib/utils";
-import { lastAssistantTextOf, textOf, type PiMessage } from "@/lib/pi";
 
 const THINKING = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
@@ -265,6 +266,16 @@ function Shell() {
     return () => window.removeEventListener("keydown", onKey);
   }, [newSession]);
 
+  // 版本页「重看引导」：先关设置弹窗（Radix 层级更高会挡住聚光灯）
+  useEffect(() => {
+    const onTour = () => {
+      setSettingsOpen(false);
+      setTimeout(() => startTour(), 250);
+    };
+    window.addEventListener("pi:tour", onTour);
+    return () => window.removeEventListener("pi:tour", onTour);
+  }, []);
+
   const submit = async (message: PromptInputMessage, behavior?: "steer" | "followUp") => {
     const text = message.text.trim();
     if (!text) return;
@@ -335,7 +346,6 @@ function Shell() {
         theme={theme}
         update={updater.state}
         onUpdateAction={onUpdateAction}
-        onNewSession={newSession}
         onOpenPalette={() => setPaletteOpen(true)}
         onOpenSkills={() => openSettings("skills")}
         onCreateProject={() => setCreateProjectOpen(true)}
@@ -571,6 +581,9 @@ function Shell() {
         initialTab={settingsTab}
         open={settingsOpen}
       />
+
+      {/* 首启新手引导（自动触发条件见组件）；版本页「重看引导」经 pi:tour 事件 */}
+      <OnboardingTour state={state} />
 
       {panel ? (
         <aside className="flex w-96 shrink-0 flex-col border-l bg-sidebar">

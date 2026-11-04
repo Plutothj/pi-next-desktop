@@ -40,6 +40,8 @@ contextBridge.exposeInMainWorld("pi", {
   reveal: (target) => ipcRenderer.invoke("pi:reveal", target),
   showWindow: () => ipcRenderer.invoke("pi:showWindow"),
   platform: process.platform,
+  // E2E 跑测试时不弹新手引导等首次启动 UI
+  e2e: process.env.PI_E2E === "1",
   win: {
     minimize: () => ipcRenderer.invoke("win:minimize"),
     toggleMaximize: () => ipcRenderer.invoke("win:toggleMaximize"),

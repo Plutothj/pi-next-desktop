@@ -1,6 +1,7 @@
 // 版本页：当前版本 + 应用内检查更新（与左下角下载图标共用同一 updater 状态）。
-import { useState } from "react";
+
 import { Loader2Icon } from "lucide-react";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useUpdater } from "@/hooks/useUpdater";
@@ -46,6 +47,17 @@ export function AboutPanel() {
               <Loader2Icon className="size-3 animate-spin" />
             ) : null}
             {status === "checking" ? "检查中…" : "检查更新"}
+          </Button>
+        </Row>
+        <Row label="新手引导">
+          <span className="text-xs text-muted-foreground">功能速览（30 秒）</span>
+          <Button
+            className="h-7 text-xs"
+            onClick={() => window.dispatchEvent(new CustomEvent("pi:tour"))}
+            size="sm"
+            variant="outline"
+          >
+            重看引导
           </Button>
         </Row>
         {status === "up-to-date" ? (

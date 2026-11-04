@@ -96,6 +96,7 @@ async function main() {
         ...process.env,
         PI_CLI: cli,
         PI_NODE: node,
+        PI_DESKTOP_HOME: `${agentDir}-home`, // projects.json 等也隔离，别污染真实 ~/.pi-desktop
         PI_AGENT_DIR: agentDir,
         PI_E2E: "1",
         PI_DEBUG: "1", // 启用 debugWidget 等测试注入通道
@@ -155,15 +156,16 @@ async function main() {
     await waitForExpr(`Boolean(document.querySelector('aside'))`, 90_000, "sidebar");
   });
 
-  // 2. 侧栏头部：logo + 新建任务（chrome v2 回归）
+  // 2. 侧栏头部：logo + 搜索/技能按钮（新建任务已移到项目行 + 图标）
   await check("侧栏 logo 行", async () => {
     const r = await evaluate(`(() => {
       const img = document.querySelector('aside img');
-      const btn = [...document.querySelectorAll('aside button')].find(b => b.textContent.includes('新建任务'));
-      return JSON.stringify({ logo: Boolean(img), newTask: Boolean(btn), logoSize: img ? Math.round(img.getBoundingClientRect().width) : 0 });
+      const palette = document.querySelector('aside button[title*="搜索"]');
+      const searchInput = document.querySelector('aside input[placeholder="搜索会话"]');
+      return JSON.stringify({ logo: Boolean(img), palette: Boolean(palette), searchInputGone: searchInput === null, logoSize: img ? Math.round(img.getBoundingClientRect().width) : 0 });
     })()`);
     const v = JSON.parse(r);
-    if (!v.logo || !v.newTask) throw new Error(JSON.stringify(v));
+    if (!v.logo || !v.palette || !v.searchInputGone) throw new Error(JSON.stringify(v));
   });
 
   // 3. caption strip（win/linux）：贴角满高（塌陷回归）
@@ -456,5 +458,9 @@ main()
         browserProc.kill("SIGKILL");
       } catch {}
     }
+    // 隔离的 APP_HOME 目录一并清掉（projects.json 等测试期间写入的都在里面）
+    try {
+      fs.rmSync(`${agentDir}-home`, { recursive: true, force: true });
+    } catch {}
     setTimeout(() => process.exit(process.exitCode ?? 0), 500);
   });

@@ -351,6 +351,7 @@ export type PiBridge = {
   reveal: (target: string) => Promise<void>;
   showWindow: () => Promise<{ ok: boolean }>;
   platform: string;
+  e2e: boolean;
   win: {
     minimize: () => Promise<{ ok: boolean }>;
     toggleMaximize: () => Promise<{ ok: boolean; maximized?: boolean }>;

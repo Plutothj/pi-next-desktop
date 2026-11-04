@@ -172,3 +172,46 @@
 .chat-md :is(code):not(pre code) {
   font-size: 0.9em;
 }
+
+/* driver.js 新手引导弹层：跟随应用深浅色变量，去掉默认蓝色系 */
+.pi-tour-popover {
+  background: var(--popover) !important;
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 36px rgb(0 0 0 / 0.4);
+  max-width: 340px;
+}
+.pi-tour-popover .driver-popover-title {
+  color: var(--foreground);
+  font-weight: 600;
+  font-size: 14px;
+}
+.pi-tour-popover .driver-popover-description {
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.pi-tour-popover .driver-popover-close-btn {
+  color: var(--muted-foreground);
+}
+.pi-tour-popover .driver-popover-progress-text {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.pi-tour-popover .driver-popover-navigation-btns button {
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 4px);
+  text-shadow: none;
+  font-size: 12px;
+}
+.pi-tour-popover .driver-popover-navigation-btns .driver-popover-next-btn {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-color: transparent;
+}
+.pi-tour-popover .driver-popover-arrow {
+  display: none;
+}

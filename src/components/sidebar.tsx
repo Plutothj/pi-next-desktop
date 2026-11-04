@@ -1,4 +1,3 @@
-import { useEffect, useRef, useState } from "react";
 import {
   ChevronDownIcon,
   DownloadIcon,
@@ -12,19 +11,20 @@ import {
   WrenchIcon,
   XIcon,
 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import logo from "@/assets/logo.png";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { baseName, cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import type { State } from "@/hooks/usePi";
 import type { UpdateState } from "@/lib/pi";
+import { baseName, cn } from "@/lib/utils";
 
 function timeAgo(ms: number) {
   const min = Math.round((Date.now() - ms) / 60000);
@@ -236,7 +236,6 @@ const COLLAPSED_COUNT = 3;
 export function SessionSidebar({
   state,
   theme,
-  onNewSession,
   onOpenPalette,
   onOpenSkills,
   onOpenSettings,
@@ -252,7 +251,6 @@ export function SessionSidebar({
 }: {
   state: State;
   theme: "dark" | "light";
-  onNewSession: () => void;
   onOpenPalette: () => void;
   onOpenSkills: () => void;
   onOpenSettings: () => void;
@@ -269,29 +267,6 @@ export function SessionSidebar({
   const [view, setView] = useState<"grouped" | "workspace" | "timeline">("workspace");
   const [sort, setSort] = useState<"updated" | "created">("updated");
   const [renaming, setRenaming] = useState<string | null>(null);
-  // 会话搜索：标题即时过滤 + 全文 grep（防抖 350ms，主进程扫最近 200 个文件）
-  const [search, setSearch] = useState("");
-  const [hits, setHits] = useState<
-    { path: string; title: string; cwd: string | null; mtime: number; snippet: string }[] | null
-  >(null);
-  const [scanned, setScanned] = useState(0);
-  const [truncated, setTruncated] = useState(false);
-  // 全文搜索防抖；标题过滤在渲染时即时做
-  useEffect(() => {
-    const q = search.trim();
-    if (q.length < 2) {
-      setHits(null);
-      return;
-    }
-    const id = setTimeout(() => {
-      window.pi.searchSessions(q).then((r) => {
-        setHits(r.hits);
-        setScanned(r.scanned);
-        setTruncated(r.truncated);
-      }).catch(() => setHits(null));
-    }, 350);
-    return () => clearTimeout(id);
-  }, [search]);
   // Groups collapse to the newest few sessions; expanded groups show all.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleGroup = (label: string) =>
@@ -332,16 +307,6 @@ export function SessionSidebar({
           <img alt="Pi" className="no-drag size-7 shrink-0 rounded-md" draggable={false} src={logo} />
         ) : null}
         <Button
-          className="no-drag flex-1 justify-center gap-1.5 px-2"
-          onClick={onNewSession}
-          size="sm"
-          title="新建任务"
-          variant="secondary"
-        >
-          <MessageSquarePlusIcon className="size-3.5" />
-          <span className="text-xs">新建任务</span>
-        </Button>
-        <Button
           className="no-drag ml-auto"
           onClick={onOpenPalette}
           size="icon-sm"
@@ -369,15 +334,6 @@ export function SessionSidebar({
         </Button>
       </div>
 
-      <div className="px-2 pb-1">
-        <Input
-          className="h-7 text-xs"
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="搜索会话"
-          value={search}
-        />
-      </div>
-
       <div className="flex items-center gap-0.5 px-2 pb-1">
         {(["grouped", "workspace", "timeline"] as const).map((v) => (
           <button
@@ -402,42 +358,14 @@ export function SessionSidebar({
       </div>
 
       <ScrollArea className="flex-1">
-        {hits !== null ? (
-          <div className="flex flex-col gap-px px-2 pb-2">
-            {truncated ? (
-              <p className="px-2 pt-2 pb-1 text-[10px] text-muted-foreground/60">结果较多，仅显示前 30 条</p>
-            ) : null}
-            {hits.length === 0 ? (
-              <p className="px-2 py-6 text-center text-muted-foreground text-xs">
-                无匹配会话{scanned ? `（已扫 ${scanned} 个）` : ""}
-              </p>
-            ) : null}
-            {hits.map((h) => (
-              <button
-                className="rounded-lg px-2 py-1.5 text-left hover:bg-sidebar-accent"
-                key={h.path}
-                onClick={() => openSession(h.path, h.cwd ?? undefined)}
-                type="button"
-              >
-                <p className="truncate text-xs">{h.title}</p>
-                <p className="line-clamp-2 text-[10px] text-muted-foreground/80">{h.snippet}</p>
-              </button>
-            ))}
-          </div>
-        ) : (
         <div className="flex flex-col gap-px px-2 pb-2">
           {(() => {
-            const q = search.trim().toLowerCase();
-            const visibleSessions =
-              q && state.sessions.length
-                ? state.sessions.filter((s) => s.title.toLowerCase().includes(q))
-                : state.sessions;
             return (
               <>
-                {visibleSessions.length === 0 ? (
+                {state.sessions.length === 0 ? (
                   <p className="px-2 py-6 text-center text-muted-foreground text-xs">暂无任务</p>
                 ) : null}
-                {groupSessions(visibleSessions, state.projects, view, sort).map(([label, items]) => {
+                {groupSessions(state.sessions, state.projects, view, sort).map(([label, items]) => {
             const open = view === "timeline" || expanded.has(label);
             const visible = open ? items : items.slice(0, COLLAPSED_COUNT);
             // 工作区视图：分组是项目，渲染成可折叠的项目标题（带目录图标）
@@ -478,6 +406,18 @@ export function SessionSidebar({
                         open && "rotate-180",
                       )}
                     />
+                  </button>
+                  <button
+                    className="mr-0.5 shrink-0 rounded p-0.5 text-muted-foreground/0 transition-colors group-hover/project:text-muted-foreground hover:text-foreground"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      // 在该项目里开一个新会话（boot 到该 cwd 即全新会话）
+                      if (projectPath) openProject(projectPath);
+                    }}
+                    title="新建会话"
+                    type="button"
+                  >
+                    <MessageSquarePlusIcon className="size-3" />
                   </button>
                   <button
                     className="mr-1 shrink-0 rounded p-0.5 text-muted-foreground/0 transition-colors group-hover/project:text-muted-foreground hover:text-destructive"
@@ -548,7 +488,6 @@ export function SessionSidebar({
             );
           })()}
         </div>
-        )}
       </ScrollArea>
 
       <div className="flex shrink-0 items-center gap-1 border-t p-2">
