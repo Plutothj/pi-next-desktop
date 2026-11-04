@@ -90,8 +90,12 @@ test("pi-bg defaults the task cwd to the caller's cwd", async () => {
   // （快捷方式启动即 C:\Users\EDY）。pi-bg 必须默认自己的 process.cwd()。
   const cliDir = path.join(tmp, "cli");
   installTermCli(cliDir);
-  const piBgJs = path.join(cliDir, "bin", "pi-bg.js");
-  assert.ok(fs.existsSync(piBgJs), "pi-bg.js 未生成");
+  // Windows 生成 pi-bg.js（.cmd shim 引用）；POSIX 是无后缀 shebang 脚本
+  const piBgJs =
+    process.platform === "win32"
+      ? path.join(cliDir, "bin", "pi-bg.js")
+      : path.join(cliDir, "bin", "pi-bg");
+  assert.ok(fs.existsSync(piBgJs), `pi-bg 未生成: ${piBgJs}`);
 
   manager.startBridge();
   // 桥监听就绪前 pi-bg 会连接失败，先探活（同上面 run/list/wait 的做法）
