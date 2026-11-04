@@ -88,6 +88,7 @@ contextBridge.exposeInMainWorld("pi", {
   files: (cwd, query) => ipcRenderer.invoke("files:search", { cwd, query }),
   tree: (cwd, dir = "") => ipcRenderer.invoke("files:tree", { cwd, dir }),
   readFile: (cwd, file) => ipcRenderer.invoke("files:read", { cwd, file }),
+  readTable: (cwd, file) => ipcRenderer.invoke("files:readTable", { cwd, file }),
   agents: (cwd) => ipcRenderer.invoke("agents:list", { cwd }),
   git: {
     status: (cwd) => ipcRenderer.invoke("git:status", { cwd }),

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { BundledLanguage } from "shiki";
+import { AgGridReact } from "ag-grid-react";
+import { AllCommunityModule, ModuleRegistry, themeQuartz } from "ag-grid-community";
 import {
   BracesIcon,
   ChevronDownIcon,
@@ -8,6 +10,7 @@ import {
   FileCodeIcon,
   FileIcon,
   FileImageIcon,
+  FileSpreadsheetIcon,
   FileTextIcon,
   GitBranchIcon,
   GlobeIcon,
@@ -23,6 +26,9 @@ import { CodeBlock, CodeBlockCopyButton } from "@/components/ai-elements/code-bl
 import { baseName, cn } from "@/lib/utils";
 import type { GitStatus, TreeEntry } from "@/lib/pi";
 import { ChangesPanel } from "@/components/changes-panel";
+
+// AG Grid v33+：模块注册一次（全量 Community 包，桌面应用不差这点体积）
+ModuleRegistry.registerModules([AllCommunityModule]);
 
 const LANGS: Record<string, string> = {
   ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx", json: "json",
@@ -65,6 +71,11 @@ function iconFor(name: string) {
     case "sh":
     case "zsh":
       return <SquareTerminalIcon className={cn(base, "text-emerald-400")} />;
+    case "xlsx":
+    case "xls":
+    case "csv":
+    case "tsv":
+      return <FileSpreadsheetIcon className={cn(base, "text-emerald-500")} />;
     case "png":
     case "jpg":
     case "jpeg":
@@ -90,7 +101,15 @@ function StatusDot({ status }: { status: ChangeStatus | null }) {
   );
 }
 
-export function FilesPanel({ cwd, changes }: { cwd: string; changes?: GitStatus["changes"] }) {
+export function FilesPanel({
+  cwd,
+  changes,
+  dark = true,
+}: {
+  cwd: string;
+  changes?: GitStatus["changes"];
+  dark?: boolean;
+}) {
   const [tab, setTab] = useState<"changes" | "tree">("changes");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [children, setChildren] = useState<Record<string, TreeEntry[]>>({});
@@ -98,6 +117,13 @@ export function FilesPanel({ cwd, changes }: { cwd: string; changes?: GitStatus[
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<string[]>([]);
   const [file, setFile] = useState<{ path: string; content: string } | null>(null);
+  // xlsx/xls 结构化预览（多 sheet）
+  const [workbook, setWorkbook] = useState<{
+    path: string;
+    sheets: { name: string; rows: string[][]; truncatedRows?: boolean }[];
+    truncatedSheets?: boolean;
+  } | null>(null);
+  const [sheetIndex, setSheetIndex] = useState(0);
 
   const loadDir = useCallback(
     async (dir: string) => {
@@ -181,9 +207,84 @@ export function FilesPanel({ cwd, changes }: { cwd: string; changes?: GitStatus[
   );
 
   const open = async (path: string) => {
+    const ext = path.split(".").pop()?.toLowerCase() ?? "";
+    if (ext === "xlsx" || ext === "xls") {
+      setFile(null);
+      setWorkbook(null);
+      setSheetIndex(0);
+      const res = (await window.pi
+        .readTable(cwd, path)
+        .catch((e) => ({ ok: false, error: String(e) }))) as {
+        ok: boolean;
+        sheets?: { name: string; rows: string[][]; truncatedRows?: boolean }[];
+        truncatedSheets?: boolean;
+        error?: string;
+      };
+      if (res.ok && res.sheets?.length) {
+        setWorkbook({ path, sheets: res.sheets, truncatedSheets: res.truncatedSheets });
+      } else {
+        setFile({ path, content: `无法预览表格：${res.error ?? "未知错误"}` });
+      }
+      return;
+    }
+    setWorkbook(null);
     const res = await window.pi.readFile(cwd, path);
     setFile({ path, content: res.content ?? res.error ?? "" });
   };
+
+  if (workbook) {
+    const sheet = workbook.sheets[Math.min(sheetIndex, workbook.sheets.length - 1)];
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1">
+          <Button
+            className="h-6 px-1.5"
+            onClick={() => {
+              setWorkbook(null);
+              setSheetIndex(0);
+            }}
+            size="sm"
+            variant="ghost"
+          >
+            <ChevronLeftIcon className="size-3.5" />
+          </Button>
+          <span className="truncate font-mono text-[11px]">{workbook.path}</span>
+        </div>
+        {workbook.sheets.length > 1 ? (
+          <div className="flex shrink-0 gap-0.5 overflow-x-auto border-b px-1 py-1">
+            {workbook.sheets.map((s, i) => (
+              <button
+                className={cn(
+                  "shrink-0 rounded px-1.5 py-0.5 text-[11px] hover:bg-accent/60",
+                  i === sheetIndex ? "bg-accent font-medium text-foreground" : "text-muted-foreground",
+                )}
+                key={s.name}
+                onClick={() => setSheetIndex(i)}
+                type="button"
+              >
+                {s.name}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <div className="min-h-0 flex-1">
+          {sheet ? (
+            <TableGrid
+              dark={dark}
+              note={
+                sheet.truncatedRows
+                  ? "行数较多，仅显示前 2000 行"
+                  : workbook.truncatedSheets
+                    ? "工作表较多，仅显示前 30 个"
+                    : undefined
+              }
+              rows={sheet.rows}
+            />
+          ) : null}
+        </div>
+      </div>
+    );
+  }
 
   if (file) {
     const ext = (file.path.split(".").pop() ?? "").toLowerCase();
@@ -198,7 +299,7 @@ export function FilesPanel({ cwd, changes }: { cwd: string; changes?: GitStatus[
         </div>
         <div className="min-h-0 flex-1 overflow-auto">
           {isTable ? (
-            <DelimitedTable content={file.content} delimiter={ext === "tsv" ? "\t" : ","} />
+            <DelimitedTable content={file.content} dark={dark} delimiter={ext === "tsv" ? "\t" : ","} />
           ) : (
             <CodeBlock code={file.content} language={(LANGS[ext] ?? "text") as BundledLanguage}>
               <CodeBlockCopyButton />
@@ -362,46 +463,115 @@ export function FilesPanel({ cwd, changes }: { cwd: string; changes?: GitStatus[
 }
 
 /** CSV/TSV preview, the way ZCode's preview panel renders spreadsheets. */
-function DelimitedTable({ content, delimiter }: { content: string; delimiter: string }) {
+/** 表格网格（AG Grid Community）：虚拟滚动、列宽拖拽、排序、quick filter。
+ * xlsx sheet 和 csv/tsv 文本共用。主题参数跟随应用深浅色。 */
+function TableGrid({ rows, note, dark }: { rows: string[][]; note?: string; dark: boolean }) {
+  const [q, setQ] = useState("");
+  const [head, ...body] = rows;
+  const maxCols = Math.max(head?.length ?? 0, ...rows.slice(0, 200).map((r) => r.length), 1);
+
+  const columnDefs = useMemo(
+    () =>
+      Array.from({ length: maxCols }, (_, i) => ({
+        headerName: head?.[i] ?? String.fromCharCode(65 + (i % 26)),
+        field: `c${i}`,
+        sortable: true,
+        resizable: true,
+        flex: 1,
+        minWidth: 72,
+        cellClass: "font-mono",
+      })),
+    [maxCols, head],
+  );
+  const rowData = useMemo(
+    () => body.map((row) => Object.fromEntries(Array.from({ length: maxCols }, (_, c) => [`c${c}`, row[c] ?? ""]))),
+    [body, maxCols],
+  );
+  const theme = useMemo(
+    () =>
+      themeQuartz.withParams(
+        dark
+          ? {
+              backgroundColor: "#1b1c22",
+              headerBackgroundColor: "#232429",
+              foregroundColor: "#cfd2da",
+              oddRowBackgroundColor: "#1f2026",
+              borderColor: "#2e3038",
+              headerTextColor: "#9aa0ac",
+              accentColor: "#7aa2f7",
+            }
+          : {
+              backgroundColor: "#ffffff",
+              headerBackgroundColor: "#f3f4f6",
+              foregroundColor: "#1f2328",
+              oddRowBackgroundColor: "#fafafa",
+              borderColor: "#e5e7eb",
+              headerTextColor: "#57606a",
+              accentColor: "#0969da",
+            },
+      ),
+    [dark],
+  );
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5">
+        <div className="flex h-6 items-center gap-1.5 rounded border bg-muted/30 px-2">
+          <SearchIcon className="size-3 shrink-0 text-muted-foreground" />
+          <input
+            className="w-36 bg-transparent text-[11px] outline-none placeholder:text-muted-foreground"
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="筛选行…"
+            value={q}
+          />
+        </div>
+        <span className="text-[10px] text-muted-foreground">
+          {rows.length - 1} 行 × {maxCols} 列
+        </span>
+        {note ? <span className="text-[10px] text-amber-500/80">{note}</span> : null}
+        <Button
+          className="ml-auto h-6 px-1.5 text-[11px]"
+          onClick={() => void navigator.clipboard.writeText(rows.map((r) => r.join(",")).join("\n"))}
+          size="sm"
+          variant="ghost"
+        >
+          复制为 CSV
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1">
+        <AgGridReact
+          columnDefs={columnDefs}
+          onGridReady={(e) => {
+            e.api.autoSizeAllColumns?.();
+          }}
+          quickFilterText={q.trim() || undefined}
+          rowData={rowData}
+          theme={theme}
+        />
+      </div>
+    </div>
+  );
+}
+
+function DelimitedTable({
+  content,
+  delimiter,
+  dark,
+}: {
+  content: string;
+  delimiter: string;
+  dark: boolean;
+}) {
   const rows = content
     .trim()
     .split(/\r?\n/)
-    .slice(0, 500)
+    .slice(0, 2000)
     .map((line) => line.split(delimiter));
-  const [head, ...body] = rows;
-
   return (
-    <div className="p-2">
-      <Button
-        className="mb-1 h-6 px-1.5 text-[11px]"
-        onClick={() => void navigator.clipboard.writeText(rows.map((r) => r.join(",")).join("\n"))}
-        size="sm"
-        variant="ghost"
-      >
-        复制为 CSV
-      </Button>
-      <table className="w-full border-collapse text-[11px]">
-        <thead>
-          <tr>
-            {head?.map((cell, i) => (
-              <th className="border-b bg-muted/50 px-1.5 py-1 text-left font-medium" key={i}>
-                {cell}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {body.map((row, r) => (
-            <tr key={r} className="hover:bg-accent/40">
-              {row.map((cell, c) => (
-                <td className="border-b px-1.5 py-0.5 font-mono" key={c}>
-                  {cell}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <TableGrid
+      dark={dark}
+      note={content.split(/\r?\n/).length > 2000 ? "行数较多，仅显示前 2000 行" : undefined}
+      rows={rows}
+    />
   );
 }

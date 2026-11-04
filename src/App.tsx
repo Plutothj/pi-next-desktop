@@ -627,7 +627,9 @@ function Shell() {
                 tasks={tasks}
               />
             ) : null}
-            {panel === "files" ? <FilesPanel changes={git?.changes} cwd={state.cwd} /> : null}
+            {panel === "files" ? (
+              <FilesPanel changes={git?.changes} cwd={state.cwd} dark={theme === "dark"} />
+            ) : null}
             {panel === "agents" ? <AgentsPanel cwd={state.cwd} state={state} /> : null}
             {panel === "board" ? <BoardPanel cwd={state.cwd} onPromote={openSession} /> : null}
             {panel === "tree" ? (

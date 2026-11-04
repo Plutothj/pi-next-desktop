@@ -433,6 +433,15 @@ export type PiBridge = {
   files: (cwd: string, query: string) => Promise<string[]>;
   tree: (cwd: string, dir?: string) => Promise<TreeEntry[]>;
   readFile: (cwd: string, file: string) => Promise<{ content?: string; size?: number; error?: string }>;
+  readTable: (
+    cwd: string,
+    file: string,
+  ) => Promise<{
+    ok: boolean;
+    sheets?: { name: string; rows: string[][]; truncatedRows?: boolean }[];
+    truncatedSheets?: boolean;
+    error?: string;
+  }>;
   agents: (cwd?: string) => Promise<AgentProfile[]>;
   git: {
     status: (cwd: string) => Promise<GitStatus>;

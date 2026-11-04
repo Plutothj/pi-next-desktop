@@ -89,6 +89,42 @@ export function registerWorkspaceHandlers() {
     }
   });
 
+  // 表格预览：xlsx/xls 结构化解析（SheetJS）→ sheet × 行列，供渲染层画网格。
+  // csv/tsv 走 files:read 的文本路径（现有 DelimitedTable），不在此列。
+  const TABLE_EXT = new Set(["xlsx", "xls"]);
+  const TABLE_LIMITS = { sheets: 30, rows: 2000, cols: 80, bytes: 20_000_000 };
+  safeHandle("files:readTable", async (_e, { cwd, file } = {}) => {
+    const root = resolveRoot(cwd);
+    if (typeof file !== "string" || !file) return { ok: false, error: "缺少文件路径" };
+    const ext = file.split(".").pop()?.toLowerCase() ?? "";
+    if (!TABLE_EXT.has(ext)) return { ok: false, error: `不支持的表格类型: .${ext}` };
+    const target = path.resolve(root, file);
+    if (target !== root && !target.startsWith(root + path.sep)) return { ok: false, error: "越界路径" };
+    try {
+      const stat = fs.statSync(target);
+      if (stat.size > TABLE_LIMITS.bytes) return { ok: false, error: "文件超过 20MB" };
+      const XLSX = await import("xlsx");
+      const wb = XLSX.read(fs.readFileSync(target), { type: "buffer" });
+      const sheets = [];
+      for (const name of wb.SheetNames.slice(0, TABLE_LIMITS.sheets)) {
+        const sheet = wb.Sheets[name];
+        // raw:false → 按显示格式取值（日期/百分比不再是原始数）
+        const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: "" });
+        const rows = aoa.slice(0, TABLE_LIMITS.rows).map((row) =>
+          row.slice(0, TABLE_LIMITS.cols).map((cell) => (cell == null ? "" : String(cell))),
+        );
+        sheets.push({ name, rows, truncatedRows: aoa.length > TABLE_LIMITS.rows });
+      }
+      return {
+        ok: true,
+        sheets,
+        truncatedSheets: wb.SheetNames.length > TABLE_LIMITS.sheets,
+      };
+    } catch (err) {
+      return { ok: false, error: `表格解析失败: ${err.message}` };
+    }
+  });
+
   safeHandle("agents:list", (_e, { cwd } = {}) => {
     const out = [];
     for (const [i, dir] of agentDirs(cwd).entries()) {
