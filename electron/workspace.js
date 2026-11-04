@@ -123,6 +123,29 @@ export function registerWorkspaceHandlers() {
     }
   });
 
+  // 预览面板「问 AI」：docx/pdf 抽文本回填进输入框（pi 的 read 读不懂二进制，
+  // 与附件解析共用同一套提取器）。
+  safeHandle("files:extractText", async (_e, { cwd, file } = {}) => {
+    const root = resolveRoot(cwd);
+    if (typeof file !== "string" || !file) return { ok: false, error: "缺少文件路径" };
+    const target = path.resolve(root, file);
+    if (target !== root && !target.startsWith(root + path.sep)) return { ok: false, error: "越界路径" };
+    try {
+      const stat = fs.statSync(target);
+      if (stat.size > 20_000_000) return { ok: false, error: "文件超过 20MB" };
+      const { parseAttachment } = await import("./attachments.js");
+      const res = await parseAttachment({
+        name: file,
+        dataBase64: fs.readFileSync(target).toString("base64"),
+      });
+      if (!res.ok) return { ok: false, error: res.error };
+      if (res.kind !== "text") return { ok: false, error: "该类型暂不支持抽取文本" };
+      return { ok: true, text: res.text };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
   // 表格预览：xlsx/xls 结构化解析（SheetJS）→ sheet × 行列，供渲染层画网格。
   // csv/tsv 走 files:read 的文本路径（现有 DelimitedTable），不在此列。
   const TABLE_EXT = new Set(["xlsx", "xls"]);

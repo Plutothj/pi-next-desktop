@@ -1,12 +1,13 @@
+import { AllCommunityModule, ModuleRegistry, themeQuartz } from "ag-grid-community";
+import { AgGridReact } from "ag-grid-react";
+import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
+import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BundledLanguage } from "shiki";
-import { AgGridReact } from "ag-grid-react";
-import { AllCommunityModule, ModuleRegistry, themeQuartz } from "ag-grid-community";
-import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 // pdf.js 需要 worker；Vite 把 worker 作为静态资源交给主进程 file:// 加载
 GlobalWorkerOptions.workerSrc = workerUrl;
+
 import {
   BracesIcon,
   ChevronDownIcon,
@@ -27,11 +28,11 @@ import {
   SearchIcon,
   SquareTerminalIcon,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { CodeBlock, CodeBlockCopyButton } from "@/components/ai-elements/code-block";
-import { baseName, cn } from "@/lib/utils";
-import type { GitStatus, TreeEntry } from "@/lib/pi";
 import { ChangesPanel } from "@/components/changes-panel";
+import { Button } from "@/components/ui/button";
+import type { GitStatus, TreeEntry } from "@/lib/pi";
+import { baseName, cn } from "@/lib/utils";
 
 // AG Grid v33+：模块注册一次（全量 Community 包，桌面应用不差这点体积）
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -116,10 +117,15 @@ export function FilesPanel({
   cwd,
   changes,
   dark = true,
+  onAskAi,
+  refreshToken,
 }: {
   cwd: string;
   changes?: GitStatus["changes"];
   dark?: boolean;
+  onAskAi?: (prompt: string) => void;
+  // 每回合结束 +1：预览中的文件若被 AI 改写，自动重新读取
+  refreshToken?: number;
 }) {
   const [tab, setTab] = useState<"changes" | "tree">("changes");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -273,6 +279,21 @@ export function FilesPanel({
     setFile({ path, content: res.content ?? res.error ?? "" });
   };
 
+  // 当前预览的路径（自动刷新用）
+  const currentPath = file?.path ?? workbook?.path ?? doc?.path ?? pdf?.path ?? null;
+  const lastRefresh = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (refreshToken === undefined) return;
+    if (lastRefresh.current === undefined) {
+      lastRefresh.current = refreshToken;
+      return;
+    }
+    if (lastRefresh.current === refreshToken || !currentPath) return;
+    lastRefresh.current = refreshToken;
+    void open(currentPath);
+    // open 依赖 cwd/setState，闭包已是最新；effect 只在 token 变化时跑，不必追依赖
+  }, [refreshToken, currentPath, open]);
+
   if (doc) {
     return (
       <div className="flex h-full min-h-0 flex-col">
@@ -281,6 +302,7 @@ export function FilesPanel({
             <ChevronLeftIcon className="size-3.5" />
           </Button>
           <span className="truncate font-mono text-[11px]">{doc.path}</span>
+          {onAskAi ? <AskAiButton cwd={cwd} onAsk={(text) => onAskAi(text)} path={doc.path} /> : null}
         </div>
         {/* mammoth 输出的干净 HTML（无脚本），prose 样式渲染 */}
         <div
@@ -306,6 +328,7 @@ export function FilesPanel({
             <ChevronLeftIcon className="size-3.5" />
           </Button>
           <span className="truncate font-mono text-[11px]">{pdf.path}</span>
+          {onAskAi ? <AskAiButton cwd={cwd} onAsk={(text) => onAskAi(text)} path={pdf.path} /> : null}
         </div>
         <PdfView data={pdf.data} />
       </div>
@@ -329,6 +352,7 @@ export function FilesPanel({
             <ChevronLeftIcon className="size-3.5" />
           </Button>
           <span className="truncate font-mono text-[11px]">{workbook.path}</span>
+          {onAskAi ? <AskAiButton cwd={cwd} onAsk={(text) => onAskAi(text)} path={workbook.path} sheets={workbook.sheets.map((s) => s.name)} /> : null}
         </div>
         {workbook.sheets.length > 1 ? (
           <div className="flex shrink-0 gap-0.5 overflow-x-auto border-b px-1 py-1">
@@ -630,6 +654,55 @@ function TableGrid({ rows, note, dark }: { rows: string[][]; note?: string; dark
         />
       </div>
     </div>
+  );
+}
+
+/** 预览头部的「问 AI」：把当前文件（及其内容）预填进输入框。
+ * - xlsx：让模型用 table 工具读（它读得懂公式与多 sheet）
+ * - docx/pdf：主进程抽文本内联（pi 的 read 读不懂二进制） */
+function AskAiButton({
+  cwd,
+  path,
+  sheets,
+  onAsk,
+}: {
+  cwd: string;
+  path: string;
+  sheets?: string[];
+  onAsk: (text: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const build = async () => {
+    const ext = path.split(".").pop()?.toLowerCase() ?? "";
+    if (ext === "xlsx" || ext === "xls") {
+      onAsk(
+        `用 table 工具 action=read 读取「${path}」${sheets?.length ? `（工作表：${sheets.join("、")}）` : ""}，然后：\n`,
+      );
+      return;
+    }
+    if (ext === "pdf" || ext === "docx") {
+      setBusy(true);
+      const res = await window.pi.extractText(cwd, path).catch(() => null);
+      setBusy(false);
+      if (res?.ok && res.text) {
+        const text = res.text.length > 15000 ? `${res.text.slice(0, 15000)}\n…（后略）` : res.text;
+        onAsk(`以下是我打开的文档「${path}」的内容：\n\n${text}\n\n请基于以上内容：\n`);
+        return;
+      }
+    }
+    onAsk(`请分析文件「${path}」：\n`);
+  };
+  return (
+    <Button
+      className="ml-auto h-6 shrink-0 px-1.5 text-[11px]"
+      disabled={busy}
+      onClick={() => void build()}
+      size="sm"
+      title="把该文件带进输入框问 AI（xlsx 走 table 工具读取，docx/pdf 自动抽取文本）"
+      variant="ghost"
+    >
+      {busy ? "读取中…" : "问 AI"}
+    </Button>
   );
 }
 

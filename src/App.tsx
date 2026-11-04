@@ -111,6 +111,13 @@ function Shell() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [dualOpen, setDualOpen] = useState(false);
   const dual = useDualModel();
+  // 每回合结束 +1：让文件面板在 AI 改写文件后自动重读预览
+  const [previewTick, setPreviewTick] = useState(0);
+  const wasStreaming = useRef(false);
+  useEffect(() => {
+    if (wasStreaming.current && !state.isStreaming) setPreviewTick((n) => n + 1);
+    wasStreaming.current = state.isStreaming;
+  }, [state.isStreaming]);
   const dualChain = useDualModelChain({ dual, state, switchModel, prompt, send });
   const updater = useUpdater();
   const { theme, toggle: toggleTheme } = useTheme();
@@ -628,7 +635,15 @@ function Shell() {
               />
             ) : null}
             {panel === "files" ? (
-              <FilesPanel changes={git?.changes} cwd={state.cwd} dark={theme === "dark"} />
+              <FilesPanel
+                changes={git?.changes}
+                cwd={state.cwd}
+                dark={theme === "dark"}
+                onAskAi={(text) => {
+                  controller.textInput.setInput(text);
+                }}
+                refreshToken={previewTick}
+              />
             ) : null}
             {panel === "agents" ? <AgentsPanel cwd={state.cwd} state={state} /> : null}
             {panel === "board" ? <BoardPanel cwd={state.cwd} onPromote={openSession} /> : null}

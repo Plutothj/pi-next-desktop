@@ -91,6 +91,7 @@ contextBridge.exposeInMainWorld("pi", {
   readTable: (cwd, file) => ipcRenderer.invoke("files:readTable", { cwd, file }),
   readDoc: (cwd, file) => ipcRenderer.invoke("files:readDoc", { cwd, file }),
   readPdf: (cwd, file) => ipcRenderer.invoke("files:readPdf", { cwd, file }),
+  extractText: (cwd, file) => ipcRenderer.invoke("files:extractText", { cwd, file }),
   agents: (cwd) => ipcRenderer.invoke("agents:list", { cwd }),
   git: {
     status: (cwd) => ipcRenderer.invoke("git:status", { cwd }),
