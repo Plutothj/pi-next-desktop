@@ -337,6 +337,35 @@ function createWindow() {
   win.webContents.on("did-finish-load", () => applyStoredZoom());
 
   win.webContents.setWindowOpenHandler(({ url }) => openExternal(url));
+
+  // 从外部拖入文件时 Electron 默认会导航到 file:// 地址（整页离开应用），
+  // 这也是"拖进去没反应"的主因之一。除应用自身页面外一律拒绝导航。
+  win.webContents.on("will-navigate", (event, url) => {
+    const current = win.webContents.getURL();
+    if (url !== current) {
+      event.preventDefault();
+      // http(s) 交给系统浏览器，file:// 静默忽略（拖拽文件的导航属于此类）
+      if (/^https?:/i.test(url)) openExternal(url);
+    }
+  });
+
+  // 渲染层（React drop handler）负责真正的接收；这里只兜住"没落在输入框上"
+  // 的拖放，避免默认行为把文件当导航处理。
+  win.webContents.on("did-finish-load", () => {
+    void win.webContents.executeJavaScript(`
+      (() => {
+        if (window.__piDragGuard) return;
+        window.__piDragGuard = true;
+        // 拖到窗口任意位置都不导航；不 preventDefault on drop 的默认行为会打开文件
+        window.addEventListener("dragover", (e) => {
+          if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files")) e.preventDefault();
+        });
+        window.addEventListener("drop", (e) => {
+          if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files")) e.preventDefault();
+        });
+      })();
+    `).catch(() => null);
+  });
 }
 
 // ------------------------------------------------------------- 界面缩放

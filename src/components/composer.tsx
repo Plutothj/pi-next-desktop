@@ -201,6 +201,9 @@ export function Composer({
 
       <PromptInput
         className="[&_[data-slot=input-group]]:rounded-2xl [&_[data-slot=input-group]]:shadow-sm"
+        // 拖到窗口任意位置都能加附件（含从资源管理器/桌面拖入，支持多选）
+        globalDrop
+        multiple
         onSubmit={handleSubmit}
       >
         {queueItems.length > 0 ? (

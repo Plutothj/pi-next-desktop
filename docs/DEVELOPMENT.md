@@ -332,6 +332,13 @@ Finder 显示、复制会话 ID、删除（二次确认变红）。删除活跃�
 
 ### 7.3 输入框
 
+**拖放**：`PromptInput` 开了 `globalDrop`——拖到窗口任意位置都能加附件（不再要求
+精确落在输入框上），`multiple` 支持一次拖多个文件。主进程另有两道兜底：
+`will-navigate` 守卫拒绝 file:// 导航（Electron 默认会把拖入的文件当导航，整页
+离开应用），以及注入的 window 级 dragover/drop preventDefault（防止未落在
+React 处理器上的拖放触发默认打开文件）。
+
+
 - 发送：Enter；Shift+Enter 换行；流式中 Enter 排队（`followUp`），Option+Enter 立即插入（`steer`）。
   发送**总是带 `streamingBehavior`** —— 空闲时被 pi 忽略，流式中缺失会被拒绝（历史 bug 的根因之一）
 - `/` 命令、`@` 文件引用弹层（组标题、目录灰显、失焦关闭）
