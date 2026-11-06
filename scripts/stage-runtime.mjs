@@ -198,17 +198,28 @@ if (staged.modules) {
   externals.add("jiti"); // 扩展加载器兜底（即使某天 bundle 形态变化也不漏）
   // 图片内联缩放（Photon WASM）：缺失时 pi 会把贴进来的图片整张丢弃
   externals.add("@silvia-odwyer/photon-node");
-  fs.mkdirSync(path.join(out, "node_modules"), { recursive: true });
+  // electron-builder 会剔除 extraResources 中含 node_modules 的路径，所以依赖
+  // 实际落在 runtime/deps，打包时由 package.json 映射到 runtime/node_modules。
+  fs.mkdirSync(path.join(out, "deps"), { recursive: true });
   const vendored = [];
   for (const name of [...externals].sort()) {
     if (SKIP_VENDOR.has(name)) continue;
     const src = path.join(staged.modules, name);
     if (!fs.existsSync(src)) continue;
-    fs.cpSync(src, path.join(out, "node_modules", name), { recursive: true });
+    fs.cpSync(src, path.join(out, "deps", name), { recursive: true });
     vendored.push(name);
   }
+  // 开发期（以及自检）需要 runtime/node_modules：优先做 junction/符号链接
+  const linkPath = path.join(out, "node_modules");
+  const target = path.join(out, "deps");
+  try {
+    if (fs.existsSync(linkPath)) fs.rmSync(linkPath, { recursive: true, force: true });
+    fs.symlinkSync(path.relative(out, target), linkPath, process.platform === "win32" ? "junction" : "dir");
+  } catch {
+    fs.cpSync(target, linkPath, { recursive: true });
+  }
   // vendor 里同步一份 jiti：CJS 侧（NODE_PATH）兜底，ESM 侧用 node_modules 副本
-  const jitiCopy = path.join(out, "node_modules", "jiti");
+  const jitiCopy = path.join(out, "deps", "jiti");
   if (fs.existsSync(jitiCopy)) {
     fs.mkdirSync(path.join(out, "vendor"), { recursive: true });
     fs.cpSync(jitiCopy, path.join(out, "vendor", "jiti"), { recursive: true });
@@ -220,7 +231,7 @@ if (staged.modules) {
     ["@silvia-odwyer/photon-node", "贴图缩放（缺失则图片被整张丢弃）"],
   ];
   for (const [name, why] of REQUIRED) {
-    if (!fs.existsSync(path.join(out, "node_modules", name))) {
+    if (!fs.existsSync(path.join(out, "deps", name))) {
       console.warn(`⚠️  runtime 缺少 ${name} —— ${why} 会失效`);
     }
   }

@@ -332,6 +332,12 @@ Finder 显示、复制会话 ID、删除（二次确认变红）。删除活跃�
 
 ### 7.3 输入框
 
+**runtime 依赖的打包陷阱**：electron-builder 会**剔除 extraResources 里路径含
+`node_modules` 的内容**——所以依赖实际落在 `runtime/deps/`，由 package.json 里
+`{from:"runtime/deps", to:"runtime/node_modules"}` 映射过去；开发期 `runtime/node_modules`
+是指向 deps 的 junction/符号链接。漏了这步的表现是"打包版某些功能静默退化"
+（贴图被丢弃、扩展加载失败），而本地开发完全正常。
+
 **贴图/内联图片**：pi 用 `@silvia-odwyer/photon-node`（WASM）把大图缩到内联上限内；
 该包缺失时图片会被**整张丢弃**（会话里出现 `[Image omitted: could not be resized…]`）。
 stage 脚本现在扫描 `import("pkg")` 动态形态（此前只扫 `require/.resolve`，photon 因此漏掉），

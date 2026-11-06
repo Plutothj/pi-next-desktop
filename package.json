@@ -78,6 +78,10 @@
         "to": "runtime"
       },
       {
+        "from": "runtime/deps",
+        "to": "runtime/node_modules"
+      },
+      {
         "from": "build/icon.png",
         "to": "pi.png"
       },
