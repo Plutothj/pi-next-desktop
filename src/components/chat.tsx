@@ -421,6 +421,7 @@ function AssistantMessageBase({
   onFork,
   durationMs,
   startedAt,
+  active,
 }: {
   message?: PiMessage;
   blocks: ContentBlock[];
@@ -432,6 +433,8 @@ function AssistantMessageBase({
   durationMs?: number;
   // 回合开始时间（流式中据此实时计时）
   startedAt?: number;
+  // 回合仍在进行（chat 级 isStreaming）：工作过程保持展开，结束后才折叠
+  active?: boolean;
 }) {
   const text = stripImageNotes(
     blocks
@@ -445,15 +448,17 @@ function AssistantMessageBase({
   const workBlocks = blocks.filter((b) => b.type === "thinking" || b.type === "toolCall");
   const textBlocks = blocks.filter((b) => b.type !== "thinking" && b.type !== "toolCall");
   const [workOpen, setWorkOpen] = useState(false);
-  const showWork = streaming || workOpen;
+  // 回合进行中始终展开；结束后折叠成一行（用户可再点开）
+  const showWork = active || streaming || workOpen;
   // 流式中每秒刷新一次已工作时长
   const [tick, setTick] = useState(0);
+  const running = Boolean(active || streaming);
   useEffect(() => {
-    if (!streaming || !startedAt) return;
+    if (!running || !startedAt) return;
     const id = setInterval(() => setTick((v) => v + 1), 1000);
     return () => clearInterval(id);
-  }, [streaming, startedAt]);
-  const live = streaming && startedAt ? Date.now() - startedAt : undefined;
+  }, [running, startedAt]);
+  const live = running && startedAt ? Date.now() - startedAt : undefined;
   void tick;
   const elapsed = live ?? durationMs;
   const fmtDuration = (ms?: number) => {
@@ -480,17 +485,17 @@ function AssistantMessageBase({
         {workBlocks.length > 0 ? (
           <button
             className="mb-0.5 flex w-fit items-center gap-1.5 rounded px-1 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground disabled:cursor-default"
-            disabled={streaming}
+            disabled={running}
             onClick={() => setWorkOpen((v) => !v)}
-            title={streaming ? "执行过程（流式中）" : workOpen ? "收起执行过程" : "展开执行过程（思考与工具调用）"}
+            title={running ? "执行过程（回合进行中）" : workOpen ? "收起执行过程" : "展开执行过程（思考与工具调用）"}
             type="button"
           >
             <Clock3Icon className="size-3 shrink-0" />
             <span>
-              {streaming ? "正在工作 " : "已工作 "}
+              {running ? "正在工作 " : "已工作 "}
               {fmtDuration(elapsed) ?? `${workBlocks.length} 步`}
             </span>
-            {streaming ? (
+            {running ? (
               <Loader2Icon className="size-3 shrink-0 animate-spin text-muted-foreground/70" />
             ) : (
               <ChevronDownIcon
@@ -673,6 +678,9 @@ export function Transcript({
           // 逐条渲染会出现一长串「已工作 N 秒」。这里把同一回合的连续
           // assistant 消息合并成一个段落：一条耗时条 + 合并后的思考/工具/正文。
           const nodes: { key: string; node: React.ReactNode }[] = [];
+          // 回合是否仍在进行：用 chat 级 isStreaming（跨工具轮保持 true），
+          // 而不是瞬时的 streaming 块（工具轮之间会短暂为 null，导致反复折叠）
+          const turnActive = isStreaming;
           let lastUserTs: number | undefined;
           let i = 0;
           while (i < windowed.length) {
@@ -700,25 +708,26 @@ export function Transcript({
                 j += 1;
               }
               const atTail = j === windowed.length;
-              // 流式内容属于同一回合：并进最后一段并标记 streaming
-              const withLive = atTail && Boolean(streaming);
+              // 回合收尾段：进行中显示"正在工作"并追加流式块；结束后显示总计
+              const liveTail = atTail && turnActive;
               const mergedBlocks = group.flatMap((m) => blocksOf(m));
               const lastMsg = group[group.length - 1];
               nodes.push({
                 key: `a-${start + i}`,
                 node: (
                   <AssistantMessage
-                    blocks={withLive ? [...mergedBlocks, ...(streaming ?? [])] : mergedBlocks}
+                    active={liveTail}
+                    blocks={liveTail ? [...mergedBlocks, ...(streaming ?? [])] : mergedBlocks}
                     durationMs={
-                      !withLive && lastMsg.timestamp && lastUserTs
+                      !liveTail && lastMsg.timestamp && lastUserTs
                         ? lastMsg.timestamp - lastUserTs
                         : undefined
                     }
                     message={lastMsg}
                     onFork={onFork}
                     results={results}
-                    startedAt={withLive ? lastUserTs : undefined}
-                    streaming={withLive}
+                    startedAt={liveTail ? lastUserTs : undefined}
+                    streaming={atTail && Boolean(streaming)}
                     tools={tools}
                   />
                 ),
@@ -751,6 +760,7 @@ export function Transcript({
               key: "live",
               node: (
                 <AssistantMessage
+                  active={turnActive}
                   blocks={streaming}
                   results={results}
                   startedAt={lastUserTs}
