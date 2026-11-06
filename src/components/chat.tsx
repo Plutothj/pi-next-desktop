@@ -326,6 +326,20 @@ const UserMessage = memo(function UserMessage({
   const images = blocksOf(message).filter((b) => b.type === "image");
   return (
     <Message from="user">
+      {/* 图片放气泡外、右对齐（气泡只装文字，避免宽图把气泡撑出大片空白） */}
+      {images.length ? (
+        <div className={cn("flex flex-wrap justify-end gap-1.5", images.length > 1 && "max-w-[560px]")}>
+          {images.map((b, j) =>
+            b.type === "image" ? (
+              <ZoomImage
+                className="max-h-40 w-auto max-w-[240px] rounded-xl border border-border/60 object-contain"
+                key={j}
+                src={`data:${b.mimeType};base64,${b.data}`}
+              />
+            ) : null,
+          )}
+        </div>
+      ) : null}
       <MessageContent className="rounded-2xl bg-muted px-4 py-2.5">
         {badge ? (
           <span className="mb-1.5 inline-block rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-xs text-primary">
@@ -342,15 +356,6 @@ const UserMessage = memo(function UserMessage({
             {text}
           </MessageResponse>
         ) : null}
-        {images.map((b, j) =>
-          b.type === "image" ? (
-            <ZoomImage
-              className="max-h-72 rounded-md"
-              key={j}
-              src={`data:${b.mimeType};base64,${b.data}`}
-            />
-          ) : null,
-        )}
       </MessageContent>
       <MessageActions className="justify-end opacity-0 transition-opacity group-hover:opacity-100">
         <CopyAction text={text} />

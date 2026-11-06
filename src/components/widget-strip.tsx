@@ -4,7 +4,7 @@
 //   "3/10" 或 "[####----]"     → 进度条
 //   "✓ / ✔" 开头               → 绿色；"✗ / ✘ / ×" 开头 → 红色
 //   "▸ / >" 开头               → 缩进强调
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckCircle2Icon, CheckIcon, ChevronDownIcon, XCircleIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -82,7 +82,7 @@ function WidgetCard({ name, widget }: { name: string; widget: Widget }) {
   if (!title && lines.every((l) => !l.trim())) return null;
 
   return (
-    <div className="w-fit max-w-full rounded-lg border bg-card/40 px-2.5 py-1.5">
+    <div className="w-fit max-w-full rounded-lg border bg-card/40 px-2.5 py-1.5" data-widget-card>
       <div className="mb-0.5 flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground/70">
         <span className="size-1 rounded-full bg-muted-foreground/40" />
         {title ?? name}
@@ -122,15 +122,26 @@ function parseTodoWidget(lines: string[]): TodoParse | null {
   return { title: head[1], items, doneCount: items.filter((i) => i.done).length };
 }
 
-/** 核对清单：每项一个方框，完成打勾并划掉；全部完成自动折叠起来。 */
+/** 核对清单：每项一个方框，完成打勾并划掉；全部完成后短暂展示再自动消失。 */
 function TodoCard({ name, todo }: { name: string; todo: TodoParse }) {
   const allDone = todo.doneCount === todo.items.length;
   // 全部完成默认折叠；用户点开过就一直展开
   const [pinnedOpen, setPinnedOpen] = useState(false);
   const open = !allDone || pinnedOpen;
+  // 全部勾选后停留 4s 让用户看到"完成"，然后彻底消失（清单已完成没有常驻价值）
+  const [hidden, setHidden] = useState(false);
+  useEffect(() => {
+    if (!allDone) {
+      setHidden(false);
+      return;
+    }
+    const id = setTimeout(() => setHidden(true), 4000);
+    return () => clearTimeout(id);
+  }, [allDone]);
+  if (hidden) return null;
 
   return (
-    <div className="w-fit max-w-full rounded-lg border bg-card/40 px-2.5 py-1.5">
+    <div className="min-w-56 max-w-full rounded-lg border bg-card/40 px-2.5 py-1.5" data-widget-card>
       <button
         className="flex w-full items-center gap-1.5 text-[10px] font-medium text-muted-foreground/70 hover:text-muted-foreground"
         onClick={() => allDone && setPinnedOpen((v) => !v)}
@@ -144,6 +155,9 @@ function TodoCard({ name, todo }: { name: string; todo: TodoParse }) {
           )}
         />
         <span className="min-w-0 flex-1 truncate text-left">{todo.title}</span>
+        <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+          {todo.doneCount}/{todo.items.length}
+        </span>
         {allDone ? (
           <ChevronDownIcon
             className={cn("size-3 shrink-0 transition-transform", open && "rotate-180")}
@@ -190,8 +204,9 @@ export function WidgetStrip({
 }) {
   const entries = Object.entries(widgets).filter(([, w]) => w.placement === placement);
   if (entries.length === 0) return null;
+  // 卡片内部可能自行隐藏（全完成的 todo），容器渲染后再由子组件撑空
   return (
-    <div data-widget-card className={cn("flex flex-wrap items-start gap-2 px-1", placement === "above" ? "pb-1.5" : "pt-1.5")}>
+    <div data-widget-strip className={cn("flex flex-wrap items-start gap-2 px-1", placement === "above" ? "pb-1.5" : "pt-1.5")}>
       {entries.map(([key, widget]) => (
         <WidgetCard key={key} name={key} widget={widget} />
       ))}
