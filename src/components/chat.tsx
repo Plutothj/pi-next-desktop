@@ -180,6 +180,7 @@ function ThinkingRow({
     <div>
       <button
         className="flex h-7 items-center gap-1.5 rounded px-1 text-xs text-muted-foreground hover:bg-muted/40"
+        data-thinking-toggle={streaming ? "live" : "idle"}
         onClick={() => setOpen((value) => !value)}
         type="button"
       >
@@ -188,7 +189,10 @@ function ThinkingRow({
         <ChevronDownIcon className={cn("size-3.5 transition", expanded && "rotate-180")} />
       </button>
       {expanded && block.thinking.trim() ? (
-        <div className="my-1 ml-4 max-h-40 overflow-auto whitespace-pre-wrap border-l pl-3 text-xs leading-6 text-muted-foreground">
+        <div
+          className="my-1 ml-4 max-h-40 overflow-auto whitespace-pre-wrap border-l pl-3 text-xs leading-6 text-muted-foreground"
+          data-thinking-body
+        >
           {block.thinking}
         </div>
       ) : null}
@@ -201,17 +205,21 @@ function Block({
   exec,
   result,
   streaming,
+  thinkingLive,
   last,
 }: {
   block: ContentBlock;
   exec?: ToolExec;
   result?: PiMessage;
   streaming?: boolean;
+  // 只有"当前正在吐字"的那条思考自动展开；已结束的思考行保持收起，
+  // 否则回合里每条思考都会跟着新 delta 一起弹开再一起收回去。
+  thinkingLive?: boolean;
   last?: boolean;
 }) {
   if (block.type === "thinking") {
     if (!block.thinking.trim()) return null;
-    return <ThinkingRow block={block} streaming={streaming} />;
+    return <ThinkingRow block={block} streaming={thinkingLive} />;
   }
   if (block.type === "toolCall") {
     return <ToolRow block={block} exec={exec} result={result} streaming={streaming} />;
@@ -513,6 +521,7 @@ function AssistantMessageBase({
                 exec={block.type === "toolCall" ? tools[block.id] : undefined}
                 result={block.type === "toolCall" ? results[block.id] : undefined}
                 streaming={streaming}
+                thinkingLive={streaming && block === blocks[blocks.length - 1]}
                 last={i === workBlocks.length - 1}
               />
             ))
