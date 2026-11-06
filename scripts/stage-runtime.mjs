@@ -196,6 +196,8 @@ const SKIP_VENDOR = new Set(["bufferutil", "utf-8-validate"]);
 if (staged.modules) {
   const externals = bareRequiresOf(out);
   externals.add("jiti"); // 扩展加载器兜底（即使某天 bundle 形态变化也不漏）
+  // 图片内联缩放（Photon WASM）：缺失时 pi 会把贴进来的图片整张丢弃
+  externals.add("@silvia-odwyer/photon-node");
   fs.mkdirSync(path.join(out, "node_modules"), { recursive: true });
   const vendored = [];
   for (const name of [...externals].sort()) {
@@ -210,6 +212,17 @@ if (staged.modules) {
   if (fs.existsSync(jitiCopy)) {
     fs.mkdirSync(path.join(out, "vendor"), { recursive: true });
     fs.cpSync(jitiCopy, path.join(out, "vendor", "jiti"), { recursive: true });
+  }
+  // 关键依赖自检：这些包缺失时功能会静默退化（不报错，只是行为变差）
+  const REQUIRED = [
+    ["jiti", "TS 扩展加载（所有第三方扩展）"],
+    ["typebox", "扩展参数 schema"],
+    ["@silvia-odwyer/photon-node", "贴图缩放（缺失则图片被整张丢弃）"],
+  ];
+  for (const [name, why] of REQUIRED) {
+    if (!fs.existsSync(path.join(out, "node_modules", name))) {
+      console.warn(`⚠️  runtime 缺少 ${name} —— ${why} 会失效`);
+    }
   }
   console.log(`vendored runtime deps: ${vendored.join(", ") || "(none)"}`);
 }

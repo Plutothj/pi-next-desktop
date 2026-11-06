@@ -332,6 +332,11 @@ Finder 显示、复制会话 ID、删除（二次确认变红）。删除活跃�
 
 ### 7.3 输入框
 
+**贴图/内联图片**：pi 用 `@silvia-odwyer/photon-node`（WASM）把大图缩到内联上限内；
+该包缺失时图片会被**整张丢弃**（会话里出现 `[Image omitted: could not be resized…]`）。
+stage 脚本现在扫描 `import("pkg")` 动态形态（此前只扫 `require/.resolve`，photon 因此漏掉），
+并对 jiti/typebox/photon 做存在性自检（缺失时打警告）。
+
 **拖放**：`PromptInput` 开了 `globalDrop`——拖到窗口任意位置都能加附件（不再要求
 精确落在输入框上），`multiple` 支持一次拖多个文件。主进程另有两道兜底：
 `will-navigate` 守卫拒绝 file:// 导航（Electron 默认会把拖入的文件当导航，整页
