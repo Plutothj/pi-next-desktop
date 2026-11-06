@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useState } from "react";
 import { mermaid } from "@streamdown/mermaid";
 import { stripDirective, stripImageNotes } from "@/lib/promptPrefixes";
 import {
@@ -420,6 +420,7 @@ function AssistantMessageBase({
   streaming,
   onFork,
   durationMs,
+  startedAt,
 }: {
   message?: PiMessage;
   blocks: ContentBlock[];
@@ -429,6 +430,8 @@ function AssistantMessageBase({
   onFork?: (message: PiMessage) => void;
   // 本回合耗时（user 消息 → 本条回复），完成后显示为「已工作 N 秒」
   durationMs?: number;
+  // 回合开始时间（流式中据此实时计时）
+  startedAt?: number;
 }) {
   const text = stripImageNotes(
     blocks
@@ -443,6 +446,16 @@ function AssistantMessageBase({
   const textBlocks = blocks.filter((b) => b.type !== "thinking" && b.type !== "toolCall");
   const [workOpen, setWorkOpen] = useState(false);
   const showWork = streaming || workOpen;
+  // 流式中每秒刷新一次已工作时长
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!streaming || !startedAt) return;
+    const id = setInterval(() => setTick((v) => v + 1), 1000);
+    return () => clearInterval(id);
+  }, [streaming, startedAt]);
+  const live = streaming && startedAt ? Date.now() - startedAt : undefined;
+  void tick;
+  const elapsed = live ?? durationMs;
   const fmtDuration = (ms?: number) => {
     if (!ms || ms < 0) return null;
     const s = Math.round(ms / 1000);
@@ -464,20 +477,26 @@ function AssistantMessageBase({
             </p>
           </div>
         ) : null}
-        {!streaming && workBlocks.length > 0 ? (
+        {workBlocks.length > 0 ? (
           <button
-            className="mb-0.5 flex w-fit items-center gap-1.5 rounded px-1 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+            className="mb-0.5 flex w-fit items-center gap-1.5 rounded px-1 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground disabled:cursor-default"
+            disabled={streaming}
             onClick={() => setWorkOpen((v) => !v)}
-            title={workOpen ? "收起执行过程" : "展开执行过程（思考与工具调用）"}
+            title={streaming ? "执行过程（流式中）" : workOpen ? "收起执行过程" : "展开执行过程（思考与工具调用）"}
             type="button"
           >
             <Clock3Icon className="size-3 shrink-0" />
             <span>
-              已工作 {fmtDuration(durationMs) ?? `${workBlocks.length} 步`}
+              {streaming ? "正在工作 " : "已工作 "}
+              {fmtDuration(elapsed) ?? `${workBlocks.length} 步`}
             </span>
-            <ChevronDownIcon
-              className={cn("size-3 shrink-0 transition-transform", workOpen && "rotate-180")}
-            />
+            {streaming ? (
+              <Loader2Icon className="size-3 shrink-0 animate-spin text-muted-foreground/70" />
+            ) : (
+              <ChevronDownIcon
+                className={cn("size-3 shrink-0 transition-transform", workOpen && "rotate-180")}
+              />
+            )}
           </button>
         ) : null}
 
@@ -649,53 +668,100 @@ export function Transcript({
           </button>
         ) : null}
 
-        {windowed.map((message, i) => {
-          if (message.role === "user") {
-            return (
-              <UserMessage
-                files={resolveAttachments(message.timestamp)}
-                key={start + i}
-                message={message}
-                onFork={onFork}
-              />
-            );
-          }
-          if (message.role === "assistant") {
-            // 本回合耗时 = 本条回复时间 - 上一条用户消息时间（历史会话同样可算）
-            let prevUserTs: number | undefined;
-            for (let j = start + i - 1; j >= 0; j--) {
-              const m = windowed[j - start] ?? visible[j];
-              if (m?.role === "user" && m.timestamp) {
-                prevUserTs = m.timestamp;
-                break;
-              }
+        {(() => {
+          // 一个回合里 pi 会产生多条 assistant 消息（每次工具调用一轮），
+          // 逐条渲染会出现一长串「已工作 N 秒」。这里把同一回合的连续
+          // assistant 消息合并成一个段落：一条耗时条 + 合并后的思考/工具/正文。
+          const nodes: { key: string; node: React.ReactNode }[] = [];
+          let lastUserTs: number | undefined;
+          let i = 0;
+          while (i < windowed.length) {
+            const message = windowed[i];
+            if (message.role === "user") {
+              if (message.timestamp) lastUserTs = message.timestamp;
+              nodes.push({
+                key: `u-${start + i}`,
+                node: (
+                  <UserMessage
+                    files={resolveAttachments(message.timestamp)}
+                    message={message}
+                    onFork={onFork}
+                  />
+                ),
+              });
+              i += 1;
+              continue;
             }
-            const durationMs =
-              message.timestamp && prevUserTs ? message.timestamp - prevUserTs : undefined;
-            return (
-              <AssistantMessage
-                durationMs={durationMs}
-                key={start + i}
-                blocks={blocksOf(message)}
-                message={message}
-                onFork={onFork}
-                results={results}
-                tools={tools}
-              />
-            );
+            if (message.role === "assistant") {
+              const group: PiMessage[] = [message];
+              let j = i + 1;
+              while (j < windowed.length && windowed[j].role === "assistant") {
+                group.push(windowed[j]);
+                j += 1;
+              }
+              const atTail = j === windowed.length;
+              // 流式内容属于同一回合：并进最后一段并标记 streaming
+              const withLive = atTail && Boolean(streaming);
+              const mergedBlocks = group.flatMap((m) => blocksOf(m));
+              const lastMsg = group[group.length - 1];
+              nodes.push({
+                key: `a-${start + i}`,
+                node: (
+                  <AssistantMessage
+                    blocks={withLive ? [...mergedBlocks, ...(streaming ?? [])] : mergedBlocks}
+                    durationMs={
+                      !withLive && lastMsg.timestamp && lastUserTs
+                        ? lastMsg.timestamp - lastUserTs
+                        : undefined
+                    }
+                    message={lastMsg}
+                    onFork={onFork}
+                    results={results}
+                    startedAt={withLive ? lastUserTs : undefined}
+                    streaming={withLive}
+                    tools={tools}
+                  />
+                ),
+              });
+              i = j;
+              continue;
+            }
+            if (message.role === "compactionSummary" || message.role === "branchSummary") {
+              nodes.push({
+                key: `s-${start + i}`,
+                node: (
+                  <div className="flex items-center gap-3 text-muted-foreground text-xs">
+                    <div className="h-px flex-1 bg-border" />
+                    {message.role === "compactionSummary" ? "上下文已压缩" : "分支摘要"}
+                    <div className="h-px flex-1 bg-border" />
+                  </div>
+                ),
+              });
+              i += 1;
+              continue;
+            }
+            if (message.role === "bashExecution") {
+              nodes.push({ key: `b-${start + i}`, node: <BashCard message={message} /> });
+            }
+            i += 1;
           }
-          if (message.role === "compactionSummary" || message.role === "branchSummary") {
-            return (
-              <div key={i} className="flex items-center gap-3 text-muted-foreground text-xs">
-                <div className="h-px flex-1 bg-border" />
-                {message.role === "compactionSummary" ? "上下文已压缩" : "分支摘要"}
-                <div className="h-px flex-1 bg-border" />
-              </div>
-            );
+          // 还没有任何 assistant 消息的回合（首个工具轮之前）
+          if (streaming && (nodes.length === 0 || windowed[windowed.length - 1]?.role === "user")) {
+            nodes.push({
+              key: "live",
+              node: (
+                <AssistantMessage
+                  blocks={streaming}
+                  results={results}
+                  startedAt={lastUserTs}
+                  streaming
+                  tools={tools}
+                />
+              ),
+            });
           }
-          if (message.role === "bashExecution") return <BashCard key={i} message={message} />;
-          return null;
-        })}
+          return nodes.map((n) => <Fragment key={n.key}>{n.node}</Fragment>);
+        })()}
 
         {messages
           .filter((m) => m.role === "bashExecution")
@@ -708,14 +774,6 @@ export function Transcript({
           <WaitingRow />
         ) : null}
 
-        {streaming ? (
-          <AssistantMessage
-            blocks={streaming}
-            tools={tools}
-            results={results}
-            streaming
-          />
-        ) : null}
       </ConversationContent>
       <ConversationScrollButton />
     </Conversation>
