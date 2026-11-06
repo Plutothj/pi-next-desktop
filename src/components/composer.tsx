@@ -8,6 +8,7 @@ import {
   SlashIcon,
   SquareIcon,
   Trash2Icon,
+  ZapIcon,
 } from "lucide-react";
 import {
   PromptInput,
@@ -43,6 +44,7 @@ export function Composer({
   cwd,
   queue,
   onClearQueue,
+  onQueueInsert,
   onSubmit,
   onStop,
   onLocalCommand,
@@ -55,6 +57,8 @@ export function Composer({
   cwd: string;
   queue: QueueState;
   onClearQueue: () => void;
+  // 立即把某条排队消息插进当前回合（不再需要 Option+Enter）
+  onQueueInsert: (text: string, kind: "steering" | "followUp") => void;
   onSubmit: (message: PromptInputMessage, behavior?: "steer" | "followUp") => void;
   onStop: () => void;
   onLocalCommand: (name: string) => void;
@@ -160,8 +164,8 @@ export function Composer({
 
   const queueItems = useMemo(
     () => [
-      ...queue.steering.map((text) => ({ text, kind: "打断" })),
-      ...queue.followUp.map((text) => ({ text, kind: "排队" })),
+      ...queue.steering.map((text, index) => ({ text, kind: "打断" as const, index })),
+      ...queue.followUp.map((text, index) => ({ text, kind: "排队" as const, index })),
     ],
     [queue],
   );
@@ -210,11 +214,23 @@ export function Composer({
           <div className="flex w-full flex-wrap items-center gap-1.5 px-3 pt-3">
             {queueItems.map((item, i) => (
               <span
-                className="flex items-center gap-1 rounded-md border bg-muted/40 px-1.5 py-0.5 text-[11px]"
-                key={i}
+                className="group/q flex items-center gap-1 rounded-md border bg-muted/40 py-0.5 pr-0.5 pl-1.5 text-[11px]"
+                key={`${item.kind}-${i}`}
+                title={item.text}
               >
                 <span className="text-muted-foreground">{item.kind}</span>
                 <span className="max-w-40 truncate">{item.text}</span>
+                <button
+                  className="flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-primary/80 transition-colors hover:bg-primary/15 hover:text-primary"
+                  onClick={() =>
+                    onQueueInsert(item.text, item.kind === "打断" ? "steering" : "followUp")
+                  }
+                  title="立即插入当前回合（不等当前回复结束）"
+                  type="button"
+                >
+                  <ZapIcon className="size-3" />
+                  插入
+                </button>
               </span>
             ))}
             <button

@@ -393,6 +393,28 @@ function Shell() {
     return () => window.removeEventListener("pi:preview-file", onPreview);
   }, []);
 
+  // 队列项「插入」：把该条立即注入当前回合（steer），其余项按原顺序重排。
+  // pi 只有 clear_queue（无单条出队），所以清空后按 目标→其余打断→其余排队 重发。
+  const insertQueued = useCallback(
+    async (text: string, kind: "steering" | "followUp") => {
+      const q = state.queue;
+      const steering = [...q.steering];
+      const followUp = [...q.followUp];
+      // 从对应队列里按值移除一条（保留重复项的其余副本）
+      const targetList = kind === "steering" ? steering : followUp;
+      const idx = targetList.indexOf(text);
+      if (idx === -1) return;
+      targetList.splice(idx, 1);
+
+      await send({ type: "clear_queue" });
+      // 目标先插（steer 会在当前回复的下一个边界立刻生效）
+      await prompt(text, undefined, "steer");
+      for (const m of steering) await prompt(m, undefined, "steer");
+      for (const m of followUp) await prompt(m, undefined, "followUp");
+    },
+    [send, prompt, state.queue],
+  );
+
   const submit = async (message: PromptInputMessage, behavior?: "steer" | "followUp") => {
     const text = message.text.trim();
     if (!text) return;
@@ -675,6 +697,7 @@ function Shell() {
               commands={state.commands}
               cwd={state.cwd}
               onClearQueue={() => send({ type: "clear_queue" })}
+              onQueueInsert={insertQueued}
               onLocalCommand={localCommand}
               onStop={dualChain.stopAll}
               onSubmit={submit}
