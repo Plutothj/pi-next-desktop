@@ -5,6 +5,7 @@ import {
   BrainIcon,
   CheckIcon,
   ChevronDownIcon,
+  Clock3Icon,
   CopyIcon,
   FilePenLineIcon,
   FileTextIcon,
@@ -328,17 +329,38 @@ const UserMessage = memo(function UserMessage({
     <Message from="user">
       {/* 图片放气泡外、右对齐（气泡只装文字，避免宽图把气泡撑出大片空白） */}
       {images.length ? (
-        <div className={cn("flex flex-wrap justify-end gap-1.5", images.length > 1 && "max-w-[560px]")}>
-          {images.map((b, j) =>
-            b.type === "image" ? (
-              <ZoomImage
-                className="max-h-40 w-auto max-w-[240px] rounded-xl border border-border/60 object-contain"
-                key={j}
-                src={`data:${b.mimeType};base64,${b.data}`}
-              />
-            ) : null,
-          )}
-        </div>
+        // 单图：自然比例（可读）；多图：等尺寸方格（曾有不同长宽比导致拼接错位）
+        images.length === 1 ? (
+          <div className="ml-auto w-fit">
+            {images.map((b, j) =>
+              b.type === "image" ? (
+                <ZoomImage
+                  className="max-h-56 w-auto max-w-[320px] rounded-xl border border-border/60 object-contain"
+                  key={j}
+                  src={`data:${b.mimeType};base64,${b.data}`}
+                />
+              ) : null,
+            )}
+          </div>
+        ) : (
+          // 按行列分组、每行独立右对齐：4 张用 2×2，其余每行 3 张。
+          // 单用 grid-cols-3 时最后一行不满会靠左，视觉上歪
+          <div className="ml-auto flex w-fit flex-col items-end gap-1.5">
+            {chunkImages(images, images.length === 4 ? 2 : 3).map((row, r) => (
+              <div className="flex justify-end gap-1.5" key={r}>
+                {row.map((b, j) =>
+                  b.type === "image" ? (
+                    <ZoomImage
+                      className="size-28 rounded-lg border border-border/60 object-cover"
+                      key={j}
+                      src={`data:${b.mimeType};base64,${b.data}`}
+                    />
+                  ) : null,
+                )}
+              </div>
+            ))}
+          </div>
+        )
       ) : null}
       <MessageContent className="rounded-2xl bg-muted px-4 py-2.5">
         {badge ? (
@@ -377,6 +399,7 @@ const AssistantMessage = memo(
   AssistantMessageBase,
   (prev, next) => {
     if (prev.blocks !== next.blocks || prev.streaming !== next.streaming) return false;
+    if (prev.durationMs !== next.durationMs) return false;
     if (prev.onFork !== next.onFork) return false;
     for (const block of next.blocks) {
       if (block.type !== "toolCall") continue;
@@ -394,6 +417,7 @@ function AssistantMessageBase({
   results,
   streaming,
   onFork,
+  durationMs,
 }: {
   message?: PiMessage;
   blocks: ContentBlock[];
@@ -401,11 +425,27 @@ function AssistantMessageBase({
   results: Record<string, PiMessage>;
   streaming?: boolean;
   onFork?: (message: PiMessage) => void;
+  // 本回合耗时（user 消息 → 本条回复），完成后显示为「已工作 N 秒」
+  durationMs?: number;
 }) {
   const text = blocks
     .filter((b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text")
     .map((b) => b.text)
     .join("");
+
+  // 工作过程（思考 + 工具调用）在回合结束后折叠成一行，让用户先看到结论；
+  // 流式中保持展开，执行细节仍然实时可见。
+  const workBlocks = blocks.filter((b) => b.type === "thinking" || b.type === "toolCall");
+  const textBlocks = blocks.filter((b) => b.type !== "thinking" && b.type !== "toolCall");
+  const [workOpen, setWorkOpen] = useState(false);
+  const showWork = streaming || workOpen;
+  const fmtDuration = (ms?: number) => {
+    if (!ms || ms < 0) return null;
+    const s = Math.round(ms / 1000);
+    if (s < 60) return `${s} 秒`;
+    const m = Math.floor(s / 60);
+    return `${m} 分 ${s % 60} 秒`;
+  };
 
   return (
     <Message from="assistant">
@@ -420,14 +460,44 @@ function AssistantMessageBase({
             </p>
           </div>
         ) : null}
-        {blocks.map((block, i) => (
+        {!streaming && workBlocks.length > 0 ? (
+          <button
+            className="mb-0.5 flex w-fit items-center gap-1.5 rounded px-1 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+            onClick={() => setWorkOpen((v) => !v)}
+            title={workOpen ? "收起执行过程" : "展开执行过程（思考与工具调用）"}
+            type="button"
+          >
+            <Clock3Icon className="size-3 shrink-0" />
+            <span>
+              已工作 {fmtDuration(durationMs) ?? `${workBlocks.length} 步`}
+            </span>
+            <ChevronDownIcon
+              className={cn("size-3 shrink-0 transition-transform", workOpen && "rotate-180")}
+            />
+          </button>
+        ) : null}
+
+        {showWork
+          ? workBlocks.map((block, i) => (
+              <Block
+                key={`work-${i}`}
+                block={block}
+                exec={block.type === "toolCall" ? tools[block.id] : undefined}
+                result={block.type === "toolCall" ? results[block.id] : undefined}
+                streaming={streaming}
+                last={i === workBlocks.length - 1}
+              />
+            ))
+          : null}
+
+        {textBlocks.map((block, i) => (
           <Block
-            key={i}
+            key={`text-${i}`}
             block={block}
-            exec={block.type === "toolCall" ? tools[block.id] : undefined}
-            result={block.type === "toolCall" ? results[block.id] : undefined}
+            exec={undefined}
+            result={undefined}
             streaming={streaming}
-            last={i === blocks.length - 1}
+            last={i === textBlocks.length - 1}
           />
         ))}
         {streaming && !text.trim() && !blocks.some((b) => b.type === "toolCall") ? <Loader /> : null}
@@ -449,6 +519,12 @@ function AssistantMessageBase({
     </Message>
   );
 }
+
+// 按每行容量切分图片（多图排版的最后一行要单独右对齐）
+const chunkImages = <T,>(list: T[], perRow: number): T[][] =>
+  Array.from({ length: Math.ceil(list.length / perRow) }, (_, i) =>
+    list.slice(i * perRow, (i + 1) * perRow),
+  );
 
 /** Click to view an attachment full size. */
 function ZoomImage({ src, className }: { src: string; className?: string }) {
@@ -581,8 +657,20 @@ export function Transcript({
             );
           }
           if (message.role === "assistant") {
+            // 本回合耗时 = 本条回复时间 - 上一条用户消息时间（历史会话同样可算）
+            let prevUserTs: number | undefined;
+            for (let j = start + i - 1; j >= 0; j--) {
+              const m = windowed[j - start] ?? visible[j];
+              if (m?.role === "user" && m.timestamp) {
+                prevUserTs = m.timestamp;
+                break;
+              }
+            }
+            const durationMs =
+              message.timestamp && prevUserTs ? message.timestamp - prevUserTs : undefined;
             return (
               <AssistantMessage
+                durationMs={durationMs}
                 key={start + i}
                 blocks={blocksOf(message)}
                 message={message}
