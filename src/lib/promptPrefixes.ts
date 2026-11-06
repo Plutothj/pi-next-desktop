@@ -30,3 +30,14 @@ export function stripDirective(raw: string): { kind: DirectiveKind; text: string
   }
   return { kind: "plain", text: raw };
 }
+
+// pi 在内联图片被缩放/转码后会往消息正文追加给模型看的提示：
+//   [Image: original 2597x558, displayed at 2000x430. Multiply coordinates by 1.30 ...]
+//   [Image converted from image/webp to image/png.]
+// 这些是模型侧的坐标映射元信息，不属于用户输入，展示层剥掉。
+const IMAGE_NOTE_RE =
+  /\n?\s*\[Image:?\s*(?:converted from [^\]]*? to [^\]]*?|original \d+x\d+[^\]]*)\]\s*/g;
+
+export function stripImageNotes(text: string): string {
+  return text.replace(IMAGE_NOTE_RE, "\n\n").replace(/\n{3,}/g, "\n\n").trim();
+}

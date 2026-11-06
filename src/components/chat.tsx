@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { mermaid } from "@streamdown/mermaid";
-import { stripDirective } from "@/lib/promptPrefixes";
+import { stripDirective, stripImageNotes } from "@/lib/promptPrefixes";
 import {
   BrainIcon,
   CheckIcon,
@@ -322,7 +322,9 @@ const UserMessage = memo(function UserMessage({
 }) {
   const raw = textOf(message.content);
   // 指令前缀（计划模式/双模型链）只进会话、不进展示：剥离后以徽章标注阶段
-  const { kind, text } = stripDirective(raw);
+  const { kind, text: stripped } = stripDirective(raw);
+  // 去掉 pi 追加的图片尺寸提示（[Image: original …]），那是给模型看的
+  const text = stripImageNotes(stripped);
   const badge = kind === "plain" ? null : BADGES[kind];
   const images = blocksOf(message).filter((b) => b.type === "image");
   return (
@@ -428,10 +430,12 @@ function AssistantMessageBase({
   // 本回合耗时（user 消息 → 本条回复），完成后显示为「已工作 N 秒」
   durationMs?: number;
 }) {
-  const text = blocks
-    .filter((b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text")
-    .map((b) => b.text)
-    .join("");
+  const text = stripImageNotes(
+    blocks
+      .filter((b): b is Extract<ContentBlock, { type: "text" }> => b.type === "text")
+      .map((b) => b.text)
+      .join(""),
+  );
 
   // 工作过程（思考 + 工具调用）在回合结束后折叠成一行，让用户先看到结论；
   // 流式中保持展开，执行细节仍然实时可见。

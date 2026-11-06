@@ -7,6 +7,7 @@ import {
   PlusIcon,
   SlashIcon,
   SquareIcon,
+  Loader2Icon,
   Trash2Icon,
   ZapIcon,
 } from "lucide-react";
@@ -58,7 +59,7 @@ export function Composer({
   queue: QueueState;
   onClearQueue: () => void;
   // 立即把某条排队消息插进当前回合（不再需要 Option+Enter）
-  onQueueInsert: (text: string, kind: "steering" | "followUp") => void;
+  onQueueInsert: (text: string, kind: "steering" | "followUp") => Promise<void> | void;
   onSubmit: (message: PromptInputMessage, behavior?: "steer" | "followUp") => void;
   onStop: () => void;
   onLocalCommand: (name: string) => void;
@@ -162,6 +163,23 @@ export function Composer({
   // short delay lets that land before blur tears the popup down.
   const onBlur = () => setTimeout(() => setSuggestions([]), 120);
 
+  // 「插入」是 清空队列 + 按新顺序重发 的多步异步操作。记录正在插入的那条，
+  // 期间在列表里保留一个「插入中…」占位 chip（真实条目会很快变成「打断」类），
+  // 并保证最短 350ms 可见，否则 IPC 太快用户看不到任何反馈。
+  const [inserting, setInserting] = useState<{ text: string } | null>(null);
+  const insertQueued = async (item: { text: string; kind: "打断" | "排队" }) => {
+    if (inserting) return;
+    setInserting({ text: item.text });
+    const started = Date.now();
+    try {
+      await onQueueInsert(item.text, item.kind === "打断" ? "steering" : "followUp");
+    } finally {
+      const wait = 350 - (Date.now() - started);
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      setInserting(null);
+    }
+  };
+
   const queueItems = useMemo(
     () => [
       ...queue.steering.map((text, index) => ({ text, kind: "打断" as const, index })),
@@ -210,8 +228,15 @@ export function Composer({
         multiple
         onSubmit={handleSubmit}
       >
-        {queueItems.length > 0 ? (
+        {queueItems.length > 0 || inserting ? (
           <div className="flex w-full flex-wrap items-center gap-1.5 px-3 pt-3">
+            {inserting ? (
+              <span className="flex items-center gap-1 rounded-md border border-primary/40 bg-primary/10 py-0.5 pr-2 pl-1.5 text-[11px] text-primary">
+                <Loader2Icon className="size-3 animate-spin" />
+                <span className="text-primary/70">插入中…</span>
+                <span className="max-w-40 truncate">{inserting.text}</span>
+              </span>
+            ) : null}
             {queueItems.map((item, i) => (
               <span
                 className="group/q flex items-center gap-1 rounded-md border bg-muted/40 py-0.5 pr-0.5 pl-1.5 text-[11px]"
@@ -221,10 +246,9 @@ export function Composer({
                 <span className="text-muted-foreground">{item.kind}</span>
                 <span className="max-w-40 truncate">{item.text}</span>
                 <button
-                  className="flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-primary/80 transition-colors hover:bg-primary/15 hover:text-primary"
-                  onClick={() =>
-                    onQueueInsert(item.text, item.kind === "打断" ? "steering" : "followUp")
-                  }
+                  className="flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-primary/80 transition-colors hover:bg-primary/15 hover:text-primary disabled:opacity-60"
+                  disabled={Boolean(inserting)}
+                  onClick={() => void insertQueued(item)}
                   title="立即插入当前回合（不等当前回复结束）"
                   type="button"
                 >
