@@ -51,10 +51,16 @@ function groupSessions(
   projects: { path: string; name: string }[],
   view: "grouped" | "workspace" | "timeline",
   sort: "updated" | "created",
+  running: Record<string, boolean> = {},
 ): [string, SessionRow[]][] {
+  const rank = (s: SessionRow) => (running[s.path] ? 1 : 0);
+  // 运行中的会话始终排在最前：并行时用户一眼就能看到哪些在干活，
+  // 即使所在项目组折叠也不会被"最近 N 条"截掉。
   const list = sessions
     .slice()
-    .sort((a, b) => (sort === "updated" ? b.mtime - a.mtime : a.mtime - b.mtime));
+    .sort(
+      (a, b) => rank(b) - rank(a) || (sort === "updated" ? b.mtime - a.mtime : a.mtime - b.mtime),
+    );
   if (view === "timeline") return [["时间线", list]];
 
   if (view === "workspace") {
@@ -71,10 +77,12 @@ function groupSessions(
       bucket.push(session);
       buckets.set(session.cwd, bucket);
     }
-    return [...buckets.entries()].map(([cwd, items]) => [
-      labels.get(cwd) ?? baseName(cwd),
-      items,
-    ]);
+    // 项目按"组内最活跃会话"排序：运行中 > 最近更新；空项目沉底。
+    const score = (items: SessionRow[]) =>
+      items[0] ? rank(items[0]) * 1e15 + (sort === "updated" ? items[0].mtime : -items[0].mtime) : -Infinity;
+    return [...buckets.entries()]
+      .sort(([, a], [, b]) => score(b) - score(a))
+      .map(([cwd, items]) => [labels.get(cwd) ?? baseName(cwd), items]);
   }
 
   const buckets = new Map<string, SessionRow[]>();
@@ -154,7 +162,8 @@ function TaskRow({
       <button
         className={cn(
           "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 pr-9 text-left hover:bg-sidebar-accent",
-          active && "bg-sidebar-accent",
+          active && "bg-sidebar-accent text-foreground ring-1 ring-sidebar-border",
+          !active && streaming && "bg-sky-500/5",
         )}
         onClick={onOpen}
         type="button"
@@ -162,9 +171,9 @@ function TaskRow({
         <span
           className={cn(
             "size-1.5 shrink-0 rounded-full",
-            streaming ? "animate-pulse bg-amber-500" : "bg-muted-foreground/40",
+            streaming ? "animate-pulse bg-sky-500" : "bg-transparent",
           )}
-          title={streaming ? "运行中" : "已完成"}
+          title={streaming ? "运行中" : undefined}
         />
         <span className="min-w-0 flex-1 truncate text-xs">{session.title}</span>
         {showBadge ? (
@@ -232,7 +241,7 @@ function TaskRow({
 }
 
 /** Left rail: project switcher, session list, settings/theme footer. */
-const COLLAPSED_COUNT = 3;
+const COLLAPSED_COUNT = 10;
 
 export function SessionSidebar({
   state,
@@ -286,14 +295,14 @@ export function SessionSidebar({
   const expandedFor = useRef<string | null>(null);
   useEffect(() => {
     if (!state.sessionFile || expandedFor.current === state.sessionFile) return;
-    const label = groupSessions(state.sessions, state.projects, view, sort).find(([, items]) =>
+    const label = groupSessions(state.sessions, state.projects, view, sort, state.runningSessions).find(([, items]) =>
       items.some((s) => s.path === state.sessionFile),
     )?.[0];
     if (label) {
       setExpanded((prev) => (prev.has(label) ? prev : new Set(prev).add(label)));
       expandedFor.current = state.sessionFile;
     }
-  }, [state.sessionFile, state.sessions, state.projects, view, sort]);
+  }, [state.sessionFile, state.sessions, state.projects, view, sort, state.runningSessions]);
   const _activeProject =
     state.projects.find((p) => p.path === state.cwd) ??
     (state.cwd ? { path: state.cwd, name: baseName(state.cwd) } : null);
@@ -378,7 +387,7 @@ export function SessionSidebar({
                 {state.sessions.length === 0 ? (
                   <p className="px-2 py-6 text-center text-muted-foreground text-xs">暂无任务</p>
                 ) : null}
-                {groupSessions(state.sessions, state.projects, view, sort).map(([label, items]) => {
+                {groupSessions(state.sessions, state.projects, view, sort, state.runningSessions).map(([label, items]) => {
             const open = view === "timeline" || expanded.has(label);
             const visible = open ? items : items.slice(0, COLLAPSED_COUNT);
             // 工作区视图：分组是项目，渲染成可折叠的项目标题（带目录图标）
@@ -414,6 +423,12 @@ export function SessionSidebar({
                   >
                     <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
                     <span className="min-w-0 flex-1 truncate">{label}</span>
+                    {items.some((s) => state.runningSessions[s.path]) ? (
+                      <span
+                        className="size-1.5 shrink-0 animate-pulse rounded-full bg-sky-500"
+                        title="该项目有会话在运行"
+                      />
+                    ) : null}
                     {items.length > 0 ? (
                       <span className="shrink-0 text-[10px] text-muted-foreground/60">
                         {items.length}
@@ -461,36 +476,34 @@ export function SessionSidebar({
               {items.length === 0 ? (
                 <p className="px-2 py-1 pl-7 text-[10px] text-muted-foreground/60">暂无会话</p>
               ) : null}
-              {open
-                ? visible.map((s) => (
-                    <div className={cn(isProject && "pl-3")} key={s.path}>
-                      <TaskRow
-                        active={state.sessionFile === s.path}
-                        currentCwd={state.cwd}
-                        key={s.path}
-                        showProject={view !== "workspace"}
-                        onDelete={() => deleteSession(s.path)}
-                        onExport={() => window.pi.exportHtml()}
-                        onOpen={() => openSession(s.path, s.cwd)}
-                        onRename={(title) => {
-                          if (s.path === state.sessionFile) renameSession(title);
-                          else {
-                            // Renaming applies to the live session: switch first.
-                            Promise.resolve(openSession(s.path, s.cwd)).then(() => renameSession(title));
-                          }
-                        }}
-                        onReveal={() => shellReveal(s.path)}
-                        renaming={renaming === s.path}
-                        session={s}
-                        setRenaming={setRenaming}
-                        streaming={
-                          Boolean(state.runningSessions[s.path]) ||
-                          (state.sessionFile === s.path && state.isStreaming)
-                        }
-                      />
-                    </div>
-                  ))
-                : null}
+              {visible.map((s) => (
+                <div className={cn(isProject && "pl-3")} key={s.path}>
+                  <TaskRow
+                    active={state.sessionFile === s.path}
+                    currentCwd={state.cwd}
+                    key={s.path}
+                    showProject={view !== "workspace"}
+                    onDelete={() => deleteSession(s.path)}
+                    onExport={() => window.pi.exportHtml()}
+                    onOpen={() => openSession(s.path, s.cwd)}
+                    onRename={(title) => {
+                      if (s.path === state.sessionFile) renameSession(title);
+                      else {
+                        // Renaming applies to the live session: switch first.
+                        Promise.resolve(openSession(s.path, s.cwd)).then(() => renameSession(title));
+                      }
+                    }}
+                    onReveal={() => shellReveal(s.path)}
+                    renaming={renaming === s.path}
+                    session={s}
+                    setRenaming={setRenaming}
+                    streaming={
+                      Boolean(state.runningSessions[s.path]) ||
+                      (state.sessionFile === s.path && state.isStreaming)
+                    }
+                  />
+                </div>
+              ))}
               {items.length > COLLAPSED_COUNT ? (
                 <button
                   className="flex w-full items-center gap-1 rounded px-2 py-1 pl-7 text-[10px] text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"

@@ -328,6 +328,7 @@ function Shell() {
   // 调试/E2E 句柄：会话切换（与 __pi 同级）
   (window as unknown as Record<string, unknown>).__piOpenSession = openSession;
   (window as unknown as Record<string, unknown>).__piOpenProject = openProject;
+  (window as unknown as Record<string, unknown>).__piRefreshSessions = refreshSessions;
 
   const openSettings = (tab: SettingsTab) => {
     setSettingsTab(tab);
