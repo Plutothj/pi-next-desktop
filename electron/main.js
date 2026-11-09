@@ -631,6 +631,31 @@ safeHandle("pi:createSession", async (_e, { cwd } = {}) => {
   return result;
 });
 
+// 并排窗格：确保会话进程在跑（不改活动指针），并开始把它的完整事件转发给
+// 渲染层；返回一份快照供窗格首帧渲染。
+safeHandle("pi:sessionPane", async (_e, { sessionFile, cwd } = {}) => {
+  const file = requireString(sessionFile, "sessionFile");
+  const dir = typeof cwd === "string" && fs.existsSync(cwd) ? cwd : os.homedir();
+  await pool.ensure(file, dir, { active: false });
+  pool.observe(file, true);
+  const [st, msgs] = await Promise.all([
+    pool.command(file, { type: "get_state" }).catch(() => null),
+    pool.command(file, { type: "get_messages" }).catch(() => null),
+  ]);
+  return {
+    ok: Boolean(st?.data),
+    error: st?.data ? undefined : "会话未就绪",
+    state: st?.data ?? null,
+    messages: msgs?.data?.messages ?? [],
+  };
+});
+
+// 窗格关闭/失焦后停止观察：后台事件回到"只发状态"的静默模式。
+safeHandle("pi:unobserveSession", (_e, { sessionFile } = {}) => {
+  const file = requireString(sessionFile, "sessionFile");
+  return { ok: pool.observe(file, false) };
+});
+
 // 切换界面显示的会话：只切活动指针（后台会话进程继续跑，不中断）。
 safeHandle("pi:switchSession", async (_e, { sessionFile, cwd } = {}) => {
   if (typeof sessionFile !== "string" || !sessionFile) return { ok: false, error: "缺少会话路径" };

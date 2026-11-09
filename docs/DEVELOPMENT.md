@@ -129,6 +129,9 @@ pi.stop() → 清理挂起对话框 → resolveRuntime()
 - 后台会话的完整事件不转发（避免污染活动视图），只发轻量 `session_status`
   （`{sessionFile, isStreaming, alive}`）：渲染层的 `runningSessions` 据此驱动侧栏运行点与
   后台完成通知。
+- **并排窗格**（`SplitPane` + `useSessionView`）：右栏会话由 `pi:sessionPane` 标记为
+  `observed`，池对它照常转发完整事件；渲染层的 usePi 只处理活动会话，窗格自己的
+  reducer 处理右栏会话。`observed` 的槽不会被空闲 sweep 回收。
 - 空闲回收仍按 10 分钟；切回被回收的会话时 `switchSession` 会按 `--session` 重新拉起。
 
 ### 3.3 PiProcess（`pi-process.js`）
@@ -219,6 +222,8 @@ reject（调用方 `.catch` 语义不变）。启动期预期错误（`pi 未运
 |---|---|---|
 | `pi:start` | `{cwd?}` | `{state, models, messages, cwd}` |
 | `pi:createSession` | `{cwd?}` | `{state, models, messages, cwd, sessionFile}`；**新开一个独立会话槽**（独立 pi 进程），不打断当前会话正在跑的回合 |
+| `pi:sessionPane` | `{sessionFile, cwd?}` | `{ok, state, messages, error?}`；确保该会话进程在跑（不改活动指针）并开始转发完整事件（并排窗格的首帧） |
+| `pi:unobserveSession` | `{sessionFile}` | `{ok}`；窗格关闭后停止转发完整事件，回到只发 `session_status` |
 | `pi:send` | RPC payload（可带 `sessionFile` 定向目标会话） | `data \| null` |
 | `pi:pickFolder` | – | `path \| null` |
 | `pi:reveal` | `path` | `shell.openPath` 结果 |

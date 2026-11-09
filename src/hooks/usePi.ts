@@ -50,7 +50,7 @@ export type State = {
   autoCompact: boolean;
 };
 
-const initialState: State = {
+export const initialState: State = {
   status: "connecting",
   cwd: "",
   models: [],
@@ -114,7 +114,7 @@ function withRunning(state: State, file: string | undefined, running: boolean): 
   return { ...state, runningSessions: { ...state.runningSessions, [file]: running } };
 }
 
-function reduce(state: State, rec: RpcEvent): State {
+export function reduce(state: State, rec: RpcEvent): State {
   switch (rec.type) {
     case "agent_start":
       return withRunning({ ...state, isStreaming: true }, state.sessionFile, true);
@@ -309,7 +309,20 @@ export function usePi() {
   // Subscribe on every mount: StrictMode's mount → cleanup → remount cycle
   // would otherwise leave the listener detached (dev builds only).
   useEffect(() => {
-    return window.pi.onEvent((rec) => setState((s) => reduce(s, rec)));
+    return window.pi.onEvent((rec) =>
+      setState((s) => {
+        // 并排窗格会同时订阅同一批事件；活动视图只吃自己的会话。
+        // 其他会话的 agent_* 仍要更新 runningSessions（侧栏运行点）。
+        if (rec.sessionFile && s.sessionFile && rec.sessionFile !== s.sessionFile) {
+          if (rec.type === "session_status") return reduce(s, rec);
+          if (rec.type === "agent_start" || rec.type === "agent_settled" || rec.type === "agent_end") {
+            return withRunning(s, rec.sessionFile, rec.type === "agent_start");
+          }
+          return s;
+        }
+        return reduce(s, rec);
+      }),
+    );
   }, []);
 
   useEffect(() => {

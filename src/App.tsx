@@ -2,6 +2,7 @@ import {
   BotIcon,
   BrainIcon,
   ClipboardListIcon,
+  Columns2Icon,
   CopyIcon,
   FilesIcon,
   GlobeIcon,
@@ -46,6 +47,7 @@ import { SessionTreePanel } from "@/components/session-tree";
 import { SettingsDialog, type SettingsTab } from "@/components/settings-dialog";
 import { ShortcutsDialog } from "@/components/shortcuts-dialog";
 import { SessionSidebar } from "@/components/sidebar";
+import { SplitPane } from "@/components/split-pane";
 import { TerminalPanel } from "@/components/terminal-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -110,6 +112,8 @@ function Shell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // 并排窗格：右栏显示另一个会话的实时转录（只读），点聚焦互换。
+  const [splitPane, setSplitPane] = useState<{ file: string; cwd?: string } | null>(null);
   const [dualOpen, setDualOpen] = useState(false);
   const dual = useDualModel();
   // 每回合结束 +1：让文件面板在 AI 改写文件后自动重读预览
@@ -486,6 +490,38 @@ function Shell() {
     [prompt],
   );
 
+  // 并排：优先选另一个"正在跑"的会话，其次最近更新的会话。
+  const toggleSplit = useCallback(() => {
+    if (splitPane) {
+      setSplitPane(null);
+      return;
+    }
+    const candidate = [...state.sessions]
+      .filter((s) => s.path !== state.sessionFile)
+      .sort((a, b) => {
+        const ra = state.runningSessions[a.path] ? 1 : 0;
+        const rb = state.runningSessions[b.path] ? 1 : 0;
+        return rb - ra || b.mtime - a.mtime;
+      })[0];
+    if (candidate) setSplitPane({ file: candidate.path, cwd: candidate.cwd });
+  }, [splitPane, state.sessions, state.sessionFile, state.runningSessions]);
+
+  // 聚焦右栏：把它的会话变成活动会话，原活动会话转到右栏继续跑。
+  const focusSplit = useCallback(
+    async (file: string, cwd?: string) => {
+      const prev = state.sessionFile;
+      const prevCwd = state.cwd;
+      await openSession(file, cwd);
+      setSplitPane(prev && prev !== file ? { file: prev, cwd: prevCwd } : null);
+    },
+    [openSession, state.sessionFile, state.cwd],
+  );
+
+  // 从侧栏直接打开了右栏会话：右栏让位，回到单栏。
+  useEffect(() => {
+    if (splitPane && splitPane.file === state.sessionFile) setSplitPane(null);
+  }, [splitPane, state.sessionFile]);
+
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
       {sidebarCollapsed ? null : (
@@ -563,6 +599,14 @@ function Shell() {
               variant="ghost"
             >
               <FilesIcon className="size-3.5" />
+            </Button>
+            <Button
+              className={cn("hidden h-7 px-2 text-xs @2xl:flex", splitPane && "bg-accent")}
+              onClick={toggleSplit}
+              title="并排显示另一个会话（再点关闭）"
+              variant="ghost"
+            >
+              <Columns2Icon className="size-3.5" />
             </Button>
             <Button
               className={cn("hidden h-7 px-2 text-xs @2xl:flex", panel === "agents" && "bg-accent")}
@@ -665,6 +709,8 @@ function Shell() {
           </div>
         ) : null}
 
+        <div className="flex min-h-0 flex-1">
+          <div className="flex min-w-0 flex-1 flex-col">
         <Chat onFork={handleFork} state={state} />
 
         <div className="mx-auto w-full max-w-3xl px-6 pb-4 lg:max-w-4xl xl:max-w-5xl 2xl:max-w-6xl min-[1800px]:max-w-7xl">
@@ -736,6 +782,20 @@ function Shell() {
             </Composer>
           </div>
           <WidgetStrip placement="below" widgets={state.widgets} />
+        </div>
+          </div>
+          {splitPane && splitPane.file !== state.sessionFile ? (
+            <SplitPane
+              activeFile={state.sessionFile}
+              cwd={splitPane.cwd}
+              file={splitPane.file}
+              key={splitPane.file}
+              onClose={() => setSplitPane(null)}
+              onFocus={focusSplit}
+              onPick={(file, cwd) => setSplitPane({ file, cwd })}
+              sessions={state.sessions}
+            />
+          ) : null}
         </div>
       </main>
 

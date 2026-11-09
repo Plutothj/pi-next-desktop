@@ -32,6 +32,9 @@ export function createSessionPool({ send, makeEnv, buildArgs, activeKey, idleMs 
       lastActive: Date.now(),
       pendingDialog: null,
       streaming: false,
+      // 被并排窗格观察的会话：不在活动指针上，但仍要把完整事件转发给
+      // 渲染层（观战窗格要实时看到流式输出）。
+      observed: false,
     };
     const proc = new PiProcess({
       onRecord(rec) {
@@ -46,12 +49,14 @@ export function createSessionPool({ send, makeEnv, buildArgs, activeKey, idleMs 
         if (rec.type === "agent_start") slot.streaming = true;
         else if (rec.type === "agent_settled" || rec.type === "agent_end") slot.streaming = false;
         if (!isActive(slot.file)) {
-          // 后台会话：完整事件不污染前台视图，但状态变化要让渲染层看见
-          // （侧栏运行指示 / 完成通知依赖它）。
-          if (rec.type === "agent_start" || rec.type === "agent_settled" || rec.type === "agent_end") {
-            send({ type: "session_status", sessionFile: slot.file, isStreaming: slot.streaming });
+          if (!slot.observed) {
+            // 后台且无人观察：完整事件不污染前台视图，但状态变化要让渲染层
+            // 看见（侧栏运行指示 / 完成通知依赖它）。
+            if (rec.type === "agent_start" || rec.type === "agent_settled" || rec.type === "agent_end") {
+              send({ type: "session_status", sessionFile: slot.file, isStreaming: slot.streaming });
+            }
+            return;
           }
-          return;
         }
         send({ ...rec, sessionFile: slot.file });
       },
@@ -88,6 +93,15 @@ export function createSessionPool({ send, makeEnv, buildArgs, activeKey, idleMs 
     const slot = slots.get(file);
     slot?.pendingDialog && replayDialog(slot);
     return slot ?? null;
+  }
+
+  /** 并排窗格开始/停止观察某个会话：观察期间后台事件照常转发。 */
+  function observe(file, on) {
+    const slot = slots.get(file);
+    if (!slot) return false;
+    slot.observed = Boolean(on);
+    if (on) slot.lastActive = Date.now();
+    return true;
   }
 
   async function command(file, payload) {
@@ -127,6 +141,8 @@ export function createSessionPool({ send, makeEnv, buildArgs, activeKey, idleMs 
     const now = Date.now();
     for (const [file, slot] of slots) {
       if (isActive(file)) continue;
+      // 并排窗格正在观察的会话不能被回收（用户正看着它）
+      if (slot.observed) continue;
       if (now - slot.lastActive < idleMs) continue;
       slot.proc.stop();
       slots.delete(file);
@@ -146,6 +162,7 @@ export function createSessionPool({ send, makeEnv, buildArgs, activeKey, idleMs 
   return {
     ensure,
     activate,
+    observe,
     rebind,
     command,
     write,

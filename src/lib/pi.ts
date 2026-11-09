@@ -357,6 +357,17 @@ export type PiBridge = {
     cwd: string;
     sessionFile: string | null;
   }>;
+  // 并排窗格：确保会话进程在跑并开始转发完整事件，返回首帧快照。
+  sessionPane: (
+    sessionFile: string,
+    cwd?: string,
+  ) => Promise<{
+    ok: boolean;
+    error?: string;
+    state: Record<string, unknown> | null;
+    messages: PiMessage[];
+  }>;
+  unobserveSession: (sessionFile: string) => Promise<{ ok: boolean }>;
   send: (payload: Record<string, unknown>) => Promise<unknown>;
   pickFolder: () => Promise<string | null>;
   reveal: (target: string) => Promise<void>;
