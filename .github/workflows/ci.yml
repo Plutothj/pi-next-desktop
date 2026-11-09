@@ -5,6 +5,10 @@ on:
     branches: ["**"]
   pull_request:
 
+env:
+  # GitHub Releases CDN 会间歇 504；electron 的 postinstall / E2E 都走镜像
+  ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+
 jobs:
   check:
     runs-on: ubuntu-latest
