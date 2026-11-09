@@ -86,14 +86,31 @@ export function registerUpdater({ safeHandle, send }) {
   });
 
   safeHandle("update:download", async () => {
-    try {
-      await autoUpdater.downloadUpdate();
-      return { ok: true, ...state };
-    } catch (err) {
-      logLine("updater", err);
-      setState({ status: "error", error: err?.message ?? String(err) });
-      return { ok: false, ...state };
+    // GitHub Releases 的 CDN 会间歇 504；先自动退避重试几次，再让用户手动开
+    // 发布页下载。
+    const delays = [0, 2000, 5000, 10_000];
+    let lastError = null;
+    for (let attempt = 0; attempt < delays.length; attempt++) {
+      if (delays[attempt]) {
+        setState({ status: "downloading", percent: 0, error: null });
+        await new Promise((r) => setTimeout(r, delays[attempt]));
+      }
+      try {
+        await autoUpdater.downloadUpdate();
+        return { ok: true, ...state };
+      } catch (err) {
+        lastError = err;
+        logLine("updater", `download attempt ${attempt + 1} failed: ${err?.message ?? err}`);
+      }
     }
+    const message = lastError?.message ?? String(lastError ?? "下载失败");
+    setState({
+      status: "error",
+      error: /504|502|503|Gateway Time-out/i.test(message)
+        ? `${message}（GitHub Releases 暂时不可用，可点「查看发布页」手动下载）`
+        : message,
+    });
+    return { ok: false, ...state };
   });
 
   safeHandle("update:install", async () => {
