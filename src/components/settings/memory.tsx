@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Loader2Icon, PlusIcon, Trash2Icon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -100,6 +101,7 @@ export function CommandsPanel({
 }) {
   const [editing, setEditing] = useState<PromptDraft | null>(null);
   const [saving, setSaving] = useState(false);
+  const confirm = useConfirm();
 
   const openEdit = async (prompt: PromptTemplate) => {
     try {
@@ -142,7 +144,13 @@ export function CommandsPanel({
   };
 
   const remove = async (prompt: PromptTemplate) => {
-    if (!confirm(`删除命令 /${prompt.name}？`)) return;
+    const ok = await confirm({
+      title: `删除命令 /${prompt.name}？`,
+      description: "命令文件会从磁盘删除，重启会话后生效。",
+      confirmText: "删除",
+      destructive: true,
+    });
+    if (!ok) return;
     setBusy(true);
     const res = await window.pi.cfg.deletePrompt({
       scope: prompt.scope === "project" ? "project" : "user",

@@ -38,6 +38,8 @@ export type State = {
   sessionFile?: string;
   sessions: SessionInfo[];
   projects: ProjectInfo[];
+  /** 用户手动移除的项目路径（有会话的项目靠它从侧栏隐藏）. */
+  removedProjects: string[];
   commands: CommandInfo[];
   /** Extension statuses pushed via ctx.ui.setStatus, e.g. a git extension's branch. */
   statuses: Record<string, string>;
@@ -64,6 +66,7 @@ export const initialState: State = {
   queue: { steering: [], followUp: [] },
   sessions: [],
   projects: [],
+  removedProjects: [],
   commands: [],
   statuses: {},
   widgets: {},
@@ -242,11 +245,18 @@ export function usePi() {
   }, [state.queue]);
 
   const refreshSessions = useCallback(async () => {
-    const [sessions, projects] = await Promise.all([
+    const [sessions, projectState] = await Promise.all([
       window.pi.sessions().catch(() => []),
-      window.pi.projects.list().catch(() => []),
+      // projects:state 同时带回手动移除的路径：侧栏分组由会话 cwd 推出，
+      // 只删 projects 列表对有会话的项目无效（会话会把它"变回"项目）。
+      window.pi.projects.state().catch(() => ({ projects: [], removed: [] })),
     ]);
-    setState((s) => ({ ...s, sessions, projects }));
+    setState((s) => ({
+      ...s,
+      sessions,
+      projects: projectState.projects,
+      removedProjects: projectState.removed,
+    }));
   }, []);
 
   // 每模型思考档位记忆：存 ui.json（我们自己的文件，pi 永不覆盖），

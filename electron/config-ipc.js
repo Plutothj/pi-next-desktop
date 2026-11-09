@@ -153,10 +153,14 @@ export function registerConfigHandlers({ send }) {
 
   safeHandle("cfg:readSkill", (_e, { file, cwd } = {}) => {
     if (typeof file !== "string" || !file) throw new Error("缺少文件路径");
-    // Skills live under the agent dir or the project's .pi; refuse anything else.
-    const allowed = [config.AGENT_DIR, ...(typeof cwd === "string" && cwd ? [path.join(cwd, ".pi")] : [])];
+    // Skills live under the agent dir, the shared ~/.agents/skills, or the project's .pi.
+    const allowed = [
+      config.AGENT_DIR,
+      ...config.USER_SKILL_ROOTS,
+      ...(typeof cwd === "string" && cwd ? [path.join(cwd, ".pi")] : []),
+    ];
     const resolved = path.resolve(file);
-    const ok = allowed.some((root) => resolved.startsWith(root + path.sep));
+    const ok = allowed.some((root) => resolved.startsWith(path.resolve(root) + path.sep));
     if (!ok) throw new Error("路径不在技能目录内");
     const stat = fs.statSync(resolved);
     if (stat.size > 1_000_000) throw new Error("文件过大");

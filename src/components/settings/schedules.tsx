@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { ClockIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -23,6 +24,7 @@ export function SchedulesPanel({ cwd }: { cwd: string }) {
   const [name, setName] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   const refresh = () => window.pi.schedules.list().then(setItems).catch(() => {});
   useEffect(() => {
@@ -48,7 +50,13 @@ export function SchedulesPanel({ cwd }: { cwd: string }) {
   };
 
   const remove = async (s: Schedule) => {
-    if (!confirm(`删除定时任务「${s.name}」？`)) return;
+    const ok = await confirm({
+      title: `删除定时任务「${s.name}」？`,
+      description: "删除后不再触发，已派发的会话不受影响。",
+      confirmText: "删除",
+      destructive: true,
+    });
+    if (!ok) return;
     await window.pi.schedules.delete(s.id).catch(() => null);
     refresh();
   };

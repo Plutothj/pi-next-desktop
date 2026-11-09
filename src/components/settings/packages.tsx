@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import type { CfgSnapshot, GalleryPackage } from "@/lib/pi";
 
@@ -51,6 +52,7 @@ export function PackagesPanel({
   const [installing, setInstalling] = useState<string | null>(null);
   const [view, setView] = useState<"installed" | "market">("installed");
   const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const confirm = useConfirm();
 
   const search = useCallback(
     async (text: string) => {
@@ -131,7 +133,13 @@ export function PackagesPanel({
   };
 
   const uninstall = async (source: string) => {
-    if (!confirm(`卸载 ${source}？`)) return;
+    const ok = await confirm({
+      title: `卸载 ${source}？`,
+      description: "扩展会从 agent 目录移除，依赖重启会话后消失。",
+      confirmText: "卸载",
+      destructive: true,
+    });
+    if (!ok) return;
     setBusy(true);
     setLog(`卸载 ${source}…`);
     const res = await window.pi.cfg.uninstall(source);

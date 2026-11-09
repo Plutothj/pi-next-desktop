@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld("pi", {
   debugQuit: () => ipcRenderer.invoke("pi:debugQuit"),
   projects: {
     list: () => ipcRenderer.invoke("projects:list"),
+    state: () => ipcRenderer.invoke("projects:state"),
     add: (dir) => ipcRenderer.invoke("projects:add", dir),
     remove: (dir) => ipcRenderer.invoke("projects:remove", dir),
   },

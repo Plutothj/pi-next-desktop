@@ -93,3 +93,14 @@ test("deleteSkill 拒绝 skills 目录之外的兄弟路径", () => {
   fs.mkdirSync(ok, { recursive: true });
   assert.doesNotThrow(() => deleteSkill(ok));
 });
+
+test("deleteSkill 允许共享的 ~/.agents/skills（用户的技能多在这里）", () => {
+  const dir = path.join(os.homedir(), ".agents", "skills", `pi-config-test-${process.pid}`);
+  fs.mkdirSync(path.join(dir, "demo"), { recursive: true });
+  try {
+    assert.doesNotThrow(() => deleteSkill(path.join(dir, "demo")));
+    assert.equal(fs.existsSync(path.join(dir, "demo")), false, "技能目录真的被删掉");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

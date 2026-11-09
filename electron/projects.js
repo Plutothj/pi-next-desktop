@@ -32,7 +32,7 @@ export function registerProjectHandlers({ userDataDir, scanSessions }) {
 
   const readProjects = () => readStore().projects;
 
-  safeHandle("projects:list", () => {
+  const listProjects = () => {
     const store = readStore();
     const removed = new Set(store.removed);
     const byPath = new Map();
@@ -55,7 +55,16 @@ export function registerProjectHandlers({ userDataDir, scanSessions }) {
         exists: fs.existsSync(p.path),
       }))
       .sort((a, b) => b.mtime - a.mtime || a.name.localeCompare(b.name));
-  });
+  };
+
+  safeHandle("projects:list", () => listProjects());
+
+  // 侧栏分组由「会话的 cwd」推出来，所以光把项目从 projects 列表删掉，有会话
+  // 的项目仍会因为会话继续出现。渲染层要 removed 才能把整组隐藏。
+  safeHandle("projects:state", () => ({
+    projects: listProjects(),
+    removed: readStore().removed,
+  }));
 
   safeHandle("projects:add", (_e, dir) => {
     try {

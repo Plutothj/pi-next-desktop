@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ChevronDownIcon, Loader2Icon, RotateCcwIcon } from "lucide-react";
 import ReactDiffViewer, { DiffMethod } from "react-diff-viewer-continued";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
 
 type ChangeEntry = { path: string; untracked: boolean };
@@ -69,6 +70,7 @@ export function ChangesPanel({
   const [open, setOpen] = useState<string | null>(null);
   const [diffs, setDiffs] = useState<Record<string, DiffData>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const confirm = useConfirm();
   const list = changes ?? [];
 
   const fetchDiff = useCallback(
@@ -84,7 +86,13 @@ export function ChangesPanel({
   }, [open, diffs, fetchDiff]);
 
   const revert = async (file: string) => {
-    if (!confirm(`还原 ${file}？该文件的修改将丢失。`)) return;
+    const ok = await confirm({
+      title: `还原 ${file}？`,
+      description: "该文件的修改将丢失，无法撤销。",
+      confirmText: "还原",
+      destructive: true,
+    });
+    if (!ok) return;
     setBusy(file);
     await window.pi.git.revertFile(cwd, file).catch(() => null);
     setBusy(null);
@@ -93,7 +101,13 @@ export function ChangesPanel({
   };
 
   const revertAll = async () => {
-    if (!confirm(`全部还原？${list.length} 个文件的修改将丢失（untracked 文件会被删除）。`)) return;
+    const ok = await confirm({
+      title: "全部还原？",
+      description: `${list.length} 个文件的修改将丢失（untracked 文件会被删除），无法撤销。`,
+      confirmText: "全部还原",
+      destructive: true,
+    });
+    if (!ok) return;
     setBusy("__all__");
     await window.pi.git.revertAll(cwd).catch(() => null);
     setBusy(null);

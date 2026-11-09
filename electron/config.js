@@ -478,12 +478,20 @@ export function listSkills(cwd) {
   return all;
 }
 
+// 用户级技能有两个来源：agent 自己的 skills 目录，以及跨 agent 共享的
+// ~/.agents/skills（Anthropic 风格技能的常见位置）。两边都要能删、能读。
+export const USER_SKILL_ROOTS = [
+  path.join(AGENT_DIR, "skills"),
+  path.join(os.homedir(), ".agents", "skills"),
+];
+
 export function deleteSkill(dir) {
-  const root = path.join(AGENT_DIR, "skills") + path.sep;
-  if (!dir.startsWith(root)) {
+  const roots = USER_SKILL_ROOTS.map((root) => path.resolve(root) + path.sep);
+  const resolved = path.resolve(String(dir ?? ""));
+  if (!resolved || !roots.some((root) => resolved.startsWith(root))) {
     throw new Error("只能删除用户目录下的技能");
   }
-  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(resolved, { recursive: true, force: true });
 }
 
 // --------------------------------------------------------------- gallery

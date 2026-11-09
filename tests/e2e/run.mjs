@@ -567,7 +567,62 @@ async function main() {
     if (!JSON.parse(projects).includes(agentDir)) throw new Error(`项目未登记: ${projects}`);
   });
 
-  // 18. 文件预览：xlsx 网格 / docx 正文 / pdf canvas / 问 AI 预填
+  // 18. 删除项目：有会话时也必须真的消失（曾经因为侧栏分组由会话 cwd 推出，
+  //     删掉项目后会话立刻把它"变回"项目），而且确认框必须是应用内对话框。
+  await check("删除项目（有会话）：应用内确认 + 整组隐藏", async () => {
+    const work = path.join(agentDir, "..", `pi-e2e-projdel-${process.pid}`);
+    fs.mkdirSync(work, { recursive: true });
+    // 直接落一个合法会话文件（pi 空闲时不一定急着写盘）：项目分组来自会话的
+    // cwd，这正是"项目有会话后删不掉"的复现条件。
+    const sessionPath = path.join(
+      agentDir,
+      "sessions",
+      `e2e-projdel-${process.pid}`,
+      "session.jsonl",
+    );
+    fs.mkdirSync(path.dirname(sessionPath), { recursive: true });
+    fs.writeFileSync(
+      sessionPath,
+      `${JSON.stringify({
+        type: "session",
+        version: 3,
+        id: `e2e-projdel-${process.pid}`,
+        timestamp: new Date().toISOString(),
+        cwd: work,
+      })}\n`,
+    );
+    await evaluate(`window.__piRefreshSessions()`);
+    const label = path.basename(work);
+    const findRemoveBtn = `[...document.querySelectorAll('aside button[title="从列表移除（不删会话）"]')]
+      .find(b => b.parentElement?.textContent?.includes(${JSON.stringify(label)}))`;
+    await waitForExpr(`Boolean(${findRemoveBtn})`, 20_000, "项目分组");
+    await evaluate(`(() => { const b = ${findRemoveBtn}; if (!b) throw new Error("remove btn"); b.click(); return "ok"; })()`);
+    // 原生 window.confirm 会阻断 CDP；能拿到 Radix 对话框即证明走的是应用内弹框
+    const dialogText = await waitForExpr(
+      `(() => {
+        const d = [...document.querySelectorAll('[data-slot="dialog-content"]')].at(-1);
+        return d && d.textContent.includes('从项目列表移除') ? d.textContent : null;
+      })()`,
+      5_000,
+      "确认框",
+    );
+    if (!String(dialogText).includes("移除")) throw new Error(`确认框内容异常: ${dialogText}`);
+    await evaluate(
+      `(() => {
+        const d = [...document.querySelectorAll('[data-slot="dialog-content"]')].at(-1);
+        const btn = [...d.querySelectorAll('button')].find(b => b.textContent.trim() === '移除');
+        if (!btn) throw new Error("confirm btn");
+        btn.click();
+        return "ok";
+      })()`,
+    );
+    await waitForExpr(`!Boolean(${findRemoveBtn})`, 10_000, "项目分组隐藏");
+    const st = JSON.parse(await evaluate(`window.pi.projects.state().then(s => JSON.stringify(s))`));
+    if (!st.removed.includes(work)) throw new Error(`removed 未记录: ${JSON.stringify(st.removed)}`);
+    if (!fs.existsSync(sessionPath)) throw new Error(`会话文件被误删: ${sessionPath}`);
+  });
+
+  // 19. 文件预览：xlsx 网格 / docx 正文 / pdf canvas / 问 AI 预填
   //     fixture 项目里放三种样例文件，走真实 UI 动线（文件树 → 点开）
   await check("文件预览（xlsx/docx/pdf）+ 问 AI", async () => {
     const work = path.join(agentDir, "..", `pi-e2e-preview-${process.pid}`);
@@ -653,7 +708,7 @@ async function main() {
     fs.rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
-  // 19. 侧栏折叠：收起后消失、头部出现展开按钮、再展开回来
+  // 20. 侧栏折叠：收起后消失、头部出现展开按钮、再展开回来
   await check("侧栏折叠/展开", async () => {
     // 注意：右侧面板也是 <aside>，这里只认左侧栏（含「项目」标题的那块）
     const hasSidebar = () => evaluate("Boolean(document.querySelector('aside.w-64'))");

@@ -477,6 +477,7 @@ export type PiBridge = {
   };
   projects: {
     list: () => Promise<ProjectInfo[]>;
+    state: () => Promise<{ projects: ProjectInfo[]; removed: string[] }>;
     add: (dir: string) => Promise<{ ok: boolean; error?: string }>;
     remove: (dir: string) => Promise<{ ok: boolean }>;
   };

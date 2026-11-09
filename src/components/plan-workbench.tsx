@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ClipboardListIcon, Loader2Icon, PlayIcon, Trash2Icon } from "lucide-react";
 import { mermaid } from "@streamdown/mermaid";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
 
@@ -19,6 +20,7 @@ export function PlanWorkbench({
   const [plans, setPlans] = useState<PlanItem[] | null>(null);
   const [selected, setSelected] = useState<PlanItem | null>(null);
   const [content, setContent] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   const refresh = useCallback(async () => {
     const list = await window.pi.plans.list(cwd).catch(() => []);
@@ -40,7 +42,13 @@ export function PlanWorkbench({
   };
 
   const remove = async (plan: PlanItem) => {
-    if (!confirm(`删除计划 ${plan.name}？`)) return;
+    const ok = await confirm({
+      title: `删除计划「${plan.name}」？`,
+      description: "计划文档会从 .pi/plans 删除，无法恢复。",
+      confirmText: "删除",
+      destructive: true,
+    });
+    if (!ok) return;
     await window.pi.plans.delete(cwd, plan.path).catch(() => null);
     if (selected?.path === plan.path) setSelected(null);
     window.pi.plans.list(cwd).then(setPlans).catch(() => {});

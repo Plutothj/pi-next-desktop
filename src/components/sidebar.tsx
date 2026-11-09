@@ -22,6 +22,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { State } from "@/hooks/usePi";
 import type { UpdateState } from "@/lib/pi";
@@ -274,6 +275,11 @@ export function SessionSidebar({
   const [view, setView] = useState<"grouped" | "workspace" | "timeline">("workspace");
   const [sort, setSort] = useState<"updated" | "created">("updated");
   const [renaming, setRenaming] = useState<string | null>(null);
+  const confirm = useConfirm();
+  // 手动移除的项目连同它的会话一起从侧栏隐藏（会话文件仍在磁盘上，
+  // 重新添加该文件夹即可恢复）。否则有会话的项目删完会立刻"长回来"。
+  const removedSet = new Set(state.removedProjects);
+  const visibleSessions = state.sessions.filter((s) => !removedSet.has(s.cwd));
   // Groups collapse to the newest few sessions; expanded groups show all.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleGroup = (label: string) =>
@@ -289,14 +295,14 @@ export function SessionSidebar({
   const expandedFor = useRef<string | null>(null);
   useEffect(() => {
     if (!state.sessionFile || expandedFor.current === state.sessionFile) return;
-    const label = groupSessions(state.sessions, state.projects, view, sort, state.runningSessions).find(([, items]) =>
+    const label = groupSessions(visibleSessions, state.projects, view, sort, state.runningSessions).find(([, items]) =>
       items.some((s) => s.path === state.sessionFile),
     )?.[0];
     if (label) {
       setExpanded((prev) => (prev.has(label) ? prev : new Set(prev).add(label)));
       expandedFor.current = state.sessionFile;
     }
-  }, [state.sessionFile, state.sessions, state.projects, view, sort, state.runningSessions]);
+  }, [state.sessionFile, state.sessions, state.projects, state.removedProjects, view, sort, state.runningSessions]);
   const _activeProject =
     state.projects.find((p) => p.path === state.cwd) ??
     (state.cwd ? { path: state.cwd, name: baseName(state.cwd) } : null);
@@ -378,10 +384,10 @@ export function SessionSidebar({
           {(() => {
             return (
               <>
-                {state.sessions.length === 0 ? (
+                {visibleSessions.length === 0 ? (
                   <p className="px-2 py-6 text-center text-muted-foreground text-xs">暂无任务</p>
                 ) : null}
-                {groupSessions(state.sessions, state.projects, view, sort, state.runningSessions).map(([label, items]) => {
+                {groupSessions(visibleSessions, state.projects, view, sort, state.runningSessions).map(([label, items]) => {
             const open = view === "timeline" || expanded.has(label);
             const visible = open ? items : items.slice(0, COLLAPSED_COUNT);
             // 工作区视图：分组是项目，渲染成可折叠的项目标题（带目录图标）
@@ -452,7 +458,14 @@ export function SessionSidebar({
                     onClick={async (e) => {
                       e.stopPropagation();
                       if (!projectPath) return;
-                      if (!confirm(`从项目列表移除「${label}」？\n（会话文件不会被删除）`)) return;
+                      const ok = await confirm({
+                        title: `从项目列表移除「${label}」？`,
+                        description:
+                          "项目会从侧栏隐藏，会话文件不会被删除；重新添加该文件夹即可恢复。",
+                        confirmText: "移除",
+                        destructive: true,
+                      });
+                      if (!ok) return;
                       await window.pi.projects.remove(projectPath).catch(() => null);
                       await onRemoveProject(projectPath);
                     }}

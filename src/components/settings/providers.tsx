@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type {
@@ -50,9 +51,16 @@ export function ProvidersPanel({
   onApply: (r: { ok: boolean; error?: string }) => Promise<void>;
 }) {
   const [editing, setEditing] = useState<ProviderInfo | "new" | null>(null);
+  const confirm = useConfirm();
 
   const remove = async (name: string) => {
-    if (!confirm(`删除供应商 ${name} 及其密钥？`)) return;
+    const ok = await confirm({
+      title: `删除供应商「${name}」？`,
+      description: "该供应商及其密钥会被移除，保存后 pi 会重启。",
+      confirmText: "删除",
+      destructive: true,
+    });
+    if (!ok) return;
     await onApply(await window.pi.cfg.deleteProvider(name));
   };
 

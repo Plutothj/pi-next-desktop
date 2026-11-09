@@ -47,6 +47,7 @@ git push --follow-tags                       # 推提交和 tag；release.yml �
 - **新建会话必须走 `pi:createSession`（新开池槽），不要用 pi 的 `new_session`**：后者是替换当前进程里的会话，会 teardown 正在跑的回合——"同项目开第二个会话就把第一个打断"的根因。后台会话的完整事件不转发，只发 `session_status` 驱动运行指示。
 - 渲染层事件订阅 effect 每次挂载都要重新注册，boot 用 `started` ref 护栏只跑一次（StrictMode 双挂载，历史 bug）。
 - 注释与用户可见文案用中文，标识符用英文，与现有代码一致。
+- **危险操作（删除/卸载/还原）的确认框必须用 `useConfirm()`（`src/components/ui/confirm-dialog.tsx`），不要用 `window.confirm`**：原生弹框和暗色 UI 割裂，阻塞渲染；CDP 驱动的 E2E 遇到原生 confirm 会直接挂住。
 - UI 交互默认对齐 ZCode Desktop 的行为（Enter 发送、流式排队/steer、弹层从输入框上方出、模型选择器内嵌输入框）。
 
 ## 跨平台
@@ -64,4 +65,6 @@ Windows 与实际 macOS 均已真机日常使用（命名管道、`cmd /d /s /c`
 - **计划模式不要再用 prompt 前缀**：走 `plan-mode.ts` 扩展（Enter/ExitPlanMode 工具 + `tool_call` 闸门 + `before_agent_start` 系统提示注入 + 审批卡片），状态是与会话文件同级的 `.plan-mode.json`。注意系统提示 section 名必须匹配 `^[a-z][a-z0-9_-]*$`（写成 `"Plan mode"` 会让 pi 拒绝整个请求，见 DEVELOPMENT §7.11.1）。
 - **远程访问是内置模块**：`electron/remote-extension.js` 把应用自带的 `pi-mobile` 及整棵依赖复制到 `<agent>/extensions/pi-mobile` + `extensions/node_modules`；不要再把 `pi-mobile` 加进「推荐扩展」。`/remote` 是 pi 扩展命令，必须以 prompt 文本发送（pi 会先执行命令、不入模型回合），并且手机只走 HTTPS（Tailscale/自建反代），hub 只监听回环。
 - **自研扩展的依赖解析以扩展文件为基准**（只有 typebox/@earendil-works 被别名进 runtime）：引第三方包要装到 `<agent>/extensions/node_modules`（table 扩展的 SheetJS 就是这么做的）。
+- **技能有两个用户级根**：`<AGENT_DIR>/skills` 与 `~/.agents/skills`（`config.USER_SKILL_ROOTS`）。删除/读取的路径守卫必须覆盖两者，否则共享技能会"点了删除没反应"。
+- **侧栏项目分组由会话的 cwd 推出来**：`projects:remove` 只改 projects.json 不会让有会话的项目消失。渲染层要用 `projects.state().removed` 把整组会话一起过滤掉（会话文件仍在磁盘上，重新添加文件夹即恢复）。
 - `App.tsx`（~900 行）与 `settings-dialog.tsx`（~1700 行）偏大，改时优先局部修改，拆分是既定方向但尚未做。

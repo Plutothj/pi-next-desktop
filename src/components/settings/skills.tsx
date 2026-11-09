@@ -10,6 +10,7 @@ import {
   WrenchIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { CfgSnapshot } from "@/lib/pi";
 
@@ -24,6 +25,7 @@ export function SkillsPanel({
   onApply: (r: { ok: boolean; error?: string }) => Promise<void>;
 }) {
   const [preview, setPreview] = useState<{ name: string; body: string } | null>(null);
+  const confirm = useConfirm();
   const grouped = useMemo(() => {
     const map = new Map<string, typeof cfg.skills>();
     for (const s of cfg.skills) {
@@ -62,9 +64,16 @@ export function SkillsPanel({
                 <Button
                   className="h-9 px-2 text-destructive"
                   onClick={async () => {
-                    if (!confirm(`删除技能 ${s.name}？`)) return;
+                    const ok = await confirm({
+                      title: `删除技能「${s.name}」？`,
+                      description: "技能目录会从磁盘删除，无法恢复。",
+                      confirmText: "删除",
+                      destructive: true,
+                    });
+                    if (!ok) return;
                     const res = await window.pi.cfg.deleteSkill(s.dir);
-                    if (res.ok) await onApply({ ok: true });
+                    // 失败（例如路径不在可删目录）也要回显，否则点了没反应
+                    await onApply(res);
                   }}
                   size="sm"
                   variant="ghost"
