@@ -184,12 +184,6 @@ function TaskRow({
             {project}
           </span>
         ) : null}
-        {session.changed && session.changed.added + session.changed.removed > 0 ? (
-          <span className="shrink-0 font-mono text-[10px]">
-            <span className="text-emerald-500">+{session.changed.added}</span>{" "}
-            <span className="text-rose-500">−{session.changed.removed}</span>
-          </span>
-        ) : null}
         <span className="shrink-0 text-[10px] text-muted-foreground">
           {timeAgo(session.mtime).replace("前", "")}
         </span>
