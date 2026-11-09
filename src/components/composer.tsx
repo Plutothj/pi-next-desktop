@@ -164,42 +164,53 @@ export function Composer({
   // short delay lets that land before blur tears the popup down.
   const onBlur = () => setTimeout(() => setSuggestions([]), 120);
 
-  // 「插入」是 清空队列 + 按新顺序重发 的多步异步操作。记录正在插入的那条，
-  // 期间在列表里保留一个「插入中…」占位 chip（真实条目会很快变成「打断」类），
-  // 并保证最短 350ms 可见，否则 IPC 太快用户看不到任何反馈。
-  const [inserting, setInserting] = useState<{ text: string } | null>(null);
-  const insertQueued = async (item: { text: string; raw?: string; kind: "打断" | "排队" }) => {
-    if (inserting) return;
-    setInserting({ text: item.text });
-    const started = Date.now();
+  // 「插入」是 清空队列 + 按新顺序重发 的多步异步操作。点击后**把目标那一行
+  // 就地变成「插入中…」**（不是再叠一个占位 chip，否则会出现两条一模一样的
+  // item），并跟着这条消息（可能从"排队"改记为"打断"）一直转到它被消费为止。
+  const [insertMark, setInsertMark] = useState<{
+    raw: string;
+    text: string;
+    startedAt: number;
+  } | null>(null);
+  const insertQueued = async (item: { raw: string; text: string; kind: "打断" | "排队" }) => {
+    if (insertMark) return;
+    setInsertMark({ raw: item.raw, text: item.text, startedAt: Date.now() });
+    // 插入按原始文本匹配 pi 的队列（含附件正文），展示用的 text 是剥离后的
     try {
-      // 插入按原始文本匹配 pi 的队列（含附件正文），展示用的 text 是剥离后的
-      await onQueueInsert(item.raw ?? item.text, item.kind === "打断" ? "steering" : "followUp");
-    } finally {
-      const wait = 350 - (Date.now() - started);
-      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-      setInserting(null);
+      await onQueueInsert(item.raw, item.kind === "打断" ? "steering" : "followUp");
+    } catch {
+      // 插入失败也要让「插入中」收尾（队列没变，靠 10s 兜底）
     }
   };
 
-  const queueItems = useMemo(
-    () => [
+  // 目标被 pi 消费掉（两个队列里都不在了）就收掉「插入中」；最短 350ms，
+  // 避免 IPC 太快用户看不到任何反馈。还在队列里（steer 等到边界）就一直转。
+  useEffect(() => {
+    if (!insertMark) return;
+    const present = queue.steering.includes(insertMark.raw) || queue.followUp.includes(insertMark.raw);
+    const delay = present
+      ? 10_000 // 兜底：pi 没回 queue_update 时最多转 10s
+      : Math.max(0, 350 - (Date.now() - insertMark.startedAt));
+    const timer = setTimeout(() => setInsertMark(null), delay);
+    return () => clearTimeout(timer);
+  }, [queue, insertMark]);
+
+  const queueItems = useMemo(() => {
+    // 同一段文本可能排队多次：用 (kind, raw) 的出现序号定位"点了插入的那一条"，
+    // 队列下标在移除后会左移，序号不会。
+    const seen = new Map<string, number>();
+    const make = (raw: string, kind: "打断" | "排队") => {
+      const key = `${kind}|${raw}`;
+      const ordinal = (seen.get(key) ?? 0) + 1;
+      seen.set(key, ordinal);
       // 队列 chip 只显示用户原文：附件解析正文是给模型的，不塞进排队预览
-      ...queue.steering.map((raw, index) => ({
-        raw,
-        text: stripAttachmentBlocks(raw),
-        kind: "打断" as const,
-        index,
-      })),
-      ...queue.followUp.map((raw, index) => ({
-        raw,
-        text: stripAttachmentBlocks(raw),
-        kind: "排队" as const,
-        index,
-      })),
-    ],
-    [queue],
-  );
+      return { raw, text: stripAttachmentBlocks(raw), kind, ordinal };
+    };
+    return [
+      ...queue.steering.map((raw) => make(raw, "打断")),
+      ...queue.followUp.map((raw) => make(raw, "排队")),
+    ];
+  }, [queue]);
   const commandItems = suggestions.filter((s) => s.kind === "command");
   const fileItems = suggestions.filter((s) => s.kind === "file");
 
@@ -241,35 +252,56 @@ export function Composer({
         multiple
         onSubmit={handleSubmit}
       >
-        {queueItems.length > 0 || inserting ? (
+        {queueItems.length > 0 || insertMark ? (
           <div className="flex w-full flex-wrap items-center gap-1.5 px-3 pt-3">
-            {inserting ? (
-              <span className="flex items-center gap-1 rounded-md border border-primary/40 bg-primary/10 py-0.5 pr-2 pl-1.5 text-[11px] text-primary">
-                <Loader2Icon className="size-3 animate-spin" />
-                <span className="text-primary/70">插入中…</span>
-                <span className="max-w-40 truncate">{inserting.text}</span>
-              </span>
-            ) : null}
-            {queueItems.map((item, i) => (
-              <span
-                className="group/q flex items-center gap-1 rounded-md border bg-muted/40 py-0.5 pr-0.5 pl-1.5 text-[11px]"
-                key={`${item.kind}-${i}`}
-                title={item.text}
-              >
-                <span className="text-muted-foreground">{item.kind}</span>
-                <span className="max-w-40 truncate">{item.text}</span>
-                <button
-                  className="flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-primary/80 transition-colors hover:bg-primary/15 hover:text-primary disabled:opacity-60"
-                  disabled={Boolean(inserting)}
-                  onClick={() => void insertQueued(item)}
-                  title="立即插入当前回合（不等当前回复结束）"
-                  type="button"
+            {(() => {
+              // 只把**第一条**同文本的目标项就地转成「插入中」，其余（重复排队的
+              // 另一份）保持普通排队态，避免出现两条一样的 item。
+              let insertShown = false;
+              return queueItems.map((item) => {
+                const isInserting =
+                  Boolean(insertMark) && !insertShown && insertMark!.raw === item.raw;
+                if (isInserting) insertShown = true;
+                return isInserting ? (
+                // 正在插入：就地换成「插入中…」，不再重复渲染原始排队项
+                <span
+                  className="flex items-center gap-1 rounded-md border border-primary/40 bg-primary/10 py-0.5 pr-2 pl-1.5 text-[11px] text-primary"
+                  key={`${item.kind}-${item.ordinal}`}
                 >
+                  <Loader2Icon className="size-3 animate-spin" />
+                  <span className="text-primary/70">插入中…</span>
+                  <span className="max-w-40 truncate">{item.text}</span>
+                </span>
+              ) : (
+                <span
+                  className="group/q flex items-center gap-1 rounded-md border bg-muted/40 py-0.5 pr-0.5 pl-1.5 text-[11px]"
+                  key={`${item.kind}-${item.ordinal}`}
+                  title={item.text}
+                >
+                  <span className="text-muted-foreground">{item.kind}</span>
+                  <span className="max-w-40 truncate">{item.text}</span>
+                  <button
+                    className="flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-primary/80 transition-colors hover:bg-primary/15 hover:text-primary disabled:opacity-60"
+                    disabled={Boolean(insertMark)}
+                    onClick={() => void insertQueued(item)}
+                    title="立即插入当前回合（不等当前回复结束）"
+                    type="button"
+                  >
                   <ZapIcon className="size-3" />
                   插入
                 </button>
               </span>
-            ))}
+              );
+              });
+            })()}
+            {insertMark && !queueItems.some((i) => i.raw === insertMark.raw) ? (
+              // clear_queue 与重放之间可能有一帧队列为空：补一个占位，别让反馈闪没
+              <span className="flex items-center gap-1 rounded-md border border-primary/40 bg-primary/10 py-0.5 pr-2 pl-1.5 text-[11px] text-primary">
+                <Loader2Icon className="size-3 animate-spin" />
+                <span className="text-primary/70">插入中…</span>
+                <span className="max-w-40 truncate">{insertMark.text}</span>
+              </span>
+            ) : null}
             <button
               className="ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent"
               onClick={onClearQueue}
