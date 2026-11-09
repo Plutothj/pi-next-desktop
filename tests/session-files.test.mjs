@@ -97,3 +97,35 @@ test("buildForkLines writes a v3 header with parentSession and the chain", () =>
   assert.equal(parsed[0].id, newId);
   assert.deepEqual(parsed.slice(1), chain);
 });
+
+test("sessionTitle: 附件解析正文不进标题，只发附件时用文件名", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-sessions-"));
+  const withText = makeSession(dir, [
+    JSON.stringify({ type: "session", version: 3, id: uuid(), timestamp: "t", cwd: "/tmp/proj" }),
+    JSON.stringify({
+      type: "message", id: uuid(), parentId: null,
+      message: {
+        role: "user",
+        content: [{
+          type: "text",
+          text:
+            "看下文档 先把这白膜接入\n\n" +
+            '<attachment name="白膜视频生成使用接入指引.docx">\n（docx 提取的纯文本，格式信息未保留）\n白膜视频生成：功能介绍……\n</attachment>',
+        }],
+      },
+    }),
+  ]);
+  assert.equal(sessionTitle(withText).title, "看下文档 先把这白膜接入");
+
+  const onlyAttachment = makeSession(dir, [
+    JSON.stringify({ type: "session", version: 3, id: uuid(), timestamp: "t", cwd: "/tmp/proj" }),
+    JSON.stringify({
+      type: "message", id: uuid(), parentId: null,
+      message: {
+        role: "user",
+        content: [{ type: "text", text: '<attachment name="方案.pdf">\n（PDF 提取的纯文本，版式与图片未保留）\n正文\n</attachment>' }],
+      },
+    }),
+  ]);
+  assert.equal(sessionTitle(onlyAttachment).title, "方案.pdf（附件）");
+});

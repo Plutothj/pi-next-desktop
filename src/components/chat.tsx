@@ -1,6 +1,6 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useState } from "react";
 import { mermaid } from "@streamdown/mermaid";
-import { stripDirective, stripImageNotes } from "@/lib/promptPrefixes";
+import { stripAttachmentBlocks, stripDirective, stripImageNotes } from "@/lib/promptPrefixes";
 import {
   BrainIcon,
   CheckIcon,
@@ -332,7 +332,8 @@ const UserMessage = memo(function UserMessage({
   // 指令前缀（计划模式/双模型链）只进会话、不进展示：剥离后以徽章标注阶段
   const { kind, text: stripped } = stripDirective(raw);
   // 去掉 pi 追加的图片尺寸提示（[Image: original …]），那是给模型看的
-  const text = stripImageNotes(stripped);
+  // 附件解析正文同样只给模型：气泡里只留用户自己写的话（附件由 chip 承载）
+  const text = stripAttachmentBlocks(stripImageNotes(stripped));
   const badge = kind === "plain" ? null : BADGES[kind];
   const images = blocksOf(message).filter((b) => b.type === "image");
   return (

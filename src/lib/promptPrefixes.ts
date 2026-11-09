@@ -41,3 +41,22 @@ const IMAGE_NOTE_RE =
 export function stripImageNotes(text: string): string {
   return text.replace(IMAGE_NOTE_RE, "\n\n").replace(/\n{3,}/g, "\n\n").trim();
 }
+
+// 附件解析结果（attachments.ts 的 wrap() 生成）：
+//   <attachment name="方案.docx">
+//   （docx 提取的纯文本，格式信息未保留）
+//   ……正文……
+//   </attachment>
+// 以及未解析/超限类的 【附件 xxx：说明】 标记。正文是给模型读的，用户消息气泡
+// 只显示他自己写的话，附件由上方 chip 承载（点开可预览原件）——会话存真相、
+// 展示层剥离，与 stripDirective / stripImageNotes 同一约定。
+const ATTACHMENT_BLOCK_RE = /<attachment\s+[^>]*>[\s\S]*?<\/attachment>/g;
+const ATTACHMENT_MARK_RE = /【附件\s+[^】\n]*】/g;
+
+export function stripAttachmentBlocks(text: string): string {
+  return text
+    .replace(ATTACHMENT_BLOCK_RE, "\n\n")
+    .replace(ATTACHMENT_MARK_RE, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}

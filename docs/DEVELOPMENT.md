@@ -740,6 +740,10 @@ npm run stage             # 把本机 pi bundle 复制进 runtime/
 `[Image: original WxH, displayed at…]`（坐标映射元信息）。`stripImageNotes`（promptPrefixes.ts）
 在展示层剥掉它，会话记录保持原样。正则只认带 `original WxH` / `converted from…` 的形态，
 普通文本里的 `[Image]` 不受影响。
+- **附件解析正文不上屏**：pdf/docx/xlsx/zip 的解析结果以 `<attachment name=…>…</attachment>`
+块拼进 prompt（模型要读它）。`stripAttachmentBlocks` 在**用户气泡、排队 chip、会话树、
+顶栏标题**里剥掉这些块和 `【附件 …】` 标记，只留用户原文；附件由气泡上方 chip 承载（点开看原件）。
+侧栏标题同样只取用户写的字，只发附件时用「文件名（附件）」——会话存真相，展示层剥离。
 - **昵称「插入」loading**：排队项点插入后先显示一个「插入中…」占位 chip（带 spinner、按钮禁用），
 并保证最短 350ms 可见——清空+重发的 IPC 太快，否则用户看不到任何反馈。
 - **整回合一条「已工作」**：pi 一个回合里会产生多条 assistant 消息（每次工具调用一轮），

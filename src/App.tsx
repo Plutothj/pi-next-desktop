@@ -73,7 +73,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { useUpdater } from "@/hooks/useUpdater";
 import { expandAttachments } from "@/lib/attachments";
 import { lastAssistantTextOf, type PiMessage, textOf } from "@/lib/pi";
-import { stripDirective } from "@/lib/promptPrefixes";
+import { stripAttachmentBlocks, stripDirective } from "@/lib/promptPrefixes";
 import { cn } from "@/lib/utils";
 
 const THINKING = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -209,7 +209,9 @@ function Shell() {
   const firstUser = state.messages.find((m) => m.role === "user");
   const derivedTitle = (() => {
     if (!firstUser) return null;
-    const clean = stripDirective(textOf(firstUser.content)).text.replace(/\s+/g, " ").trim();
+    const clean = stripAttachmentBlocks(stripDirective(textOf(firstUser.content)).text)
+      .replace(/\s+/g, " ")
+      .trim();
     if (!clean) return null;
     return clean.length > 40 ? `${clean.slice(0, 40)}…` : clean;
   })();

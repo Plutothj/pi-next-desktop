@@ -26,6 +26,7 @@ import {
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import { cn } from "@/lib/utils";
+import { stripAttachmentBlocks } from "@/lib/promptPrefixes";
 import type { CommandInfo, QueueState } from "@/lib/pi";
 
 /** Local commands the composer handles itself, merged with pi's own list. */
@@ -167,12 +168,13 @@ export function Composer({
   // 期间在列表里保留一个「插入中…」占位 chip（真实条目会很快变成「打断」类），
   // 并保证最短 350ms 可见，否则 IPC 太快用户看不到任何反馈。
   const [inserting, setInserting] = useState<{ text: string } | null>(null);
-  const insertQueued = async (item: { text: string; kind: "打断" | "排队" }) => {
+  const insertQueued = async (item: { text: string; raw?: string; kind: "打断" | "排队" }) => {
     if (inserting) return;
     setInserting({ text: item.text });
     const started = Date.now();
     try {
-      await onQueueInsert(item.text, item.kind === "打断" ? "steering" : "followUp");
+      // 插入按原始文本匹配 pi 的队列（含附件正文），展示用的 text 是剥离后的
+      await onQueueInsert(item.raw ?? item.text, item.kind === "打断" ? "steering" : "followUp");
     } finally {
       const wait = 350 - (Date.now() - started);
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
@@ -182,8 +184,19 @@ export function Composer({
 
   const queueItems = useMemo(
     () => [
-      ...queue.steering.map((text, index) => ({ text, kind: "打断" as const, index })),
-      ...queue.followUp.map((text, index) => ({ text, kind: "排队" as const, index })),
+      // 队列 chip 只显示用户原文：附件解析正文是给模型的，不塞进排队预览
+      ...queue.steering.map((raw, index) => ({
+        raw,
+        text: stripAttachmentBlocks(raw),
+        kind: "打断" as const,
+        index,
+      })),
+      ...queue.followUp.map((raw, index) => ({
+        raw,
+        text: stripAttachmentBlocks(raw),
+        kind: "排队" as const,
+        index,
+      })),
     ],
     [queue],
   );

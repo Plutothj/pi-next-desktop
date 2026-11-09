@@ -41,6 +41,24 @@ function readLines(file, size) {
   }
 }
 
+// 附件块（attachments.ts 的 wrap() 生成）与未解析标记：会话文件里是真相，
+// 但侧栏标题属于展示语义——不能用附件正文开头当标题。
+const ATTACHMENT_BLOCK_RE = /<attachment\s+[^>]*>[\s\S]*?<\/attachment>/g;
+const ATTACHMENT_MARK_RE = /【附件\s+[^】\n]*】/g;
+const ATTACHMENT_NAME_RE = /<attachment\s+name="([^"]+)"/;
+
+function titleFromUserText(text) {
+  const name = text.match(ATTACHMENT_NAME_RE)?.[1];
+  const clean = text
+    .replace(ATTACHMENT_BLOCK_RE, " ")
+    .replace(ATTACHMENT_MARK_RE, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (clean) return clean.slice(0, 80);
+  if (name) return `${name}（附件）`;
+  return null;
+}
+
 function parseSession(file, size) {
   let raw;
   try {
@@ -71,7 +89,8 @@ function parseSession(file, size) {
     if (!title && rec.type === "message" && rec.message?.role === "user") {
       const c = rec.message.content;
       const text = typeof c === "string" ? c : c?.find((b) => b.type === "text")?.text;
-      if (text) title = text.replace(/\s+/g, " ").slice(0, 80);
+      // 附件的解析正文是给模型的：标题只用用户自己写的字；只发了附件就用文件名
+      if (text) title = titleFromUserText(text);
     }
     if (rec.type === "message" && rec.message?.role === "assistant") {
       for (const block of rec.message.content ?? []) {
