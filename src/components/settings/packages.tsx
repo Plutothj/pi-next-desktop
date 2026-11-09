@@ -47,25 +47,31 @@ export function PackagesPanel({
   const [exhausted, setExhausted] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [searching, setSearching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [installing, setInstalling] = useState<string | null>(null);
   const [view, setView] = useState<"installed" | "market">("installed");
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-  const search = async (text: string) => {
-    setSearching(true);
-    const res = await window.pi.cfg.gallery(text, 0);
-    setSearching(false);
-    if (res?.ok) {
-      setGallery(res.items);
-      setTotal(res.total);
-      setExhausted(false);
-    } else {
-      setGallery([]);
-      setTotal(0);
-      setExhausted(true);
-      setLog(res?.error ?? "搜索失败");
-    }
-  };
+  const search = useCallback(
+    async (text: string) => {
+      setSearching(true);
+      const res = await window.pi.cfg.gallery(text, 0);
+      setSearching(false);
+      if (res?.ok) {
+        setGallery(res.items);
+        setTotal(res.total);
+        setExhausted(false);
+        setError(null);
+      } else {
+        setGallery([]);
+        setTotal(0);
+        setExhausted(true);
+        setError(res?.error ?? "搜索失败");
+        setLog(res?.error ?? "搜索失败");
+      }
+    },
+    [setLog],
+  );
 
   // 无限加载：npm 搜索每次 30 条，滚到底部继续取，直到没有新结果
   const loadMore = useCallback(
@@ -89,8 +95,10 @@ export function PackagesPanel({
   );
 
   useEffect(() => {
-    search("");
-  }, [search]);
+    // 只有切到"扩展市场"且还没加载过时才请求一次；不能在每次渲染都搜，
+    // 否则搜索 setState → 重渲染 → effect 再跑，页面会不停闪屏并打爆 npm 限流。
+    if (view === "market" && gallery === null && !searching) void search("");
+  }, [view, gallery, searching, search]);
 
   // 哨兵进入视口（外层滚动容器接近底部）时加载下一页
   useEffect(() => {
@@ -294,6 +302,8 @@ export function PackagesPanel({
         <div className="space-y-2">
           {gallery === null ? (
             <p className="text-muted-foreground text-xs">加载中…</p>
+          ) : error ? (
+            <p className="max-w-xl break-words text-xs text-destructive">{error}</p>
           ) : gallery.length === 0 ? (
             <p className="text-muted-foreground text-xs">没有结果</p>
           ) : null}

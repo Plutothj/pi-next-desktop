@@ -20,13 +20,15 @@ let currentUrl = null;
 export function resolveCloudflared(appRoot) {
   const pkg = PKG_BY_PLATFORM[`${process.platform}-${process.arch}`];
   if (!pkg) return null;
-  const roots = [appRoot];
-  // 打包后原生可执行文件被 electron-builder 放到 app.asar.unpacked；
-  // app.asar 内部只有占位路径，OS 不能直接 spawn。
-  if (appRoot.endsWith("app.asar")) roots.unshift(`${appRoot}.unpacked`);
   const binName = process.platform === "win32" ? "cloudflared.exe" : "cloudflared";
-  for (const root of roots) {
-    const bin = path.join(root, "node_modules", pkg, "bin", binName);
+  const candidates = [path.join(appRoot, "runtime", "cloudflared", binName)];
+  // 打包后 appRoot 是 resources/app.asar；staged runtime 在 resources/runtime。
+  if (appRoot.endsWith("app.asar")) {
+    candidates.unshift(path.join(path.dirname(appRoot), "runtime", "cloudflared", binName));
+  }
+  // 开发环境没跑 stage 时的兜底：直接读 optional dependency
+  candidates.push(path.join(appRoot, "node_modules", pkg, "bin", binName));
+  for (const bin of candidates) {
     if (fs.existsSync(bin)) return bin;
   }
   return null;

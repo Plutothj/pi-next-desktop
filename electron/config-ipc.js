@@ -4,6 +4,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { net } from "electron";
 import * as config from "./config.js";
 import { safeHandle } from "./ipc.js";
 import { requireObject } from "./ipc-helpers.js";
@@ -139,7 +140,13 @@ export function registerConfigHandlers({ send }) {
   safeHandle("cfg:gallery", async (_e, payload) => {
     const { query = "", from = 0 } = requireObject(payload ?? {}, "payload");
     return config
-      .searchGallery({ query, from })
+      .searchGallery({
+        query,
+        from,
+        // electron net 走 Chromium 网络栈，自动继承系统代理/证书设置；
+        // Node 的 fetch 不认系统代理，用户开 7890 时会拿到 HTML 拦截页。
+        fetcher: (url, init) => net.fetch(url, init),
+      })
       .then((r) => ({ ok: true, ...r }))
       .catch((err) => ({ ok: false, error: err.message }));
   });

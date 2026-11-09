@@ -317,8 +317,40 @@ function stageBundledExtensions() {
   }
 }
 
+// Cloudflare Quick Tunnel 的可执行文件：按打包平台复制进 runtime，避免把
+// 55MB 原生 exe 放进 app.asar（Windows 打包会触发签名工具下载，且 OS 不能
+// 从 asar 里直接 spawn）。应用运行时只从这个 runtime 路径启动。
+const CLOUDFLARED_PACKAGES = {
+  "win32-x64": "@botharness/cloudflared-win32-x64",
+  "darwin-x64": "@botharness/cloudflared-darwin-x64",
+  "darwin-arm64": "@botharness/cloudflared-darwin-arm64",
+  "linux-x64": "@botharness/cloudflared-linux-x64",
+  "linux-arm64": "@botharness/cloudflared-linux-arm64",
+};
+
+function stageCloudflared() {
+  const pkg = CLOUDFLARED_PACKAGES[`${process.platform}-${process.arch}`];
+  if (!pkg) {
+    console.warn(`cloudflared skipped: unsupported ${process.platform}-${process.arch}`);
+    return;
+  }
+  const bin = process.platform === "win32" ? "cloudflared.exe" : "cloudflared";
+  const source = path.join(root, "node_modules", pkg, "bin", bin);
+  if (!fs.existsSync(source)) {
+    console.warn(`cloudflared skipped: ${source} missing (optional dependency not installed)`);
+    return;
+  }
+  const dest = path.join(out, "cloudflared");
+  fs.rmSync(dest, { recursive: true, force: true });
+  fs.mkdirSync(dest, { recursive: true });
+  fs.copyFileSync(source, path.join(dest, bin));
+  if (process.platform !== "win32") fs.chmodSync(path.join(dest, bin), 0o755);
+  console.log(`cloudflared staged: ${dest}`);
+}
+
 try {
   stageBundledExtensions();
+  stageCloudflared();
 } catch (err) {
   console.warn("bundled extensions not staged:", err.message);
 }

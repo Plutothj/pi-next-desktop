@@ -488,31 +488,77 @@ export function deleteSkill(dir) {
 
 // --------------------------------------------------------------- gallery
 
-export async function searchGallery({ query, from = 0 } = {}) {
-  const text = query?.trim() ? `${query} keywords:pi-package` : "keywords:pi-package";
-  const res = await fetch(
-    `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(text)}&size=30&from=${Number(from) || 0}`,
-  );
-  if (!res.ok) throw new Error(`npm 搜索失败: ${res.status}`);
-  const data = await res.json();
+// npm 搜索接口对匿名请求限流很严（429）。设置页会反复打开/切换，
+// 短时间缓存结果，既省请求也避免用户看到"没有结果"。
+const galleryCache = new Map();
+const GALLERY_TTL_MS = 5 * 60_000;
+
+export async function searchGallery({ query, from = 0, fetcher = fetch } = {}) {
+  const cacheKey = `${query ?? ""}|${Number(from) || 0}`;
+  const cached = galleryCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < GALLERY_TTL_MS) return cached.data;
+
   const installed = new Set(
     (readSettings().packages ?? []).map((p) => (typeof p === "string" ? p : p.source)),
   );
+  const toItems = (data) =>
+    data.objects
+      .map(({ package: p }) => ({
+        name: p.name,
+        version: p.version,
+        description: p.description ?? "",
+        keywords: p.keywords ?? [],
+        author: p.author?.name ?? p.publisher?.username,
+        date: p.date,
+        links: p.links,
+        source: `npm:${p.name}`,
+      }))
+      .filter((p) => p.keywords.includes("pi-package") || query?.trim())
+      .map((p) => ({ ...p, installed: installed.has(p.source) }));
 
-  const items = data.objects
-    .map(({ package: p }) => ({
-      name: p.name,
-      version: p.version,
-      description: p.description ?? "",
-      keywords: p.keywords ?? [],
-      author: p.author?.name ?? p.publisher?.username,
-      date: p.date,
-      links: p.links,
-      source: `npm:${p.name}`,
-    }))
-    .filter((p) => p.keywords.includes("pi-package") || query?.trim())
-    .map((p) => ({ ...p, installed: installed.has(p.source) }));
-  return { items, total: data.total ?? items.length };
+  // npmjs 的 search 限流很凶（匿名 429），国内网络还常被网关拦成 HTML。
+  // 先试 npmjs，失败就换 npmmirror（它的搜索不支持 keywords: 语法，用纯文本）。
+  const trim = Number(from) || 0;
+  const attempts = [
+    `https://registry.npmjs.org/-/v1/search?text=${encodeURIComponent(
+      query?.trim() ? `${query} keywords:pi-package` : "keywords:pi-package",
+    )}&size=30&from=${trim}`,
+    `https://registry.npmmirror.com/-/v1/search?text=${encodeURIComponent(
+      query?.trim() ? `${query} pi-package` : "pi-package",
+    )}&size=30&from=${trim}`,
+  ];
+  let lastError = "搜索失败";
+  for (const url of attempts) {
+    try {
+      const res = await fetcher(url, {
+        headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!res.ok) {
+        lastError = `npm 搜索失败: ${res.status}${res.status === 429 ? "（请求太频繁）" : ""}`;
+        continue;
+      }
+      const raw = await res.text();
+      let data;
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        lastError = "npm 返回非 JSON（可能是网络代理拦截）";
+        continue;
+      }
+      if (!Array.isArray(data?.objects)) {
+        lastError = "npm 搜索响应格式异常";
+        continue;
+      }
+      const result = { items: toItems(data), total: data.total ?? data.objects.length };
+      galleryCache.set(cacheKey, { at: Date.now(), data: result });
+      return result;
+    } catch (err) {
+      lastError = err.message;
+    }
+  }
+  if (cached) return cached.data;
+  throw new Error(lastError);
 }
 
 
