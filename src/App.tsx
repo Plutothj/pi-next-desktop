@@ -487,6 +487,9 @@ function Shell() {
     else if (name === "plan") void togglePlanMode();
   };
 
+  // 调试/E2E 句柄：直接提交一条消息（双模型链路等动线用）
+  (window as unknown as Record<string, unknown>).__piSubmit = submit;
+
   // 编辑重发：fork 截断到此提问之前，原文预填进输入框并聚焦，改完 Enter 重发
   const handleFork = useCallback(
     async (message: PiMessage) => {

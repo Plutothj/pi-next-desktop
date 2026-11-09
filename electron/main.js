@@ -674,15 +674,25 @@ safeHandle("pi:getPlanMode", (_e, { sessionFile } = {}) => {
   }
 });
 
-safeHandle("pi:setPlanMode", (_e, { sessionFile, enabled } = {}) => {
+safeHandle("pi:setPlanMode", (_e, { sessionFile, enabled, autoApprove, chain } = {}) => {
   const file = planFlagFile(requireString(sessionFile, "sessionFile"));
   if (!file) return { ok: false, error: "无效会话路径" };
   try {
+    const on = Boolean(enabled);
     fs.writeFileSync(
       file,
-      `${JSON.stringify({ enabled: Boolean(enabled), updatedAt: Date.now() }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          enabled: on,
+          autoApprove: on ? Boolean(autoApprove) : false,
+          chain: on ? Boolean(chain) : false,
+          updatedAt: Date.now(),
+        },
+        null,
+        2,
+      )}\n`,
     );
-    return { ok: true, enabled: Boolean(enabled) };
+    return { ok: true, enabled: on };
   } catch (err) {
     return { ok: false, error: err.message };
   }

@@ -41,22 +41,35 @@ function flagPath(ctx: ExtensionContext): string | undefined {
   return path.join(cwd, ".pi", "plan-mode", id.replace(/[^A-Za-z0-9._-]/g, "-") + ".json");
 }
 
-function readFlag(ctx: ExtensionContext): boolean {
+function readState(ctx: ExtensionContext): { enabled: boolean; autoApprove: boolean; chain: boolean } {
   try {
     const file = flagPath(ctx);
-    if (!file) return false;
-    return Boolean(JSON.parse(fs.readFileSync(file, "utf8")).enabled);
+    if (!file) return { enabled: false, autoApprove: false, chain: false };
+    const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+    return {
+      enabled: Boolean(raw.enabled),
+      autoApprove: Boolean(raw.autoApprove),
+      chain: Boolean(raw.chain),
+    };
   } catch {
-    return false;
+    return { enabled: false, autoApprove: false, chain: false };
   }
 }
 
-function writeFlag(ctx: ExtensionContext, enabled: boolean): void {
+function readFlag(ctx: ExtensionContext): boolean {
+  return readState(ctx).enabled;
+}
+
+function writeFlag(ctx: ExtensionContext, enabled: boolean, autoApprove = false): void {
   try {
     const file = flagPath(ctx);
     if (!file) return;
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify({ enabled, updatedAt: Date.now() }), "utf8");
+    fs.writeFileSync(
+      file,
+      JSON.stringify({ enabled, autoApprove: enabled ? Boolean(autoApprove) : false, updatedAt: Date.now() }),
+      "utf8",
+    );
   } catch {}
 }
 
@@ -157,7 +170,8 @@ export default function (pi: ExtensionAPI) {
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (!readFlag(ctx)) {
+      const mode = readState(ctx);
+      if (!mode.enabled) {
         return errorResult(
           "ExitPlanMode can only be used while plan mode is active. If the plan was already approved, continue implementing.",
         );
@@ -166,7 +180,8 @@ export default function (pi: ExtensionAPI) {
       if (!plan.trim()) return errorResult("The plan argument is empty; pass the full plan text.");
       if (plan.length > MAX_PLAN_CHARS) return errorResult("The plan is too long; keep it under 20000 characters.");
 
-      const approved = await ctx.ui.confirm("批准这份实施计划？", plan);
+      // 双模型链路会预先打开 autoApprove：规划模型交计划后不打断，由执行模型接手。
+      const approved = mode.autoApprove ? true : await ctx.ui.confirm("批准这份实施计划？", plan);
       if (!approved) {
         const feedback = await ctx.ui.editor("对计划的修改意见（可留空直接结束本回合）", "");
         paint(ctx);
@@ -190,6 +205,23 @@ export default function (pi: ExtensionAPI) {
         planFile = path.join(dir, "plan-" + safe + ".md");
         fs.writeFileSync(planFile, plan, "utf8");
       } catch {}
+
+      if (mode.autoApprove || mode.chain) {
+        // 双模型链路：保持 flag 到本回合结束（规划模型不能再趁机改文件），
+        // 由链路在 settle 后关闭并切到执行模型。
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                "Plan recorded for the execution phase" +
+                (planFile ? " at " + planFile : "") +
+                ". Stop here and do not implement anything in this turn; the execution model will follow the document.",
+            },
+          ],
+          details: { approved: true, auto: true, plan, planFile },
+        };
+      }
 
       writeFlag(ctx, false);
       paint(ctx);

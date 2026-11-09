@@ -130,6 +130,37 @@ test("plan-mode 扩展：进入/拦截/批准落盘/拒绝反馈", async () => {
   fs.rmSync(cwd, { recursive: true, force: true });
 });
 
+test("plan-mode 扩展：autoApprove 跳过审批且不关闭计划模式（双模型链路）", async () => {
+  const { factory, dir } = await loadExtension();
+  const pi = makePi();
+  factory(pi);
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "plan-cwd-"));
+  const sessionFile = path.join(cwd, "session.jsonl");
+  fs.writeFileSync(
+    `${sessionFile}.plan-mode.json`,
+    JSON.stringify({ enabled: true, autoApprove: true, chain: true }),
+    "utf8",
+  );
+  const ctx = makeCtx({ sessionFile, cwd, confirmResult: false });
+  const approved = await pi.tools
+    .get("ExitPlanMode")
+    .execute("t1", { plan: "# 双模型方案\n\n1. 改 A" }, null, null, ctx);
+  assert.equal(approved.details.auto, true);
+  assert.equal(
+    ctx.calls.some((c) => c.kind === "confirm"),
+    false,
+    "autoApprove 不应弹用户审批",
+  );
+  assert.match(approved.content[0].text, /Stop here/);
+  assert.equal(fs.existsSync(approved.details.planFile), true);
+  // 链路在 settle 后自己关闭，扩展不提前开闸
+  const flag = JSON.parse(fs.readFileSync(`${sessionFile}.plan-mode.json`, "utf8"));
+  assert.equal(flag.enabled, true);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(cwd, { recursive: true, force: true });
+});
+
 test("plan-mode 扩展：系统提示只在计划模式注入", async () => {
   const { factory, dir } = await loadExtension();
   const pi = makePi();

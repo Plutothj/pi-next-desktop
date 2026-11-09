@@ -424,14 +424,21 @@ pi-bg --list | --output ID | --kill ID | --wait ID [--timeout 秒]
 ```
 submit（enabled && idle && 未流式）
   → 记录原模型与原 sessionFile
+  → setPlanMode(sessionFile, true, autoApprove = 用户原本没开计划模式)
   → switchModel(planner)（只改实时会话，不写默认设置）
-  → prompt(【规划阶段】… , files, followUp)
-一轮 settle（agent_settled 之后 isStreaming=false）
-  → 若 sessionFile 变了：链条中止（不恢复模型）
-  → switchModel(executor) → prompt(【执行阶段】…, followUp)
-规划轮 settle 后：把规划回复写入 <cwd>/.pi/plans/plan-<时间戳>.md（$plans:save），
-执行指令携带该文件路径；执行轮 settle → resetDualChain() → 恢复原模型
+  → prompt(用户原文, files, followUp)   // 约束来自 plan-mode 扩展，不拼话术
+规划轮 settle（agent_settled 之后 isStreaming=false）
+  → ExitPlanMode 被用户拒绝（toolResult isError）→ reset(restore, keepPlan)：
+    保持计划模式、恢复原模型、不进入执行
+  → 取 ExitPlanMode 的 toolResult details.planFile（autoApprove 下已落盘）
+    没有工具结果则把最后一段正文写 <cwd>/.pi/plans/plan-<时间戳>.md 兜底
+  → setPlanMode(false) 关闸 → switchModel(executor)
+  → prompt(【执行阶段】… + 方案文档：<path>，followUp)
+执行轮 settle → reset → 关掉计划模式并恢复原模型
 ```
+
+`autoApprove` 只给自动链路用：`ExitPlanMode` 不弹审批，但**保持只读闸门到本回合结束**，
+tool 结果明确要求规划模型停手；执行模型由链路切换后接手。手动计划模式仍然走审批卡片。
 
 护栏：`started` 标志避免「尚未开始就判定结束」；停止按钮先中止链条再 `abort`；
 配置缺模型时回退普通发送，不吞消息。

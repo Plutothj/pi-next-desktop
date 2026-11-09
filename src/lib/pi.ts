@@ -372,7 +372,12 @@ export type PiBridge = {
   unobserveSession: (sessionFile: string) => Promise<{ ok: boolean }>;
   // 计划模式状态（会话文件旁的 sidecar，扩展侧每次 tool_call 实时读取）
   getPlanMode: (sessionFile: string) => Promise<{ enabled: boolean }>;
-  setPlanMode: (sessionFile: string, enabled: boolean) => Promise<{ ok: boolean; enabled?: boolean; error?: string }>;
+  setPlanMode: (
+    sessionFile: string,
+    enabled: boolean,
+    autoApprove?: boolean,
+    chain?: boolean,
+  ) => Promise<{ ok: boolean; enabled?: boolean; error?: string }>;
   send: (payload: Record<string, unknown>) => Promise<unknown>;
   pickFolder: () => Promise<string | null>;
   reveal: (target: string) => Promise<void>;
