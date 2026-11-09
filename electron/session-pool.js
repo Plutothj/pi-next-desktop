@@ -35,11 +35,32 @@ export function createSessionPool({ send, makeEnv, buildArgs, activeKey, idleMs 
       // 被并排窗格观察的会话：不在活动指针上，但仍要把完整事件转发给
       // 渲染层（观战窗格要实时看到流式输出）。
       observed: false,
+      // 扩展 UI（todo widget / git 状态）：按会话缓存，切会话时整体替换，
+      // 避免 A 的 todo 出现在 B 的界面里（历史 bug）。
+      ui: { widgets: {}, statuses: {} },
     };
     const proc = new PiProcess({
       onRecord(rec) {
         slot.lastActive = Date.now();
         if (rec.type === "extension_ui_request") {
+          // 扩展 UI 状态按会话缓存（即使后台会话也要记，切过来要能还原）。
+          if (rec.method === "setWidget") {
+            const key = rec.widgetKey ?? "widget";
+            const lines = (rec.widgetLines ?? []).filter((line) => Boolean(line));
+            if (lines.length) {
+              slot.ui.widgets[key] = {
+                lines,
+                placement: rec.widgetPlacement === "belowEditor" ? "below" : "above",
+              };
+            } else {
+              delete slot.ui.widgets[key];
+            }
+          } else if (rec.method === "setStatus") {
+            const key = rec.statusKey ?? "status";
+            const text = String(rec.statusText ?? "").trim();
+            if (text) slot.ui.statuses[key] = text;
+            else delete slot.ui.statuses[key];
+          }
           // 阻塞型对话框：后台会话的暂存，切过来再弹
           if (["select", "input", "editor", "confirm"].includes(rec.method)) {
             slot.pendingDialog = rec;
@@ -104,6 +125,16 @@ export function createSessionPool({ send, makeEnv, buildArgs, activeKey, idleMs 
     return true;
   }
 
+  /** 会话的扩展 UI 快照（todo widget / 状态 chip），切会话时整体替换。 */
+  function uiSnapshot(file) {
+    const slot = slots.get(file);
+    if (!slot) return { widgets: {}, statuses: {} };
+    return {
+      widgets: { ...slot.ui.widgets },
+      statuses: { ...slot.ui.statuses },
+    };
+  }
+
   async function command(file, payload) {
     const slot = slots.get(file);
     if (!slot?.proc.running) throw new Error("pi 未运行");
@@ -163,6 +194,7 @@ export function createSessionPool({ send, makeEnv, buildArgs, activeKey, idleMs 
     ensure,
     activate,
     observe,
+    uiSnapshot,
     rebind,
     command,
     write,

@@ -274,6 +274,10 @@ export function usePi() {
           sessionFile: st.sessionFile as string | undefined,
           commands: commands?.commands ?? [],
           autoCompact: Boolean((st.autoCompactionEnabled as boolean) ?? true),
+          // 扩展 UI 按会话替换，避免上一个会话的 todo/status 残留
+          widgets: res.ui?.widgets ?? {},
+          statuses: res.ui?.statuses ?? {},
+          dialog: null,
           runningSessions:
             typeof st.sessionFile === "string"
               ? { ...s.runningSessions, [st.sessionFile]: Boolean(st.isStreaming) }
@@ -440,6 +444,10 @@ export function usePi() {
         sessionName: state_.sessionName,
         model: state_.model ?? s.model,
         thinkingLevel: state_.thinkingLevel ?? s.thinkingLevel,
+        // fork/换会话后旧会话的 todo/status 不能残留；新会话的事件会重新绘制
+        widgets: {},
+        statuses: {},
+        dialog: null,
         runningSessions: file
           ? { ...s.runningSessions, [file]: Boolean(state_.isStreaming) }
           : s.runningSessions,
@@ -592,6 +600,9 @@ export function usePi() {
         sessionName: fresh.sessionName as string | undefined,
         model: (fresh.model as ModelInfo | undefined) ?? s.model,
         thinkingLevel: String(fresh.thinkingLevel ?? s.thinkingLevel),
+        widgets: res.ui?.widgets ?? {},
+        statuses: res.ui?.statuses ?? {},
+        dialog: null,
         runningSessions: file
           ? { ...s.runningSessions, [file]: Boolean(fresh.isStreaming) }
           : s.runningSessions,
@@ -626,6 +637,9 @@ export function usePi() {
           isStreaming: false,
           sessionFile: fresh.sessionFile as string | undefined,
           sessionName: fresh.sessionName as string | undefined,
+          widgets: {},
+          statuses: {},
+          dialog: null,
         }));
       }
       refreshSessions();
@@ -650,6 +664,7 @@ export function usePi() {
       if (seq !== openSeq.current) return;
       const state_ = (st as any)?.state ?? (st as any) ?? {};
       const messages = (msgs as any)?.messages ?? [];
+      const ui = "ui" in switched ? switched.ui : undefined;
       setState((s) => ({
         ...s,
         messages,
@@ -661,6 +676,10 @@ export function usePi() {
         sessionName: state_.sessionName,
         model: state_.model ?? s.model,
         thinkingLevel: state_.thinkingLevel ?? s.thinkingLevel,
+        // 扩展 UI 跟着会话走：todo/status 一律整体替换，杜绝跨会话串台
+        widgets: ui?.widgets ?? {},
+        statuses: ui?.statuses ?? {},
+        dialog: null,
         runningSessions: { ...s.runningSessions, [file]: Boolean(state_.isStreaming) },
         // Session files record their own cwd; cross-project switches follow it.
         ...(cwd ? { cwd } : {}),

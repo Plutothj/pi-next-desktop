@@ -132,6 +132,10 @@ pi.stop() → 清理挂起对话框 → resolveRuntime()
 - **并排窗格**（`SplitPane` + `useSessionView`）：右栏会话由 `pi:sessionPane` 标记为
   `observed`，池对它照常转发完整事件；渲染层的 usePi 只处理活动会话，窗格自己的
   reducer 处理右栏会话。`observed` 的槽不会被空闲 sweep 回收。
+- **扩展 UI 按会话隔离**：池对每个槽缓存 `setWidget` / `setStatus`（即使后台会话也记），
+  切会话时把该槽的 `uiSnapshot` 随 `pi:switchSession` / `pi:start` / `pi:createSession`
+  返回，渲染层**整体替换** `widgets/statuses`（不是合并）。否则 A 会话的 todo 会留在
+  B 的界面上（历史 bug）。
 - 空闲回收仍按 10 分钟；切回被回收的会话时 `switchSession` 会按 `--session` 重新拉起。
 
 ### 3.3 PiProcess（`pi-process.js`）
@@ -220,8 +224,8 @@ reject（调用方 `.catch` 语义不变）。启动期预期错误（`pi 未运
 
 | channel | 参数 | 返回 |
 |---|---|---|
-| `pi:start` | `{cwd?}` | `{state, models, messages, cwd}` |
-| `pi:createSession` | `{cwd?}` | `{state, models, messages, cwd, sessionFile}`；**新开一个独立会话槽**（独立 pi 进程），不打断当前会话正在跑的回合 |
+| `pi:start` | `{cwd?}` | `{state, models, messages, cwd, ui}`；`ui` 是该会话缓存的扩展 widget/status 快照 |
+| `pi:createSession` | `{cwd?}` | `{state, models, messages, cwd, sessionFile, ui}`；**新开一个独立会话槽**（独立 pi 进程），不打断当前会话正在跑的回合 |
 | `pi:sessionPane` | `{sessionFile, cwd?}` | `{ok, state, messages, error?}`；确保该会话进程在跑（不改活动指针）并开始转发完整事件（并排窗格的首帧） |
 | `pi:unobserveSession` | `{sessionFile}` | `{ok}`；窗格关闭后停止转发完整事件，回到只发 `session_status` |
 | `pi:send` | RPC payload（可带 `sessionFile` 定向目标会话） | `data \| null` |

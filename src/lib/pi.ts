@@ -340,16 +340,22 @@ export type AgentProfile = {
   model: string;
 };
 
+export type UiSnapshot = {
+  widgets: Record<string, { lines: string[]; placement: "above" | "below" }>;
+  statuses: Record<string, string>;
+};
+
 export type PiBridge = {
   switchSession: (
     sessionFile: string,
     cwd?: string,
-  ) => Promise<{ ok: boolean; running?: boolean; error?: string }>;
+  ) => Promise<{ ok: boolean; running?: boolean; error?: string; ui?: UiSnapshot }>;
   start: (cwd?: string) => Promise<{
     state: Record<string, unknown> | null;
     models: ModelInfo[];
     messages: PiMessage[];
     cwd: string;
+    ui?: UiSnapshot;
   }>;
   // 新开一个独立会话槽（独立 pi 进程），不打断当前会话正在跑的回合。
   createSession: (cwd?: string) => Promise<{
@@ -358,6 +364,7 @@ export type PiBridge = {
     messages: PiMessage[];
     cwd: string;
     sessionFile: string | null;
+    ui?: UiSnapshot;
   }>;
   // 并排窗格：确保会话进程在跑并开始转发完整事件，返回首帧快照。
   sessionPane: (

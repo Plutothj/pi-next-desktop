@@ -570,6 +570,7 @@ safeHandle("pi:start", async (_e, { cwd, sessionFile = null } = {}) => {
       messages: messages?.data?.messages ?? [],
       cwd: resolved,
       sessionFile: assigned,
+      ui: pool.uiSnapshot(activeSession),
     };
   };
   // Serialise overlapping boots; the caller always gets the latest result.
@@ -619,6 +620,7 @@ safeHandle("pi:createSession", async (_e, { cwd } = {}) => {
       messages: messages?.data?.messages ?? [],
       cwd: resolved,
       sessionFile: assigned,
+      ui: pool.uiSnapshot(activeSession),
     };
   };
   const result = bootLock.then(run, run);
@@ -718,7 +720,11 @@ safeHandle("pi:switchSession", async (_e, { sessionFile, cwd } = {}) => {
     // 进程已被回收：按 --session 重新拉起（历史完整恢复）
     await startPi(cwd && fs.existsSync(cwd) ? cwd : os.homedir(), sessionFile);
   }
-  return { ok: true, running: pool.isRunning(sessionFile) };
+  return {
+    ok: true,
+    running: pool.isRunning(sessionFile),
+    ui: pool.uiSnapshot(sessionFile),
+  };
 });
 
 safeHandle("pi:send", async (_e, payload = {}) => {
