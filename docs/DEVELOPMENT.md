@@ -513,6 +513,36 @@ npm 包，照这个模式办，**不要指望 stage 脚本 vendor**（那是给 
 技能是"按需检索的领域提示词"：模型仅在相关任务上读到正文，不占常驻上下文，
 也不需要新增代码能力。frontmatter 只依赖 `name` / `description`（`config.js:readSkillMeta` 的解析约定）。
 
+### 7.11.1 计划模式（工具闸门 + 计划审批）
+
+**不是提示词方案。** 旧实现往用户消息前面拼 `PLAN_PREFIX` 只是"求模型别改文件"，没有强制力；
+现行实现是 `electron/plan-mode-extension.js` 生成到 `<agent>/extensions/plan-mode.ts`，用 pi 的三个
+机制做真闸门：
+
+1. **工具**：注册 `EnterPlanMode` / `ExitPlanMode`。模型可主动进入只读规划；`ExitPlanMode`
+   的 `plan` 参数就是用户审批时看到的完整计划正文。
+2. **`pi.on("tool_call")`**：计划模式开启时拦截所有非只读工具（`read/grep/glob/find/ls`、
+   `todo`、`ask_user_question`、`table` 的 `read` 放行；`write/edit/bash/table write/未知工具`
+   返回 `{block:true, reason}`），pi 会把它变成带原因的 tool error，模型能看懂并转向读代码。
+3. **`before_agent_start`**：开启时往 `systemPromptOptions.sections` 注入 `plan_mode` 区块
+   （名字必须匹配 `^[a-z][a-z0-9_-]*$`，写成 "Plan mode" 会报 *Invalid system prompt section name*）。
+
+**状态**：会话级 sidecar `<sessionFile>.plan-mode.json`。桌面端 `pi:getPlanMode` /
+`pi:setPlanMode` 写同一份文件，所以 UI 开关与模型主动 `EnterPlanMode` 共用事实；墙钟轮询
+（流式中 1.5s、切会话、回合结束）把它同步到 UI。
+
+**审批**：`ExitPlanMode` 用 `ctx.ui.confirm` 弹审批。主进程把 `confirm` 从原生 message box
+改成应用内卡片（`ExtensionDialog` 的 `confirm` 分支），用 `MessageResponse` 渲染 markdown 计划，
+按钮「拒绝 / 批准并开始实施」。拒绝后再用 `ctx.ui.editor` 收一次修改意见：有意见则作为 tool
+error 回给模型并**保持计划模式**，空意见则结束本回合。
+
+**文档**：批准后把最终 plan 原文写到 `<cwd>/.pi/plans/plan-<sessionId>.md`（与计划工作台同一目录，
+幂等覆盖、可在面板里打开），供实施阶段和 compact/resume 回看。
+
+> 与 ZCode 的差异：我们没有权限模式（build/edit/yolo），因此计划模式只做"只读 + 审批"；
+> 计划正文随 `ExitPlanMode` 工具输入传递，审批通过才落盘。
+
+
 ### 7.12 应用内更新
 
 `electron-updater` + GitHub Releases（`build.publish`）。状态机：

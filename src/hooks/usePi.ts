@@ -351,7 +351,10 @@ export function usePi() {
   // 先清掉本地弹窗再发答复：rpiv 这类扩展在收到答复后会立刻弹下一个对话框，
   // 若等 IPC 返回后才清，会把刚弹出的下一个框一起关掉（表现为"点确认没反应"）。
   const respondDialog = useCallback(
-    async (dialog: UiDialogRequest, values: { value?: string; cancelled?: boolean }) => {
+    async (
+      dialog: UiDialogRequest,
+      values: { value?: string; cancelled?: boolean; confirmed?: boolean },
+    ) => {
       setState((s) => (s.dialog?.id === dialog.id ? { ...s, dialog: null } : s));
       await window.pi.respondUi(dialog.id, values).catch(() => null);
     },

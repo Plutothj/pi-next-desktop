@@ -32,6 +32,7 @@ import { createSessionPool } from "./session-pool.js";
 import { registerSessionHandlers } from "./sessions.js";
 import { createTaskManager, installTermCli } from "./tasks.js";
 import { installHrSkills } from "./hr-skills.js";
+import { installPlanModeExtension } from "./plan-mode-extension.js";
 import { installTableExtension } from "./table-extension.js";
 import { installTodoExtension } from "./todo-extension.js";
 import { registerUpdater } from "./updater.js";
@@ -179,22 +180,19 @@ function stripAnsi(text) {
 
 // Dialog requests block pi until answered, so every one of them gets a reply.
 function handleExtensionUi(req) {
-  const reply = (values) => {
-    pool.write(activeSession, { type: "extension_ui_response", id: req.id, ...values });
-  };
-
   if (req.method === "confirm") {
-    dialog
-      .showMessageBox(win, {
-        type: "question",
-        title: req.title ?? "Pi",
-        message: req.title ?? "确认",
-        detail: req.message ?? "",
-        buttons: ["取消", "确认"],
-        defaultId: 1,
-        cancelId: 0,
-      })
-      .then(({ response }) => reply({ confirmed: response === 1 }));
+    // 走应用内卡片而不是系统 message box：计划审批要把整份 markdown 计划
+    // 展示给用户（ZCode 的计划审批也是输入框上方的卡片，而不是原生弹窗）。
+    pendingDialogs.add(req.id);
+    send({
+      type: "ui_dialog",
+      dialog: {
+        id: req.id,
+        method: "confirm",
+        title: req.title,
+        message: req.message,
+      },
+    });
     return;
   }
   if (req.method === "notify") {
@@ -656,6 +654,40 @@ safeHandle("pi:unobserveSession", (_e, { sessionFile } = {}) => {
   return { ok: pool.observe(file, false) };
 });
 
+// 计划模式：状态存在会话文件旁边的 sidecar（扩展每次 tool_call 读它做拦截），
+// 所以 UI 开关和模型主动 EnterPlanMode 共用一份事实，重启也不丢。
+function planFlagFile(sessionFile) {
+  const resolved = path.resolve(sessionFile);
+  const root = path.resolve(AGENT_DIR);
+  // 只允许写 agent 目录下的会话文件旁边，避免渲染层传任意路径做写入
+  if (resolved !== root && !resolved.startsWith(root + path.sep)) return null;
+  return `${resolved}.plan-mode.json`;
+}
+
+safeHandle("pi:getPlanMode", (_e, { sessionFile } = {}) => {
+  const file = planFlagFile(requireString(sessionFile, "sessionFile"));
+  if (!file) return { enabled: false };
+  try {
+    return { enabled: Boolean(JSON.parse(fs.readFileSync(file, "utf8")).enabled) };
+  } catch {
+    return { enabled: false };
+  }
+});
+
+safeHandle("pi:setPlanMode", (_e, { sessionFile, enabled } = {}) => {
+  const file = planFlagFile(requireString(sessionFile, "sessionFile"));
+  if (!file) return { ok: false, error: "无效会话路径" };
+  try {
+    fs.writeFileSync(
+      file,
+      `${JSON.stringify({ enabled: Boolean(enabled), updatedAt: Date.now() }, null, 2)}\n`,
+    );
+    return { ok: true, enabled: Boolean(enabled) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 // 切换界面显示的会话：只切活动指针（后台会话进程继续跑，不中断）。
 safeHandle("pi:switchSession", async (_e, { sessionFile, cwd } = {}) => {
   if (typeof sessionFile !== "string" || !sessionFile) return { ok: false, error: "缺少会话路径" };
@@ -868,6 +900,8 @@ app.whenReady().then(() => {
   // auto 虚拟模型扩展（模型选择器里的 pi-desktop/auto：low→最便宜，high→最强）
   installAutoRouter(AGENT_DIR);
   installTodoExtension(AGENT_DIR);
+  // 计划模式扩展：EnterPlanMode / ExitPlanMode 工具 + 只读工具闸门 + plan 文档
+  installPlanModeExtension(AGENT_DIR);
   // 表格工具扩展：让模型能读写带公式的 xlsx（SheetJS 随应用分发给扩展目录）
   installTableExtension(AGENT_DIR, path.join(import.meta.dirname, "..", "node_modules", "xlsx"));
   // HR 文案技能包（员工沟通 / 会议纪要 / 活动方案），随应用分发

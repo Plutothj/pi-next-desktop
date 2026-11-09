@@ -71,7 +71,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { useUpdater } from "@/hooks/useUpdater";
 import { expandAttachments } from "@/lib/attachments";
 import { lastAssistantTextOf, type PiMessage, textOf } from "@/lib/pi";
-import { PLAN_PREFIX, stripDirective } from "@/lib/promptPrefixes";
+import { stripDirective } from "@/lib/promptPrefixes";
 import { cn } from "@/lib/utils";
 
 const THINKING = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
@@ -109,6 +109,41 @@ function Shell() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [planMode, setPlanMode] = useState(false);
+  // 计划模式是会话级事实（扩展每次 tool_call 读会话旁路的 sidecar），
+  // 这里切会话/回合结束/流式中轮询把它同步到 UI（模型也能主动 EnterPlanMode）。
+  useEffect(() => {
+    const file = state.sessionFile;
+    if (!file) return;
+    let alive = true;
+    window.pi
+      .getPlanMode(file)
+      .then((r) => {
+        if (alive) setPlanMode(Boolean(r.enabled));
+      })
+      .catch(() => null);
+    return () => {
+      alive = false;
+    };
+  }, [state.sessionFile]);
+
+  useEffect(() => {
+    if (!state.isStreaming || !state.sessionFile) return;
+    const file = state.sessionFile;
+    const id = setInterval(() => {
+      window.pi
+        .getPlanMode(file)
+        .then((r) => setPlanMode(Boolean(r.enabled)))
+        .catch(() => null);
+    }, 1500);
+    return () => clearInterval(id);
+  }, [state.isStreaming, state.sessionFile]);
+
+  const togglePlanMode = useCallback(async () => {
+    const next = !planMode;
+    setPlanMode(next);
+    const file = state.sessionFile;
+    if (file) await window.pi.setPlanMode(file, next).catch(() => null);
+  }, [planMode, state.sessionFile]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -441,17 +476,15 @@ function Shell() {
         return;
       }
     }
-    const body = planMode ? PLAN_PREFIX + text : text;
-    // Always name a streamingBehavior: it only matters while pi is mid-run
-    // (where a missing one is rejected outright), and is ignored when idle.
-    // This keeps sends working even if our isStreaming flag lags reality.
-    prompt(extraText ? `${body}\n\n${extraText}` : body, images, behavior ?? "followUp");
+    // 计划模式不再往用户消息里拼话术：约束由 plan-mode 扩展注入系统提示 +
+    // tool_call 闸门实现，用户消息保持原文。
+    prompt(extraText ? `${text}\n\n${extraText}` : text, images, behavior ?? "followUp");
   };
 
   const localCommand = (name: string) => {
     if (name === "new") newSession();
     else if (name === "compact") compact();
-    else if (name === "plan") setPlanMode((v) => !v);
+    else if (name === "plan") void togglePlanMode();
   };
 
   // 编辑重发：fork 截断到此提问之前，原文预填进输入框并聚焦，改完 Enter 重发
@@ -521,6 +554,9 @@ function Shell() {
   useEffect(() => {
     if (splitPane && splitPane.file === state.sessionFile) setSplitPane(null);
   }, [splitPane, state.sessionFile]);
+
+  // 计划模式已有专门徽章/开关，不再重复渲染扩展的 status chip
+  const statusChips = Object.entries(state.statuses).filter(([key]) => key !== "plan");
 
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
@@ -714,7 +750,7 @@ function Shell() {
         <Chat onFork={handleFork} state={state} />
 
         <div className="mx-auto w-full max-w-3xl px-6 pb-4 lg:max-w-4xl xl:max-w-5xl 2xl:max-w-6xl min-[1800px]:max-w-7xl">
-          {git?.isRepo || Object.keys(state.statuses).length > 0 || dualChain.phase !== "idle" ? (
+          {git?.isRepo || statusChips.length > 0 || dualChain.phase !== "idle" ? (
             <div className="mb-1.5 flex items-center gap-2 px-1">
               {git?.isRepo ? (
                 <BranchPicker cwd={state.cwd} git={git} onSwitched={refreshGit} />
@@ -725,7 +761,7 @@ function Shell() {
                   {dualChain.phase === "planning" ? "规划中" : "执行中"} · {state.model?.name ?? ""}
                 </span>
               ) : null}
-              {Object.entries(state.statuses).map(([key, text]) => (
+              {statusChips.map(([key, text]) => (
                 <span
                   className="max-w-64 truncate rounded-md border bg-background/60 px-2 py-1 text-[11px] text-muted-foreground"
                   key={key}
@@ -747,7 +783,7 @@ function Shell() {
               onLocalCommand={localCommand}
               onStop={dualChain.stopAll}
               onSubmit={submit}
-              onTogglePlan={() => setPlanMode((v) => !v)}
+              onTogglePlan={() => void togglePlanMode()}
               planMode={planMode}
               queue={state.queue}
               streaming={state.isStreaming}

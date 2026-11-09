@@ -32,7 +32,7 @@ import type { CommandInfo, QueueState } from "@/lib/pi";
 export const LOCAL_COMMANDS = [
   { name: "new", description: "开始新会话" },
   { name: "compact", description: "压缩上下文" },
-  { name: "plan", description: "切换计划模式：只出方案不改文件" },
+  { name: "plan", description: "切换计划模式：只读探索，产出计划后经你批准" },
 ];
 
 type Suggestion =
@@ -288,9 +288,13 @@ export function Composer({
             <PromptInputButton
               className={cn("gap-1 text-xs", planMode && "text-primary")}
               onClick={onTogglePlan}
-              title={planMode ? "计划模式已开启" : "计划模式：只出方案，不改文件"}
+              title={
+                planMode
+                  ? "计划模式已开启：工具只读，模型产出计划后由你批准"
+                  : "计划模式：先只读探索、产出计划，经你批准后才开始改文件"
+              }
             >
-              {planMode ? "计划中" : "计划"}
+              {planMode ? "计划模式 · 只读" : "计划"}
             </PromptInputButton>
             <PromptInputButton
               className="text-xs"

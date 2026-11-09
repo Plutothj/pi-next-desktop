@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { MessageResponse } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -16,7 +17,7 @@ export function ExtensionDialog({
   dialog: UiDialogRequest | null;
   onRespond: (
     dialog: UiDialogRequest,
-    values: { value?: string; cancelled?: boolean },
+    values: { value?: string; cancelled?: boolean; confirmed?: boolean },
   ) => void;
 }) {
   const [text, setText] = useState("");
@@ -131,7 +132,31 @@ export function ExtensionDialog({
         </div>
       ) : null}
 
-      {dialog.method === "select" && !freeform ? null : (
+      {dialog.method === "confirm" ? (
+        <div className="max-h-[45vh] overflow-auto border-b px-3 py-2" data-plan-approval>
+          <MessageResponse className="chat-md text-xs">{dialog.message ?? ""}</MessageResponse>
+        </div>
+      ) : null}
+
+      {dialog.method === "confirm" ? (
+        <div className="flex justify-end gap-1.5 px-2 py-1.5">
+          <Button
+            className="h-7 px-3 text-xs"
+            onClick={() => onRespond(dialog, { confirmed: false })}
+            size="sm"
+            variant="ghost"
+          >
+            拒绝
+          </Button>
+          <Button
+            className="h-7 px-3 text-xs"
+            onClick={() => onRespond(dialog, { confirmed: true })}
+            size="sm"
+          >
+            批准并开始实施
+          </Button>
+        </div>
+      ) : dialog.method === "select" && !freeform ? null : (
         <div className="flex justify-end border-t px-2 py-1.5">
           <Button
             className="h-7 px-3 text-xs"

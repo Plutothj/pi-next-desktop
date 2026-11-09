@@ -149,11 +149,13 @@ export type UsageReport = {
 
 export type UiDialogRequest = {
   id: string;
-  method: "select" | "input" | "editor";
+  method: "select" | "input" | "editor" | "confirm";
   title?: string;
   options?: string[];
   placeholder?: string;
   prefill?: string;
+  /** confirm 的正文（计划审批时是完整 markdown 计划）。 */
+  message?: string;
 };
 
 export type GitStatus = {
@@ -368,6 +370,9 @@ export type PiBridge = {
     messages: PiMessage[];
   }>;
   unobserveSession: (sessionFile: string) => Promise<{ ok: boolean }>;
+  // 计划模式状态（会话文件旁的 sidecar，扩展侧每次 tool_call 实时读取）
+  getPlanMode: (sessionFile: string) => Promise<{ enabled: boolean }>;
+  setPlanMode: (sessionFile: string, enabled: boolean) => Promise<{ ok: boolean; enabled?: boolean; error?: string }>;
   send: (payload: Record<string, unknown>) => Promise<unknown>;
   pickFolder: () => Promise<string | null>;
   reveal: (target: string) => Promise<void>;
