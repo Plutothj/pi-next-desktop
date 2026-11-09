@@ -19,6 +19,11 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      # GitHub Releases CDN 近期对 electron-builder 的二进制下载频繁 504；
+      # 走 npmmirror 镜像，避免每个平台打包时卡在 winCodeSign / NSIS / dmgbuild。
+      ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+      ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
