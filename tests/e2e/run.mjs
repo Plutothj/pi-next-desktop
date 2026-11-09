@@ -57,6 +57,14 @@ function makeFixtureAgentDir() {
     path.join(dir, "settings.json"),
     JSON.stringify({ defaultProvider: "e2e", defaultModel: "e2e-model" }, null, 2),
   );
+  // 设置页技能面板在打开时只读一次 cfg；技能要在 boot 前就存在，
+  // 否则删除动线里看不到它（E2E 的删除技能检查会用到）。
+  const skillDir = path.join(dir, "skills", "e2e-demo-skill");
+  fs.mkdirSync(skillDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(skillDir, "SKILL.md"),
+    "---\nname: e2e-demo-skill\ndescription: E2E demo\n---\nbody\n",
+  );
   return dir;
 }
 
@@ -622,7 +630,68 @@ async function main() {
     if (!fs.existsSync(sessionPath)) throw new Error(`会话文件被误删: ${sessionPath}`);
   });
 
-  // 19. 文件预览：xlsx 网格 / docx 正文 / pdf canvas / 问 AI 预填
+  // 19. 删除技能：设置页里点垃圾桶 → 应用内确认框（叠在设置页之上）→ 真的删掉
+  await check("删除技能：应用内确认 + 目录真的删除", async () => {
+    // 技能目录在 fixture 启动时已创建（设置页 cfg 只在打开时读一次）
+    const skillDir = path.join(agentDir, "skills", "e2e-demo-skill");
+    if (!fs.existsSync(skillDir)) throw new Error("fixture 技能缺失");
+    await evaluate(
+      `(() => { const b = document.querySelector('aside button[title="技能"]'); if (!b) throw new Error("skills btn"); b.click(); return "ok"; })()`,
+    );
+    const rowExpr = `(() => {
+      const name = [...document.querySelectorAll('span')].find(s => s.textContent.trim() === 'e2e-demo-skill');
+      const row = name?.closest('div.flex.items-center');
+      return row ? true : null;
+    })()`;
+    try {
+      await waitForExpr(rowExpr, 15_000, "技能行");
+    } catch (err) {
+      const dump = await evaluate(
+        `JSON.stringify({
+          settings: [...document.querySelectorAll('button')].some(b => b.textContent.includes('返回工作区')),
+          spans: [...document.querySelectorAll('span')].map(s => s.textContent.trim()).filter(Boolean).slice(0, 40),
+        })`,
+      );
+      throw new Error(`${err.message}; dump=${dump}`);
+    }
+    await evaluate(
+      `(() => {
+        const name = [...document.querySelectorAll('span')].find(s => s.textContent.trim() === 'e2e-demo-skill');
+        const row = name.closest('div.flex.items-center');
+        const del = [...row.querySelectorAll('button')].find(b => !b.textContent.trim());
+        if (!del) throw new Error("delete btn");
+        del.click();
+        return "ok";
+      })()`,
+    );
+    const dialogText = await waitForExpr(
+      `(() => {
+        const d = [...document.querySelectorAll('[data-slot="dialog-content"]')].at(-1);
+        return d && d.textContent.includes('删除技能') ? d.textContent : null;
+      })()`,
+      5_000,
+      "技能确认框",
+    );
+    if (!String(dialogText).includes("e2e-demo-skill")) throw new Error(`确认框内容异常: ${dialogText}`);
+    await evaluate(
+      `(() => {
+        const d = [...document.querySelectorAll('[data-slot="dialog-content"]')].at(-1);
+        const btn = [...d.querySelectorAll('button')].find(b => b.textContent.trim() === '删除');
+        if (!btn) throw new Error("confirm btn");
+        btn.click();
+        return "ok";
+      })()`,
+    );
+    for (let i = 0; i < 40 && fs.existsSync(skillDir); i++) await sleep(150);
+    if (fs.existsSync(skillDir)) throw new Error(`技能目录未删除: ${skillDir}`);
+    // 收拾：回到工作区，避免影响后续侧栏动线
+    await evaluate(
+      `(() => { const b = [...document.querySelectorAll('button')].find(b => b.textContent.includes('返回工作区')); b?.click(); return "ok"; })()`,
+    );
+    await sleep(300);
+  });
+
+  // 20. 文件预览：xlsx 网格 / docx 正文 / pdf canvas / 问 AI 预填
   //     fixture 项目里放三种样例文件，走真实 UI 动线（文件树 → 点开）
   await check("文件预览（xlsx/docx/pdf）+ 问 AI", async () => {
     const work = path.join(agentDir, "..", `pi-e2e-preview-${process.pid}`);
@@ -708,7 +777,7 @@ async function main() {
     fs.rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
-  // 20. 侧栏折叠：收起后消失、头部出现展开按钮、再展开回来
+  // 21. 侧栏折叠：收起后消失、头部出现展开按钮、再展开回来
   await check("侧栏折叠/展开", async () => {
     // 注意：右侧面板也是 <aside>，这里只认左侧栏（含「项目」标题的那块）
     const hasSidebar = () => evaluate("Boolean(document.querySelector('aside.w-64'))");
