@@ -361,7 +361,7 @@ export function usePi() {
     [],
   );
 
-  const prompt = useCallback(
+  const buildPromptPayload = useCallback(
     async (text: string, images?: FileUIPart[], behavior?: "steer" | "followUp") => {
       const payload: Record<string, unknown> = { type: "prompt", message: text };
       // While streaming, pi routes the message by streamingBehavior instead of
@@ -386,9 +386,26 @@ export function usePi() {
           }),
         );
       }
-      return send(payload);
+      return payload;
     },
-    [send],
+    [],
+  );
+
+  const prompt = useCallback(
+    async (text: string, images?: FileUIPart[], behavior?: "steer" | "followUp") =>
+      send(await buildPromptPayload(text, images, behavior)),
+    [send, buildPromptPayload],
+  );
+
+  // 定向发送：双模型链路可能在后台会话里继续跑，不能依赖"当前活动会话"。
+  const promptFor = useCallback(
+    async (
+      sessionFile: string,
+      text: string,
+      images?: FileUIPart[],
+      behavior?: "steer" | "followUp",
+    ) => send({ ...(await buildPromptPayload(text, images, behavior)), sessionFile }),
+    [send, buildPromptPayload],
   );
 
   const renameSession = useCallback(
@@ -512,6 +529,22 @@ export function usePi() {
     async (model: ModelInfo) => {
       setState((s) => ({ ...s, model }));
       return send({ type: "set_model", provider: model.provider, modelId: model.id });
+    },
+    [send],
+  );
+
+  // 定向切模型：后台会话的双模型链路只改自己的会话，不碰当前活动会话。
+  // 目标正好是活动会话时同步更新 UI（否则 picker 会停在执行模型上）。
+  const switchModelFor = useCallback(
+    async (sessionFile: string, model: ModelInfo) => {
+      const res = await send({
+        type: "set_model",
+        provider: model.provider,
+        modelId: model.id,
+        sessionFile,
+      });
+      if (res) setState((s) => (s.sessionFile === sessionFile ? { ...s, model } : s));
+      return res;
     },
     [send],
   );
@@ -641,11 +674,13 @@ export function usePi() {
     boot,
     openProject,
     prompt,
+    promptFor,
     send,
     clearError,
     respondDialog,
     setModel,
     switchModel,
+    switchModelFor,
     setThinking,
     newSession,
     openSession,

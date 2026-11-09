@@ -648,6 +648,16 @@ safeHandle("pi:sessionPane", async (_e, { sessionFile, cwd } = {}) => {
   };
 });
 
+// 并排窗格/后台链路用的只读快照：不发事件、不改观察标记。
+safeHandle("pi:sessionSnapshot", async (_e, { sessionFile } = {}) => {
+  const file = requireString(sessionFile, "sessionFile");
+  const [st, msgs] = await Promise.all([
+    pool.command(file, { type: "get_state" }).catch(() => null),
+    pool.command(file, { type: "get_messages" }).catch(() => null),
+  ]);
+  return { state: st?.data ?? null, messages: msgs?.data?.messages ?? [] };
+});
+
 // 窗格关闭/失焦后停止观察：后台事件回到"只发状态"的静默模式。
 safeHandle("pi:unobserveSession", (_e, { sessionFile } = {}) => {
   const file = requireString(sessionFile, "sessionFile");

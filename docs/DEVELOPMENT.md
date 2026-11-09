@@ -372,7 +372,8 @@ React 处理器上的拖放触发默认打开文件）。
 - `/` 命令、`@` 文件引用弹层（组标题、目录灰显、失焦关闭）
 - 附件：粘贴/拖拽/`+` 按钮；图片转 base64 随 prompt 发送
 - 输入框上方：分支 chip、扩展状态 chip、双模型阶段 chip
-- 输入框下方：用量环、双模型按钮、模型选择器（锚定弹层，非模态）、思考等级、计划模式、附件、停止/排队/发送
+- 输入框下方：用量环、双模型按钮、**规划模型 chip**（开启双模型时显示 planner 名称，点击打开配置；右侧模型是执行模型）、模型选择器（锚定弹层，非模态）、思考等级、计划模式、附件、停止/排队/发送
+- 工具栏宽度不够时自动换行（`PromptInputTools` 加 `flex-wrap`），计划模式按钮用短标签「计划中」，避免与思考等级/模型选择器重叠
 
 ### 7.4 上下文用量
 
@@ -419,28 +420,33 @@ pi-bg --list | --output ID | --kill ID | --wait ID [--timeout 秒]
 
 ### 7.8 双模型（自动链式）
 
-配置（`localStorage: pi-desktop-dual-model`）：`{enabled, planner, executor}`。
+配置（`localStorage: pi-desktop-dual-model:<sessionFile>`，**按会话独立**）：`{enabled, planner, executor}`。
+旧版本的全局键只迁移给升级后打开的第一个会话；新会话默认单模型，改动 B 会话不会影响 A。
+写配置时同时更新 `…-defaults`（记住上次的规划/执行模型引用）。
 
 ```
 submit（enabled && idle && 未流式）
-  → 记录原模型与原 sessionFile
-  → setPlanMode(sessionFile, true, autoApprove = 用户原本没开计划模式)
-  → switchModel(planner)（只改实时会话，不写默认设置）
-  → prompt(用户原文, files, followUp)   // 约束来自 plan-mode 扩展，不拼话术
-规划轮 settle（agent_settled 之后 isStreaming=false）
+  → 记录原模型、原 sessionFile、executor（全部进 chainRef，之后不再读活动会话的配置）
+  → setPlanMode(sessionFile, true, autoApprove = 用户原本没开计划模式, chain=true)
+  → switchModelFor(sessionFile, planner)（定向：只改目标会话，不碰活动会话）
+  → promptFor(sessionFile, 用户原文, files, followUp)   // 约束来自 plan-mode 扩展
+按 chain 自己会话的 running 状态判 settle（用户切到别的会话也继续）
+  → 用 pi:sessionSnapshot(file) 读该会话消息（不订阅）
   → ExitPlanMode 被用户拒绝（toolResult isError）→ reset(restore, keepPlan)：
     保持计划模式、恢复原模型、不进入执行
   → 取 ExitPlanMode 的 toolResult details.planFile（autoApprove 下已落盘）
     没有工具结果则把最后一段正文写 <cwd>/.pi/plans/plan-<时间戳>.md 兜底
-  → setPlanMode(false) 关闸 → switchModel(executor)
-  → prompt(【执行阶段】… + 方案文档：<path>，followUp)
-执行轮 settle → reset → 关掉计划模式并恢复原模型
+  → setPlanMode(false) 关闸 → switchModelFor(file, executor)
+  → promptFor(file, 【执行阶段】… + 方案文档：<path>, followUp)
+执行轮 settle → reset → 关掉计划模式并恢复原会话的原模型
 ```
 
 `autoApprove` 只给自动链路用：`ExitPlanMode` 不弹审批，但**保持只读闸门到本回合结束**，
 tool 结果明确要求规划模型停手；执行模型由链路切换后接手。手动计划模式仍然走审批卡片。
+链路的一切命令都用 `sessionFile` 定向（`pi:send` / `switchModelFor` / `promptFor`），
+所以开新会话、用单模型、甚至改 B 会话的双模型配置都不会中断或污染 A 的回合。
 
-护栏：`started` 标志避免「尚未开始就判定结束」；停止按钮先中止链条再 `abort`；
+护栏：`started` 标志避免「尚未开始就判定结束」；停止按钮先中止链条再定向 `abort`；
 配置缺模型时回退普通发送，不吞消息。
 
 ### 7.9 模型与思考等级持久化

@@ -370,6 +370,11 @@ export type PiBridge = {
     messages: PiMessage[];
   }>;
   unobserveSession: (sessionFile: string) => Promise<{ ok: boolean }>;
+  // 只读快照（不订阅事件）：后台双模型链路 settle 后读取该会话的消息。
+  sessionSnapshot: (sessionFile: string) => Promise<{
+    state: Record<string, unknown> | null;
+    messages: PiMessage[];
+  }>;
   // 计划模式状态（会话文件旁的 sidecar，扩展侧每次 tool_call 实时读取）
   getPlanMode: (sessionFile: string) => Promise<{ enabled: boolean }>;
   setPlanMode: (

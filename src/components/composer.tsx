@@ -283,7 +283,7 @@ export function Composer({
           />
         </PromptInputBody>
         <PromptInputFooter className="px-2 pb-2">
-          <PromptInputTools>
+          <PromptInputTools className="min-w-0 flex-1 flex-wrap">
             {children}
             <PromptInputButton
               className={cn("gap-1 text-xs", planMode && "text-primary")}
@@ -294,7 +294,7 @@ export function Composer({
                   : "计划模式：先只读探索、产出计划，经你批准后才开始改文件"
               }
             >
-              {planMode ? "计划模式 · 只读" : "计划"}
+              {planMode ? "计划中" : "计划"}
             </PromptInputButton>
             <PromptInputButton
               className="text-xs"

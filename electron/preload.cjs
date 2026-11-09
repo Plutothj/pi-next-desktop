@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld("pi", {
   start: (cwd, sessionFile) => ipcRenderer.invoke("pi:start", { cwd, sessionFile }),
   createSession: (cwd) => ipcRenderer.invoke("pi:createSession", { cwd }),
   sessionPane: (sessionFile, cwd) => ipcRenderer.invoke("pi:sessionPane", { sessionFile, cwd }),
+  sessionSnapshot: (sessionFile) => ipcRenderer.invoke("pi:sessionSnapshot", { sessionFile }),
   unobserveSession: (sessionFile) => ipcRenderer.invoke("pi:unobserveSession", { sessionFile }),
   getPlanMode: (sessionFile) => ipcRenderer.invoke("pi:getPlanMode", { sessionFile }),
   setPlanMode: (sessionFile, enabled, autoApprove, chain) =>

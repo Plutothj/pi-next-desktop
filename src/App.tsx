@@ -90,11 +90,13 @@ function Shell() {
     boot,
     openProject,
     prompt,
+    promptFor,
     send,
     clearError,
     respondDialog,
     setModel,
     switchModel,
+    switchModelFor,
     setThinking,
     newSession,
     openSession,
@@ -150,7 +152,7 @@ function Shell() {
   // 并排窗格：右栏显示另一个会话的实时转录（只读），点聚焦互换。
   const [splitPane, setSplitPane] = useState<{ file: string; cwd?: string } | null>(null);
   const [dualOpen, setDualOpen] = useState(false);
-  const dual = useDualModel();
+  const dual = useDualModel(state.sessionFile);
   // 每回合结束 +1：让文件面板在 AI 改写文件后自动重读预览
   const [previewTick, setPreviewTick] = useState(0);
   const wasStreaming = useRef(false);
@@ -158,7 +160,7 @@ function Shell() {
     if (wasStreaming.current && !state.isStreaming) setPreviewTick((n) => n + 1);
     wasStreaming.current = state.isStreaming;
   }, [state.isStreaming]);
-  const dualChain = useDualModelChain({ dual, state, switchModel, prompt, send });
+  const dualChain = useDualModelChain({ state, promptFor, switchModelFor, send });
   const updater = useUpdater();
   const { theme, toggle: toggleTheme } = useTheme();
   const [restartDismissed, setRestartDismissed] = useState<string | null>(null);
@@ -473,7 +475,7 @@ function Shell() {
       const planner = dual.find(state.models, dual.config.planner);
       const executor = dual.find(state.models, dual.config.executor);
       if (planner && executor) {
-        dualChain.start(text, images, planner);
+        dualChain.start(text, images, planner, executor);
         return;
       }
     }
@@ -561,6 +563,9 @@ function Shell() {
 
   // 计划模式已有专门徽章/开关，不再重复渲染扩展的 status chip
   const statusChips = Object.entries(state.statuses).filter(([key]) => key !== "plan");
+  // 后台会话的双模型链路不把"规划中/执行中"徽章显示在别的会话上
+  const chainHere = dualChain.phase !== "idle" && dualChain.sessionFile === state.sessionFile;
+  const plannerModel = dual.find(state.models, dual.config.planner);
 
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
@@ -754,12 +759,12 @@ function Shell() {
         <Chat onFork={handleFork} state={state} />
 
         <div className="mx-auto w-full max-w-3xl px-6 pb-4 lg:max-w-4xl xl:max-w-5xl 2xl:max-w-6xl min-[1800px]:max-w-7xl">
-          {git?.isRepo || statusChips.length > 0 || dualChain.phase !== "idle" ? (
+          {git?.isRepo || statusChips.length > 0 || chainHere ? (
             <div className="mb-1.5 flex items-center gap-2 px-1">
               {git?.isRepo ? (
                 <BranchPicker cwd={state.cwd} git={git} onSwitched={refreshGit} />
               ) : null}
-              {dualChain.phase !== "idle" ? (
+              {chainHere ? (
                 <span className="flex items-center gap-1 rounded-md border bg-background/60 px-2 py-1 text-[11px] text-primary">
                   <WorkflowIcon className="size-3" />
                   {dualChain.phase === "planning" ? "规划中" : "执行中"} · {state.model?.name ?? ""}
@@ -801,6 +806,19 @@ function Shell() {
                 <WorkflowIcon className="size-3.5" />
                 {dual.config.enabled ? "双模型" : "单模型"}
               </PromptInputButton>
+              {dual.config.enabled ? (
+                <PromptInputButton
+                  className="gap-1 text-xs text-muted-foreground"
+                  onClick={() => setDualOpen(true)}
+                  title="规划模型（只出方案）；右侧模型是执行模型，点此修改双模型配置"
+                >
+                  <WorkflowIcon className="size-3.5" />
+                  规划
+                  <span className="max-w-24 truncate font-medium text-foreground/80">
+                    {plannerModel?.name ?? "未选"}
+                  </span>
+                </PromptInputButton>
+              ) : null}
               <ModelPicker
                 model={state.model}
                 models={state.models}

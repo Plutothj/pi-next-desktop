@@ -1,135 +1,151 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FileUIPart } from "ai";
 import { DUAL_EXEC_PREFIX } from "@/lib/promptPrefixes";
-import { lastAssistantTextOf, type ModelInfo } from "@/lib/pi";
+import { lastAssistantTextOf, type ModelInfo, type PiMessage } from "@/lib/pi";
 import type { State } from "@/hooks/usePi";
-import type { useDualModel } from "@/hooks/useDualModel";
 
 type Phase = "idle" | "planning" | "executing";
 
-type PromptFn = (
+type PromptForFn = (
+  sessionFile: string,
   text: string,
   files?: FileUIPart[],
   behavior?: "steer" | "followUp",
 ) => Promise<unknown>;
 
 /**
- * Orchestrates the plan→execute chain: a fresh task runs the planner
- * read-only, then switches to the executor once planning settles and restores
- * the user's model afterwards. Stopping aborts the chain; switching sessions
- * cancels it without touching the new session's model.
+ * Orchestrates the plan→execute chain inside ONE session. It uses targeted
+ * prompts/model switches, so switching to another session (or changing that
+ * session's dual-model setting) never redirects or cancels the chain.
  */
 export function useDualModelChain({
-  dual,
   state,
-  switchModel,
-  prompt,
+  promptFor,
+  switchModelFor,
   send,
 }: {
-  dual: ReturnType<typeof useDualModel>;
   state: State;
-  switchModel: (model: ModelInfo) => Promise<unknown>;
-  prompt: PromptFn;
+  promptFor: PromptForFn;
+  switchModelFor: (sessionFile: string, model: ModelInfo) => Promise<unknown>;
   send: (payload: Record<string, unknown>) => Promise<unknown>;
 }) {
   const [phase, setPhase] = useState<Phase>("idle");
+  const [chainSession, setChainSession] = useState<string | undefined>();
   const chainRef = useRef<{
     phase: Phase;
     started: boolean;
+    settling?: boolean;
     original?: ModelInfo;
     sessionFile?: string;
+    cwd?: string;
     planTouched?: boolean;
+    executor?: ModelInfo;
   }>({ phase: "idle", started: false });
 
-  // Ends the chain; restores the user's model unless aborted by a session
-  // switch (where the model belongs to the new session). keepPlan 用于计划被
-  // 用户拒绝的场景：保持计划模式，让用户继续修改方案。
+  // Ends the chain; restores the model on the chain's own session, not on
+  // whichever session the user happens to be looking at now.
   const reset = useCallback(
     async (restore = true, keepPlan = false) => {
       const chain = chainRef.current;
       chainRef.current = { phase: "idle", started: false };
       setPhase("idle");
+      setChainSession(undefined);
       if (!keepPlan && chain.planTouched && chain.sessionFile) {
         await window.pi.setPlanMode(chain.sessionFile, false, false).catch(() => null);
       }
-      if (restore && chain.original) await switchModel(chain.original);
+      if (restore && chain.original && chain.sessionFile) {
+        await switchModelFor(chain.sessionFile, chain.original);
+      }
     },
-    [switchModel],
+    [switchModelFor],
   );
 
   const start = useCallback(
-    async (text: string, files: FileUIPart[] | undefined, planner: ModelInfo) => {
+    async (
+      text: string,
+      files: FileUIPart[] | undefined,
+      planner: ModelInfo,
+      executor: ModelInfo,
+    ) => {
       const file = state.sessionFile;
+      if (!file) return;
       let planTouched = false;
       // 规划阶段用真正的计划模式：只读工具闸门 + 系统提示要求用 ExitPlanMode
       // 交计划。autoApprove 仅当用户没手动开计划模式时启用（双模型是自动链路）。
-      if (file) {
-        const before = await window.pi.getPlanMode(file).catch(() => null);
-        const autoApprove = !before?.enabled;
-        const applied = await window.pi.setPlanMode(file, true, autoApprove, true).catch(() => null);
-        planTouched = Boolean(applied?.ok);
-      }
+      const before = await window.pi.getPlanMode(file).catch(() => null);
+      const autoApprove = !before?.enabled;
+      const applied = await window.pi.setPlanMode(file, true, autoApprove, true).catch(() => null);
+      planTouched = Boolean(applied?.ok);
+
       chainRef.current = {
         phase: "planning",
         started: false,
         original: state.model,
         sessionFile: file,
+        cwd: state.cwd,
         planTouched,
+        executor,
       };
       setPhase("planning");
-      const switched = await switchModel(planner);
+      setChainSession(file);
+
+      const switched = await switchModelFor(file, planner);
       if (!switched) {
         await reset();
         return;
       }
-      // 不再往用户消息里拼"规划阶段"话术：约束来自 plan-mode 扩展。
-      const res = await prompt(text, files, "followUp");
+      // 不拼"规划阶段"话术：约束来自 plan-mode 扩展。
+      const res = await promptFor(file, text, files, "followUp");
       if (!res) await reset();
-      // The executor is looked up again when planning settles (config may change).
     },
-    [state.model, state.sessionFile, switchModel, prompt, reset],
+    [state.model, state.sessionFile, state.cwd, switchModelFor, promptFor, reset],
   );
 
-  // Advance the chain when a phase's run settles.
+  // Advance when the chain's own session settles, even while the user looks
+  // at a different session (runningSessions carries background status).
   useEffect(() => {
     const chain = chainRef.current;
-    if (chain.phase === "idle") return;
-    if (state.isStreaming) {
+    if (chain.phase === "idle" || !chain.sessionFile) return;
+    const file = chain.sessionFile;
+    const running =
+      Boolean(state.runningSessions[file]) || (state.sessionFile === file && state.isStreaming);
+    if (running) {
       chain.started = true;
       return;
     }
-    if (!chain.started) return;
-    if (chain.sessionFile !== state.sessionFile) {
-      reset(false);
-      return;
-    }
-    if (chain.phase === "planning") {
-      const executor = dual.find(state.models, dual.config.executor);
-      if (!executor) {
-        reset();
-        return;
-      }
-      // 规划模型提交的计划被用户拒绝：保持计划模式，恢复原模型，不进入执行。
-      const planResult = [...state.messages]
-        .reverse()
-        .find((m) => m.role === "toolResult" && m.toolName === "ExitPlanMode");
-      if (planResult?.isError) {
-        void reset(true, true);
-        return;
-      }
+    if (!chain.started || chain.settling) return;
+    chain.settling = true;
 
-      chain.phase = "executing";
-      chain.started = false;
-      setPhase("executing");
-      void (async () => {
+    void (async () => {
+      if (chain.phase === "planning") {
+        const snapshot = await window.pi.sessionSnapshot(file).catch(() => null);
+        const messages = (snapshot?.messages ?? []) as PiMessage[];
+        // 规划模型提交的计划被用户拒绝：保持计划模式，恢复原模型，不进入执行。
+        const planResult = [...messages]
+          .reverse()
+          .find((m) => m.role === "toolResult" && m.toolName === "ExitPlanMode");
+        if (planResult?.isError) {
+          await reset(true, true);
+          return;
+        }
+        const executor = chain.executor;
+        if (!executor) {
+          await reset();
+          return;
+        }
+        chain.phase = "executing";
+        chain.started = false;
+        chain.settling = false;
+        setPhase("executing");
+
         const details = planResult?.details as { plan?: string; planFile?: string } | undefined;
         let planFile = details?.planFile ?? "";
         if (!planFile) {
           // 规划模型没用 ExitPlanMode：把最后一段正文落成文档做兜底。
-          const planText = details?.plan || lastAssistantTextOf(state.messages);
+          const planText = details?.plan || lastAssistantTextOf(messages);
           const saved = planText
             ? await window.pi.plans
-                .save(state.cwd, `# 执行方案\n\n${planText}\n`)
+                .save(chain.cwd ?? "", `# 执行方案\n\n${planText}\n`)
                 .catch(() => null)
             : null;
           if (saved?.ok && saved.path) planFile = saved.path;
@@ -139,36 +155,35 @@ export function useDualModelChain({
           return;
         }
         // 关闭规划闸门后执行模型才能写文件 / 跑命令。
-        if (chain.sessionFile) {
-          await window.pi.setPlanMode(chain.sessionFile, false, false).catch(() => null);
-        }
+        await window.pi.setPlanMode(file, false, false).catch(() => null);
         const directive = `${DUAL_EXEC_PREFIX}\n方案文档：${planFile}（开始前先读取该文件，按它逐项实施）。`;
-        const switched = await switchModel(executor);
+        const switched = await switchModelFor(file, executor);
         if (!switched) {
           await reset();
           return;
         }
-        const res = await prompt(directive, undefined, "followUp");
+        const res = await promptFor(file, directive, undefined, "followUp");
         if (!res) await reset();
-      })();
-    } else {
-      reset();
-    }
+        return;
+      }
+
+      // execution settled
+      await reset();
+    })();
   }, [
-    state.isStreaming, 
-    state.sessionFile, 
-    state.models, 
-    dual.config, 
-    dual.find, 
-    switchModel, 
-    prompt, 
-    reset, state.messages, state.cwd
+    state.isStreaming,
+    state.sessionFile,
+    state.runningSessions,
+    promptFor,
+    switchModelFor,
+    reset,
   ]);
 
   const stopAll = useCallback(() => {
-    if (chainRef.current.phase !== "idle") reset();
-    send({ type: "abort" });
+    const file = chainRef.current.sessionFile;
+    if (chainRef.current.phase !== "idle") void reset();
+    send(file ? { type: "abort", sessionFile: file } : { type: "abort" });
   }, [reset, send]);
 
-  return { phase, start, reset, stopAll };
+  return { phase, sessionFile: chainSession, start, reset, stopAll };
 }
