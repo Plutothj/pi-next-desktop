@@ -36,9 +36,20 @@ export function RemoteDialog({
 
   const urls = useMemo(() => {
     const found = notice?.message.match(/https:\/\/[^\s<>"')]+/gu) ?? [];
-    return [...new Set(found)];
+    // 只认 pi-mobile 的配对链接（token 在 fragment 的 #p= 里）；别的扩展
+    // （比如 pi-memory 的 qmd 提示）也会带 https 链接，不能拿来生成二维码
+    return [...new Set(found.filter((url) => /#p=|\/pair(?:#|\?|$)/i.test(url)))];
   }, [notice?.message]);
-  const primary = urls.find((url) => url.includes("pair")) ?? urls[0];
+  const primary = urls[0];
+
+  const remoteNotice = useMemo(() => {
+    const message = notice?.message ?? "";
+    if (!message.trim()) return "";
+    // 远程面板只展示远程相关提示，别把其他扩展的噪音（qmd/memory_search）带进来
+    if (/qmd|memory_search|install qmd/i.test(message)) return "";
+    if (!/#p=|\/pair|pi-mobile|Tailscale|\/remote|HTTPS/i.test(message)) return "";
+    return message;
+  }, [notice?.message]);
 
   useEffect(() => {
     let alive = true;
@@ -111,9 +122,9 @@ export function RemoteDialog({
           </div>
         ) : null}
 
-        {notice?.message ? (
+        {remoteNotice ? (
           <div className="max-h-40 overflow-auto whitespace-pre-wrap rounded-lg border bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
-            {notice.message}
+            {remoteNotice}
           </div>
         ) : null}
 

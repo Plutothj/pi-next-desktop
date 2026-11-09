@@ -571,8 +571,9 @@ error 回给模型并**保持计划模式**，空意见则结束本回合。
 - **入口**：标题栏手机图标 → `RemoteDialog`。命令以 prompt 文本发给当前会话
   （`/remote`、`/remote pair|devices|settings|off`），pi 会先执行扩展命令，不会进入模型回合。
 - **配对信息**：pi-mobile 在 RPC 模式下用 `ui_notify` 回传 HTTPS 配对链接（TUI 才画终端二维码）。
-  main 清洗 ANSI 后存进 `usePi.state.notice`；`RemoteDialog` 提取 https URL，用 `qrcode`
-  在应用内生成二维码 + 复制/打开。
+  main 清洗 ANSI 后存进 `usePi.state.notice`；`RemoteDialog` **只接受带 `#p=` / `/pair`
+  token 的 https URL** 生成二维码，并过滤掉其他扩展的无关通知（例如 pi-memory 的
+  `memory_search requires qmd` 提示也带 https 链接，不能拿来当配对二维码——踩过）。
 - **状态**：pi-mobile 的 `setStatus("remote", ...)` 进入 `state.statuses.remote`，标题按钮高亮；
   切会话/后台会话的 status/widget 走 7.11 的 `uiSnapshot`（返回前 `cleanUiSnapshot` 去 ANSI）。
 - **HTTPS**：手机只接受 HTTPS。推荐 Tailscale（电脑和手机同一 tailnet，`/remote` 自动配
