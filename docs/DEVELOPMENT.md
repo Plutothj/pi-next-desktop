@@ -120,6 +120,17 @@ pi.stop() → 清理挂起对话框 → resolveRuntime()
 `pi:start` 随后轮询 `get_state`（最多 40 × 400ms，直到出现 `model`），再取
 `get_available_models` / `get_messages` 返回渲染层；渲染层再拉 `get_commands`、会话、项目。
 
+### 3.2.1 多会话并行（`session-pool.js`）
+
+- **每个会话文件一个 pi 进程**；切会话只切"活动指针"，后台进程继续跑（pi 的
+  `switch_session` / `new_session` 会 teardown 当前回合，不用于切视图）。
+- `pi:createSession` 用临时键 `__new-*` 开新槽（`ensure(key, cwd, { fresh: true })` 不传
+  `--session`），等 pi 分配 sessionFile 后 `rebind` 到真实路径——**新建会话不会顶掉正在跑的会话**。
+- 后台会话的完整事件不转发（避免污染活动视图），只发轻量 `session_status`
+  （`{sessionFile, isStreaming, alive}`）：渲染层的 `runningSessions` 据此驱动侧栏运行点与
+  后台完成通知。
+- 空闲回收仍按 10 分钟；切回被回收的会话时 `switchSession` 会按 `--session` 重新拉起。
+
 ### 3.3 PiProcess（`pi-process.js`）
 
 - 一个子进程、`pending: Map<id, {resolve,reject}>` 做请求/响应关联
@@ -207,7 +218,8 @@ reject（调用方 `.catch` 语义不变）。启动期预期错误（`pi 未运
 | channel | 参数 | 返回 |
 |---|---|---|
 | `pi:start` | `{cwd?}` | `{state, models, messages, cwd}` |
-| `pi:send` | RPC payload | `data \| null` |
+| `pi:createSession` | `{cwd?}` | `{state, models, messages, cwd, sessionFile}`；**新开一个独立会话槽**（独立 pi 进程），不打断当前会话正在跑的回合 |
+| `pi:send` | RPC payload（可带 `sessionFile` 定向目标会话） | `data \| null` |
 | `pi:pickFolder` | – | `path \| null` |
 | `pi:reveal` | `path` | `shell.openPath` 结果 |
 | `pi:uiRespond` | `{id, value?, cancelled?, confirmed?}` | `{ok,error?}`（非 pending 请求拒绝） |

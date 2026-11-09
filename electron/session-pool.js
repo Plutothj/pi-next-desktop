@@ -15,7 +15,7 @@ export function createSessionPool({ send, makeEnv, buildArgs, activeKey, idleMs 
 
   const isActive = (file) => activeKey() === file;
 
-  async function ensure(file, cwd, { active = false } = {}) {
+  async function ensure(file, cwd, { active = false, fresh = false } = {}) {
     const existing = slots.get(file);
     if (existing?.proc.running) {
       existing.lastActive = Date.now();
@@ -23,7 +23,7 @@ export function createSessionPool({ send, makeEnv, buildArgs, activeKey, idleMs 
       return existing;
     }
 
-    const { runtime, argv } = await buildArgs(file);
+    const { runtime, argv } = await buildArgs(fresh ? null : file);
     const slot = {
       id: `s${++seq}`,
       file,
@@ -31,6 +31,7 @@ export function createSessionPool({ send, makeEnv, buildArgs, activeKey, idleMs 
       proc: null,
       lastActive: Date.now(),
       pendingDialog: null,
+      streaming: false,
     };
     const proc = new PiProcess({
       onRecord(rec) {
@@ -42,11 +43,26 @@ export function createSessionPool({ send, makeEnv, buildArgs, activeKey, idleMs 
             if (!isActive(slot.file)) return;
           }
         }
-        if (!isActive(slot.file)) return; // 后台会话：静默，不污染前台视图
+        if (rec.type === "agent_start") slot.streaming = true;
+        else if (rec.type === "agent_settled" || rec.type === "agent_end") slot.streaming = false;
+        if (!isActive(slot.file)) {
+          // 后台会话：完整事件不污染前台视图，但状态变化要让渲染层看见
+          // （侧栏运行指示 / 完成通知依赖它）。
+          if (rec.type === "agent_start" || rec.type === "agent_settled" || rec.type === "agent_end") {
+            send({ type: "session_status", sessionFile: slot.file, isStreaming: slot.streaming });
+          }
+          return;
+        }
         send({ ...rec, sessionFile: slot.file });
       },
       onExit({ code, signal }) {
-        if (isActive(slot.file)) send({ type: "child_exit", code, signal, sessionFile: slot.file });
+        if (isActive(slot.file)) {
+          send({ type: "child_exit", code, signal, sessionFile: slot.file });
+        } else {
+          // 后台会话进程退出：清掉运行指示，别让侧栏一直转圈
+          slot.streaming = false;
+          send({ type: "session_status", sessionFile: slot.file, isStreaming: false, alive: false });
+        }
         // 用 slot.file（rebind 后的最新键），闭包里的 file 是 ensure 时的旧键
         if (slots.get(slot.file) === slot) slots.delete(slot.file);
       },

@@ -45,6 +45,8 @@ export type State = {
   widgets: Record<string, { lines: string[]; placement: "above" | "below" }>;
   /** Blocking extension dialog (select / input / editor) awaiting an answer. */
   dialog: UiDialogRequest | null;
+  /** 正在跑的会话（含后台会话）：侧栏/标题栏据此显示运行指示. */
+  runningSessions: Record<string, boolean>;
   autoCompact: boolean;
 };
 
@@ -65,6 +67,7 @@ const initialState: State = {
   widgets: {},
   dialog: null,
   autoCompact: true,
+  runningSessions: {},
 };
 
 // Deltas arrive only for the block being written, so patch by contentIndex.
@@ -104,16 +107,36 @@ function applyBlockEvent(blocks: ContentBlock[], ev: NonNullable<RpcEvent["assis
   return next.filter(Boolean);
 }
 
+// 记录某个会话的运行状态（后台会话靠主进程的 session_status 事件同步）。
+function withRunning(state: State, file: string | undefined, running: boolean): State {
+  if (!file) return state;
+  if (state.runningSessions[file] === running) return state;
+  return { ...state, runningSessions: { ...state.runningSessions, [file]: running } };
+}
+
 function reduce(state: State, rec: RpcEvent): State {
   switch (rec.type) {
     case "agent_start":
-      return { ...state, isStreaming: true };
+      return withRunning({ ...state, isStreaming: true }, state.sessionFile, true);
     case "agent_settled":
     case "agent_end":
-      return { ...state, isStreaming: false, streaming: null };
+      return withRunning(
+        { ...state, isStreaming: false, streaming: null },
+        state.sessionFile,
+        false,
+      );
+    case "session_status": {
+      // 后台会话的轻量状态（完整事件不会转发到活动视图）
+      if (!rec.sessionFile) return state;
+      return withRunning(state, rec.sessionFile, Boolean(rec.isStreaming));
+    }
     case "message_start":
       if (rec.message?.role === "assistant") {
-        return { ...state, isStreaming: true, streaming: [{ type: "text", text: "" }] };
+        return withRunning(
+          { ...state, isStreaming: true, streaming: [{ type: "text", text: "" }] },
+          state.sessionFile,
+          true,
+        );
       }
       return state;
     case "message_update": {
@@ -180,7 +203,7 @@ function reduce(state: State, rec: RpcEvent): State {
       return { ...state, dialog: null };
     case "child_exit":
       return {
-        ...state,
+        ...withRunning(state, state.sessionFile, false),
         status: "exited",
         isStreaming: false,
         dialog: null,
@@ -251,6 +274,10 @@ export function usePi() {
           sessionFile: st.sessionFile as string | undefined,
           commands: commands?.commands ?? [],
           autoCompact: Boolean((st.autoCompactionEnabled as boolean) ?? true),
+          runningSessions:
+            typeof st.sessionFile === "string"
+              ? { ...s.runningSessions, [st.sessionFile]: Boolean(st.isStreaming) }
+              : s.runningSessions,
         }));
         // 按记忆注入该模型的思考档位（用户上次为它选的）
         const applied = await applyThinkingPref(
@@ -367,18 +394,24 @@ export function usePi() {
     ]);
     const state_ = (st as any)?.state ?? (st as any) ?? {};
     const messages = (msgs as any)?.messages ?? [];
-    setState((s) => ({
-      ...s,
-      messages,
-      streaming: null,
-      tools: {},
-      queue: { steering: [], followUp: [] },
-      isStreaming: Boolean(state_.isStreaming),
-      sessionFile: (state_.sessionFile as string | undefined) ?? s.sessionFile,
-      sessionName: state_.sessionName,
-      model: state_.model ?? s.model,
-      thinkingLevel: state_.thinkingLevel ?? s.thinkingLevel,
-    }));
+    setState((s) => {
+      const file = (state_.sessionFile as string | undefined) ?? s.sessionFile;
+      return {
+        ...s,
+        messages,
+        streaming: null,
+        tools: {},
+        queue: { steering: [], followUp: [] },
+        isStreaming: Boolean(state_.isStreaming),
+        sessionFile: file,
+        sessionName: state_.sessionName,
+        model: state_.model ?? s.model,
+        thinkingLevel: state_.thinkingLevel ?? s.thinkingLevel,
+        runningSessions: file
+          ? { ...s.runningSessions, [file]: Boolean(state_.isStreaming) }
+          : s.runningSessions,
+      };
+    });
     // 打开的会话按记忆注入该模型的思考档位（fork/切换后同样生效）
     const applied = await applyThinkingPref(
       (state_.model as ModelInfo | undefined) ?? stateRef.current?.model,
@@ -484,22 +517,37 @@ export function usePi() {
     [send, state.model],
   );
 
+  // 新建会话 = 在主进程里新开一个会话槽（独立 pi 进程），不打断当前会话。
+  // 旧实现走 pi 的 new_session：那是"替换当前进程里的会话"，会 teardown 正在
+  // 跑的回合——同项目开第二个会话时第一个就被打断。
   const newSession = useCallback(async () => {
-    await send({ type: "new_session" });
-    // Re-read state so the header and the sidebar highlight follow the fresh
-    // session instead of silently staying on the old one.
-    const st = (await send({ type: "get_state" })) as Record<string, unknown> | null;
-    const fresh = (st as { state?: Record<string, unknown> })?.state ?? st ?? {};
-    setState((s) => ({
-      ...s,
-      messages: [],
-      streaming: null,
-      tools: {},
-      queue: { steering: [], followUp: [] },
-      isStreaming: false,
-      sessionFile: fresh.sessionFile as string | undefined,
-      sessionName: fresh.sessionName as string | undefined,
-    }));
+    let res: Awaited<ReturnType<typeof window.pi.createSession>>;
+    try {
+      res = await window.pi.createSession(stateRef.current?.cwd);
+    } catch (err) {
+      setState((s) => ({ ...s, error: `新建会话失败：${(err as Error).message}` }));
+      return;
+    }
+    const fresh = (res.state ?? {}) as Record<string, unknown>;
+    setState((s) => {
+      const file = res.sessionFile ?? (fresh.sessionFile as string | undefined);
+      return {
+        ...s,
+        cwd: res.cwd,
+        messages: res.messages ?? [],
+        streaming: null,
+        tools: {},
+        queue: { steering: [], followUp: [] },
+        isStreaming: Boolean(fresh.isStreaming),
+        sessionFile: file,
+        sessionName: fresh.sessionName as string | undefined,
+        model: (fresh.model as ModelInfo | undefined) ?? s.model,
+        thinkingLevel: String(fresh.thinkingLevel ?? s.thinkingLevel),
+        runningSessions: file
+          ? { ...s.runningSessions, [file]: Boolean(fresh.isStreaming) }
+          : s.runningSessions,
+      };
+    });
     // 新会话同样按记忆注入该模型的思考档位
     const applied = await applyThinkingPref(
       (fresh.model as ModelInfo | undefined) ?? stateRef.current?.model,
@@ -507,7 +555,7 @@ export function usePi() {
     );
     if (applied) setState((s) => ({ ...s, thinkingLevel: applied }));
     refreshSessions();
-  }, [send, refreshSessions, applyThinkingPref]);
+  }, [refreshSessions, applyThinkingPref]);
 
   const deleteSession = useCallback(
     async (file: string) => {
@@ -559,10 +607,12 @@ export function usePi() {
         streaming: null,
         tools: {},
         queue: { steering: [], followUp: [] },
+        isStreaming: Boolean(state_.isStreaming),
         sessionFile: file,
         sessionName: state_.sessionName,
         model: state_.model ?? s.model,
         thinkingLevel: state_.thinkingLevel ?? s.thinkingLevel,
+        runningSessions: { ...s.runningSessions, [file]: Boolean(state_.isStreaming) },
         // Session files record their own cwd; cross-project switches follow it.
         ...(cwd ? { cwd } : {}),
       }));

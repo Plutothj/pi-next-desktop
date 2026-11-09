@@ -97,6 +97,9 @@ export type RpcEvent = {
   task?: TaskInfo;
   dialog?: UiDialogRequest;
   update?: UpdateState;
+  sessionFile?: string;
+  isStreaming?: boolean;
+  alive?: boolean;
   message_text?: string;
   aborted?: boolean;
   reason?: string;
@@ -345,6 +348,14 @@ export type PiBridge = {
     models: ModelInfo[];
     messages: PiMessage[];
     cwd: string;
+  }>;
+  // 新开一个独立会话槽（独立 pi 进程），不打断当前会话正在跑的回合。
+  createSession: (cwd?: string) => Promise<{
+    state: Record<string, unknown> | null;
+    models: ModelInfo[];
+    messages: PiMessage[];
+    cwd: string;
+    sessionFile: string | null;
   }>;
   send: (payload: Record<string, unknown>) => Promise<unknown>;
   pickFolder: () => Promise<string | null>;

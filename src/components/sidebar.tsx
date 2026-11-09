@@ -399,9 +399,15 @@ export function SessionSidebar({
                       isActiveProject && "font-medium text-foreground",
                     )}
                     onClick={() => {
-                      // 双击项目标题 = 切换到该工作区
-                      if (projectPath && projectPath !== state.cwd) openProject(projectPath);
-                      else toggleGroup(label);
+                      // 点项目标题 = 切到该项目最近一次会话；没有会话才新建。
+                      // 这样切项目是"恢复现场"，不会每次都生出一个空会话。
+                      if (projectPath && projectPath !== state.cwd) {
+                        const latest = items[0]?.path;
+                        if (latest) void openSession(latest, projectPath);
+                        else openProject(projectPath);
+                      } else {
+                        toggleGroup(label);
+                      }
                     }}
                     title={projectPath ?? label}
                     type="button"
@@ -477,7 +483,10 @@ export function SessionSidebar({
                         renaming={renaming === s.path}
                         session={s}
                         setRenaming={setRenaming}
-                        streaming={state.sessionFile === s.path && state.isStreaming}
+                        streaming={
+                          Boolean(state.runningSessions[s.path]) ||
+                          (state.sessionFile === s.path && state.isStreaming)
+                        }
                       />
                     </div>
                   ))

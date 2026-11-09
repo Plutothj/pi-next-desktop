@@ -1,10 +1,14 @@
-import { useEffect, useRef } from "react";
-import type { TaskInfo } from "@/lib/pi";
+import { useCallback, useEffect, useRef } from "react";
+import type { SessionInfo, TaskInfo } from "@/lib/pi";
 
 // 窗口不在前台（托盘/最小化/失焦）时，用系统通知播报回合完成与后台任务结束；
 // 点击通知唤起窗口。前台使用时不打扰。
-export function useNotifications(streaming: boolean, sessionName: string | undefined, tasks: TaskInfo[]) {
-  const prevStreaming = useRef(false);
+export function useNotifications(
+  runningSessions: Record<string, boolean>,
+  sessions: SessionInfo[],
+  tasks: TaskInfo[],
+) {
+  const prevRunning = useRef<Record<string, boolean>>({});
   const prevTasks = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
@@ -12,7 +16,7 @@ export function useNotifications(streaming: boolean, sessionName: string | undef
     if (Notification.permission === "default") void Notification.requestPermission();
   }, []);
 
-  const notify = (title: string, body: string) => {
+  const notify = useCallback((title: string, body: string) => {
     if (document.hasFocus()) return;
     if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
     const n = new Notification(title, { body });
@@ -21,16 +25,20 @@ export function useNotifications(streaming: boolean, sessionName: string | undef
       window.focus();
       n.close();
     };
-  };
+  }, []);
 
-  // 回合完成（streaming true→false）
+  // 回合完成（任意会话 running true→false，含后台并行的会话）
   useEffect(() => {
-    const was = prevStreaming.current;
-    prevStreaming.current = streaming;
-    if (was && !streaming) {
-      notify(sessionName ? `Pi · ${sessionName}` : "Pi", "回复已完成");
+    const prev = prevRunning.current;
+    const next = { ...runningSessions };
+    for (const [file, running] of Object.entries(next)) {
+      if (prev[file] && !running) {
+        const title = sessions.find((s) => s.path === file)?.title;
+        notify(title ? `Pi · ${title}` : "Pi", "回复已完成");
+      }
     }
-  }, [streaming, sessionName, notify]);
+    prevRunning.current = next;
+  }, [runningSessions, sessions, notify]);
 
   // 后台任务结束（running → done/failed）
   useEffect(() => {

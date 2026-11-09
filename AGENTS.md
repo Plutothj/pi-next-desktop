@@ -44,6 +44,7 @@ git push --follow-tags                       # 推提交和 tag；release.yml �
 - **prompt 总是带 `streamingBehavior`**：空闲时 pi 忽略，流式中缺失会被拒。
 - 会话 JSONL 是 pi 的内部格式（当前 v3，`SUPPORTED_SESSION_VERSION`）：手写/复制文件前必须过版本守卫；标题解析已有廉价预过滤，别逐行 `JSON.parse` 全量。
 - `PiProcess` 的 exit 回调：被新进程顶替的旧进程不算新闻，但 `stop()` 主动停的**必须**照常触发 `onExit`（`this.stopped` 标记）——槽清理与退出钩子都挂在上面，历史 bug。
+- **新建会话必须走 `pi:createSession`（新开池槽），不要用 pi 的 `new_session`**：后者是替换当前进程里的会话，会 teardown 正在跑的回合——"同项目开第二个会话就把第一个打断"的根因。后台会话的完整事件不转发，只发 `session_status` 驱动运行指示。
 - 渲染层事件订阅 effect 每次挂载都要重新注册，boot 用 `started` ref 护栏只跑一次（StrictMode 双挂载，历史 bug）。
 - 注释与用户可见文案用中文，标识符用英文，与现有代码一致。
 - UI 交互默认对齐 ZCode Desktop 的行为（Enter 发送、流式排队/steer、弹层从输入框上方出、模型选择器内嵌输入框）。

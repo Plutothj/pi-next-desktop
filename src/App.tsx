@@ -244,7 +244,7 @@ function Shell() {
   // 聊天附件 chip 点开预览：{abs,name,seq} 传给文件面板
   const [previewFile, setPreviewFile] = useState<{ abs: string; name: string; seq: number } | null>(null);
   const { tasks, run: runTask, kill: killTask, remove: removeTask, hosts } = useTasks();
-  useNotifications(state.isStreaming, state.sessionName, tasks);
+  useNotifications(state.runningSessions, state.sessions, tasks);
   const { git, refresh: refreshGit } = useGit(state.cwd, state.isStreaming);
   const { stats, refresh: refreshStats } = useSessionStats(
     state.sessionFile,

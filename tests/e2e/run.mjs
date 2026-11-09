@@ -545,6 +545,19 @@ async function main() {
       `window.pi.switchSession(${JSON.stringify(aFile)}, ${JSON.stringify(agentDir)}).then(r => JSON.stringify(r))`,
     );
     if (!JSON.parse(stillRunning).running) throw new Error(`切回 A 时进程不在: ${stillRunning}`);
+
+    // 新建会话 = 新开池槽，不能顶掉 A 的进程（旧路径 pi new_session 会 teardown）
+    const created = JSON.parse(
+      await evaluate(
+        `window.pi.createSession(${JSON.stringify(agentDir)}).then(r => JSON.stringify({ file: r.sessionFile }))`,
+      ),
+    );
+    if (!created.file) throw new Error(`新会话未分配文件: ${JSON.stringify(created)}`);
+    if (created.file === aFile) throw new Error("新会话复用了旧会话文件");
+    const aAfterCreate = await evaluate(
+      `window.pi.switchSession(${JSON.stringify(aFile)}, ${JSON.stringify(agentDir)}).then(r => JSON.stringify(r))`,
+    );
+    if (!JSON.parse(aAfterCreate).running) throw new Error(`新建后 A 进程被顶掉: ${aAfterCreate}`);
   });
 
   // 17. 项目树：创建项目后出现在侧栏的项目分组里

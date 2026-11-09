@@ -149,6 +149,7 @@ function piEnv(rt) {
 // Boots are serialised: a rapid project switch waits for the previous start
 // instead of interleaving two poll loops.
 let bootLock = Promise.resolve();
+let newSessionSeq = 0;
 
 async function startPi(cwd, sessionFile = null) {
   // 切到目标会话（null = 新会话，由 pi 分配文件）；其余会话进程保持运行。
@@ -582,6 +583,54 @@ safeHandle("pi:start", async (_e, { cwd, sessionFile = null } = {}) => {
   return result;
 });
 
+// 新建会话：新开一个池槽（独立 pi 进程），不碰当前会话。
+// 旧路径用 pi 的 new_session 是"替换当前进程里的会话"，会 teardown 正在跑的
+// 回合——这正是"同项目开第二个会话就把第一个打断"的根因。
+safeHandle("pi:createSession", async (_e, { cwd } = {}) => {
+  const saved = readLastWorkspace();
+  const resolved =
+    cwd && fs.existsSync(cwd)
+      ? cwd
+      : saved && fs.existsSync(saved)
+        ? saved
+        : os.homedir();
+  const run = async () => {
+    const key = `__new-${Date.now()}-${++newSessionSeq}`;
+    await pool.ensure(key, resolved, { active: true, fresh: true });
+    activeSession = key;
+    pendingDialogs.clear();
+    let state = null;
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      state = await pool.command(key, { type: "get_state" }).catch(() => null);
+      if (state?.data?.model) break;
+    }
+    const assigned = state?.data?.sessionFile ?? null;
+    if (assigned) {
+      pool.rebind(key, assigned);
+      activeSession = assigned;
+    }
+    const [models, messages] = await Promise.all([
+      pool.command(activeSession, { type: "get_available_models" }).catch(() => null),
+      pool.command(activeSession, { type: "get_messages" }).catch(() => null),
+    ]);
+    writeLastWorkspace(resolved);
+    return {
+      state: state?.data ?? null,
+      models: models?.data?.models ?? [],
+      messages: messages?.data?.messages ?? [],
+      cwd: resolved,
+      sessionFile: assigned,
+    };
+  };
+  const result = bootLock.then(run, run);
+  bootLock = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+});
+
 // 切换界面显示的会话：只切活动指针（后台会话进程继续跑，不中断）。
 safeHandle("pi:switchSession", async (_e, { sessionFile, cwd } = {}) => {
   if (typeof sessionFile !== "string" || !sessionFile) return { ok: false, error: "缺少会话路径" };
@@ -595,8 +644,12 @@ safeHandle("pi:switchSession", async (_e, { sessionFile, cwd } = {}) => {
   return { ok: true, running: pool.isRunning(sessionFile) };
 });
 
-safeHandle("pi:send", async (_e, payload) => {
-  const res = await pool.command(activeSession, payload);
+safeHandle("pi:send", async (_e, payload = {}) => {
+  // payload 可带 sessionFile 定向发给某个会话（多会话并行时用）；
+  // 不传则维持旧行为：发给当前活动会话。
+  const { sessionFile, ...body } = payload ?? {};
+  const target = typeof sessionFile === "string" && sessionFile ? sessionFile : activeSession;
+  const res = await pool.command(target, body);
   return res.data ?? null;
 });
 
