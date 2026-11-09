@@ -1,4 +1,4 @@
-import { CopyIcon, ExternalLinkIcon, SmartphoneIcon } from "lucide-react";
+import { CopyIcon, ExternalLinkIcon, Loader2Icon, SmartphoneIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,7 @@ export function RemoteDialog({
   onOpenChange,
   status,
   notice,
+  error,
   onCommand,
   ready,
 }: {
@@ -28,11 +29,13 @@ export function RemoteDialog({
   onOpenChange: (open: boolean) => void;
   status?: string;
   notice?: Notice;
-  onCommand: (command: string) => void;
+  error?: string | null;
+  onCommand: (command: string) => Promise<void> | void;
   ready: boolean;
 }) {
   const [qr, setQr] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const urls = useMemo(() => {
     const found = notice?.message.match(/https:\/\/[^\s<>"')]+/gu) ?? [];
@@ -78,6 +81,16 @@ export function RemoteDialog({
     await navigator.clipboard.writeText(primary).catch(() => null);
     setCopied(true);
     setTimeout(() => setCopied(false), 1200);
+  };
+
+  const run = async (command: string) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await onCommand(command);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -128,35 +141,68 @@ export function RemoteDialog({
           </div>
         ) : null}
 
+        {error ? (
+          <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs leading-5 text-destructive">
+            公网隧道启动失败：{error}
+          </div>
+        ) : null}
+
         {!primary ? (
           <div className="rounded-lg border border-dashed px-3 py-2 text-xs leading-5 text-muted-foreground">
-            手机必须通过 <span className="font-medium text-foreground">HTTPS</span> 访问。推荐在电脑和手机上安装
-            Tailscale（同一 tailnet），点「开启远程」会自动配置；也可以在自己的 HTTPS 反代地址里填写
+            点「开启远程」会自动建立临时 <span className="font-medium text-foreground">HTTPS 公网隧道</span>
+            （Cloudflare Quick Tunnel，无需账号）。也支持电脑和手机装 Tailscale（同一 tailnet），或在自己的
+            HTTPS 反代地址里填写
             <span className="font-mono"> /remote settings </span>。
+          </div>
+        ) : null}
+
+        {busy ? (
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            <Loader2Icon className="size-3.5 animate-spin" />
+            正在建立公网隧道并重启远程服务…
           </div>
         ) : null}
 
         <div className="flex flex-wrap gap-1.5">
           <Button
             className="h-7 px-2 text-xs"
-            disabled={!ready}
-            onClick={() => onCommand("/remote")}
+            disabled={!ready || busy}
+            onClick={() => void run("/remote")}
             size="sm"
           >
             开启远程
           </Button>
-          <Button className="h-7 px-2 text-xs" onClick={() => onCommand("/remote pair")} size="sm" variant="secondary">
+          <Button
+            className="h-7 px-2 text-xs"
+            disabled={busy}
+            onClick={() => void run("/remote pair")}
+            size="sm"
+            variant="secondary"
+          >
             配对新设备
           </Button>
-          <Button className="h-7 px-2 text-xs" onClick={() => onCommand("/remote devices")} size="sm" variant="ghost">
+          <Button
+            className="h-7 px-2 text-xs"
+            disabled={busy}
+            onClick={() => void run("/remote devices")}
+            size="sm"
+            variant="ghost"
+          >
             设备管理
           </Button>
-          <Button className="h-7 px-2 text-xs" onClick={() => onCommand("/remote settings")} size="sm" variant="ghost">
+          <Button
+            className="h-7 px-2 text-xs"
+            disabled={busy}
+            onClick={() => void run("/remote settings")}
+            size="sm"
+            variant="ghost"
+          >
             设置
           </Button>
           <Button
             className="h-7 px-2 text-xs text-destructive"
-            onClick={() => onCommand("/remote off")}
+            disabled={busy}
+            onClick={() => void run("/remote off")}
             size="sm"
             variant="ghost"
           >

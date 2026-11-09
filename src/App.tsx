@@ -96,6 +96,7 @@ function Shell() {
     snapshotQueuedPayloads,
     send,
     clearError,
+    clearNotice,
     respondDialog,
     setModel,
     switchModel,
@@ -114,6 +115,8 @@ function Shell() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [remoteOpen, setRemoteOpen] = useState(false);
+  const [remoteError, setRemoteError] = useState<string | null>(null);
+  const [remoteRestarting, setRemoteRestarting] = useState(false);
   const [planMode, setPlanMode] = useState(false);
   // 计划模式是会话级事实（扩展每次 tool_call 读会话旁路的 sidecar），
   // 这里切会话/回合结束/流式中轮询把它同步到 UI（模型也能主动 EnterPlanMode）。
@@ -586,17 +589,73 @@ function Shell() {
 
   // 远程面板命令：/remote 由 pi 当扩展命令执行，不会进模型回合
   const runRemoteCommand = useCallback(
-    (command: string) => {
+    async (command: string) => {
       if (!state.sessionFile) return;
       // 设备/设置会拉扩展 select/input 弹层，先关掉模态框，否则弹层被挡住
-      if (command === "/remote devices" || command === "/remote settings") setRemoteOpen(false);
+      if (command === "/remote devices" || command === "/remote settings") {
+        setRemoteOpen(false);
+        void send({ type: "prompt", message: command });
+        return;
+      }
+      if (command === "/remote off") {
+        // 关闭远程 = 整台机器停止共享；/remote off 的 select 自动答“整台机器”
+        clearNotice();
+        setRemoteError(null);
+        setRemoteRestarting(true);
+        await send({ type: "prompt", message: command });
+        setRemoteRestarting(false);
+        await window.pi.remoteTunnelStop();
+        return;
+      }
+      if (command === "/remote" || command === "/remote pair") {
+        // 没有现成的配对 URL 时，先起零配置公网隧道（Cloudflare Quick Tunnel），
+        // 再把临时 https 地址写进 pi-mobile 配置并重启 hub。
+        const hasPairing = Boolean(
+          state.statuses.remote &&
+            state.notice?.message &&
+            /#p=|\/pair/i.test(state.notice.message),
+        );
+        if (!hasPairing) {
+          const tunnel = await window.pi.remoteTunnelStart().catch(() => null);
+          if (tunnel?.ok) {
+            setRemoteError(null);
+            // /remote off 会弹 select，auto-answer effect 会自动选“整台机器”
+            setRemoteRestarting(true);
+            await send({ type: "prompt", message: "/remote off" });
+            setRemoteRestarting(false);
+            await send({ type: "prompt", message: "/remote" });
+          } else {
+            setRemoteError(tunnel?.error ?? "无法建立公网隧道");
+            if (command === "/remote") {
+              void send({ type: "prompt", message: "/remote" });
+              return;
+            }
+          }
+        }
+        void send({ type: "prompt", message: "/remote pair" });
+        return;
+      }
       void send({ type: "prompt", message: command });
     },
-    [send, state.sessionFile],
+    [send, state.sessionFile, state.notice?.message, state.statuses.remote, clearNotice],
   );
 
-  // 计划模式已有专门徽章/开关，不再重复渲染扩展的 status chip
-  const statusChips = Object.entries(state.statuses).filter(([key]) => key !== "plan");
+  // 远程隧道切换：/remote off 在 RPC 模式会弹 select 让用户选停止范围，
+  // 既然用户已经点了"开启远程/配对"，这里自动选"整台机器"以完成重启。
+  useEffect(() => {
+    if (!remoteRestarting || !state.dialog || state.dialog.method !== "select") return;
+    const title = state.dialog.title ?? "";
+    if (!/stop sharing|停止共享|关闭远程/i.test(title)) return;
+    const option = (state.dialog.options ?? []).find((value) =>
+      /every session|所有会话|整台机器/i.test(value),
+    );
+    if (option) void respondDialog(state.dialog, { value: option });
+  }, [remoteRestarting, state.dialog, respondDialog]);
+
+  // 计划模式/远程已有专门徽章与入口，不再重复渲染扩展的 status chip
+  const statusChips = Object.entries(state.statuses).filter(
+    ([key]) => key !== "plan" && key !== "remote",
+  );
   // 后台会话的双模型链路不把"规划中/执行中"徽章显示在别的会话上
   const chainHere = dualChain.phase !== "idle" && dualChain.sessionFile === state.sessionFile;
   const plannerModel = dual.find(state.models, dual.config.planner);
@@ -900,6 +959,7 @@ function Shell() {
       </main>
 
       <RemoteDialog
+        error={remoteError}
         notice={state.notice}
         onCommand={runRemoteCommand}
         onOpenChange={setRemoteOpen}

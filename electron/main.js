@@ -27,6 +27,7 @@ import {
 } from "./pi-process.js";
 import { registerProjectHandlers } from "./projects.js";
 import { installPiMobileExtension } from "./remote-extension.js";
+import { startRemoteTunnel, stopRemoteTunnel } from "./remote-tunnel.js";
 import { createScheduler } from "./schedules.js";
 import { scanSessions } from "./session-files.js";
 import { createSessionPool } from "./session-pool.js";
@@ -728,6 +729,43 @@ safeHandle("pi:setPlanMode", (_e, { sessionFile, enabled, autoApprove, chain } =
   }
 });
 
+// 远程零配置入口：起 Cloudflare Quick Tunnel，并把临时 https 地址写进
+// pi-mobile 的 config.json（publicUrl）。手机只走 HTTPS，hub 仍只监听回环。
+safeHandle("remote:tunnelStart", async () => {
+  const dir = path.join(AGENT_DIR, "pi-mobile");
+  const file = path.join(dir, "config.json");
+  let config = {};
+  try {
+    config = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {}
+  const port = Number.isInteger(config.port) ? config.port : 7878;
+  // 用户自己配了固定 HTTPS 反代就复用它，不再起临时隧道；
+  // 上次应用留下的 trycloudflare 地址已经死了，不能复用。
+  const configured =
+    typeof config.publicUrl === "string" &&
+    /^https:\/\//i.test(config.publicUrl) &&
+    !/trycloudflare\.com/i.test(config.publicUrl);
+  if (configured) return { ok: true, url: config.publicUrl, port, reused: true };
+  const result = await startRemoteTunnel({
+    appRoot: path.join(import.meta.dirname, ".."),
+    port,
+  });
+  if (!result.ok) return result;
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(
+      file,
+      `${JSON.stringify({ ...config, port, publicUrl: result.url, tailscale: false }, null, 2)}\n`,
+      { mode: 0o600 },
+    );
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+  return { ...result, port };
+});
+
+safeHandle("remote:tunnelStop", () => stopRemoteTunnel());
+
 // 切换界面显示的会话：只切活动指针（后台会话进程继续跑，不中断）。
 safeHandle("pi:switchSession", async (_e, { sessionFile, cwd } = {}) => {
   if (typeof sessionFile !== "string" || !sessionFile) return { ok: false, error: "缺少会话路径" };
@@ -971,6 +1009,7 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
+  stopRemoteTunnel();
   pool.stopAll();
   if (process.platform !== "darwin") app.quit();
 });
@@ -984,6 +1023,7 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   quitDrained = true;
   taskManager.stopBridge();
+  stopRemoteTunnel();
   agentBoard.stopAll();
   scheduler.stop();
   Promise.race([pool.stopAll(), new Promise((r) => setTimeout(r, 2500))]).finally(() =>

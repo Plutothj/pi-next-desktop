@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld("pi", {
   getPlanMode: (sessionFile) => ipcRenderer.invoke("pi:getPlanMode", { sessionFile }),
   setPlanMode: (sessionFile, enabled, autoApprove, chain) =>
     ipcRenderer.invoke("pi:setPlanMode", { sessionFile, enabled, autoApprove, chain }),
+  remoteTunnelStart: () => ipcRenderer.invoke("remote:tunnelStart"),
+  remoteTunnelStop: () => ipcRenderer.invoke("remote:tunnelStop"),
   switchSession: (sessionFile, cwd) => ipcRenderer.invoke("pi:switchSession", { sessionFile, cwd }),
   send: (payload) => ipcRenderer.invoke("pi:send", payload),
   pickFolder: () => ipcRenderer.invoke("pi:pickFolder"),

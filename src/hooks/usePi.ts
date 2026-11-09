@@ -371,6 +371,10 @@ export function usePi() {
     setState((s) => ({ ...s, error: undefined }));
   }, []);
 
+  const clearNotice = useCallback(() => {
+    setState((s) => (s.notice ? { ...s, notice: undefined } : s));
+  }, []);
+
   // Answers a blocking extension dialog; pi resumes once the response lands.
   // 先清掉本地弹窗再发答复：rpiv 这类扩展在收到答复后会立刻弹下一个对话框，
   // 若等 IPC 返回后才清，会把刚弹出的下一个框一起关掉（表现为"点确认没反应"）。
@@ -737,6 +741,7 @@ export function usePi() {
     snapshotQueuedPayloads,
     send,
     clearError,
+    clearNotice,
     respondDialog,
     setModel,
     switchModel,

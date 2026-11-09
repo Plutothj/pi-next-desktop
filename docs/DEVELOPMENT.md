@@ -576,9 +576,14 @@ error 回给模型并**保持计划模式**，空意见则结束本回合。
   `memory_search requires qmd` 提示也带 https 链接，不能拿来当配对二维码——踩过）。
 - **状态**：pi-mobile 的 `setStatus("remote", ...)` 进入 `state.statuses.remote`，标题按钮高亮；
   切会话/后台会话的 status/widget 走 7.11 的 `uiSnapshot`（返回前 `cleanUiSnapshot` 去 ANSI）。
-- **HTTPS**：手机只接受 HTTPS。推荐 Tailscale（电脑和手机同一 tailnet，`/remote` 自动配
-  `tailscale serve`）；也可在 `/remote settings` 填自己的 HTTPS 反代地址。hub 只监听
-  127.0.0.1，不暴露公网端口。配对是一次性二维码/链接，每台设备独立密钥、可撤销。
+- **HTTPS / 零配置隧道**：手机只接受 HTTPS。`remote:tunnelStart` 用随应用分发的
+  `cloudflared`（optionalDependencies 按平台 `@botharness/cloudflared-*`）起 Cloudflare
+  Quick Tunnel，把临时 `https://*.trycloudflare.com` 写进 pi-mobile 的
+  `config.json`（`publicUrl`），再 `/remote off` → `/remote` 让 hub 用新地址重启。
+  `/remote off` 在 RPC 模式会弹 select，App 用一个 auto-answer effect 自动选
+  「整台机器」；关闭远程时同时 `remote:tunnelStop` 并清掉旧配对提示。
+  隧道只转发 pi-mobile 的端到端加密流量；关闭应用时 kill cloudflared。
+  也支持 Tailscale Serve 或自写 `publicUrl`。hub 只监听 127.0.0.1，不暴露本机端口。
 - **多进程**：每会话一个 pi 进程时，任意一个进程 `/remote` 起 hub，其余进程会自动挂上去
   （实测新会话 4 秒内 status 变成 `/remote`）。
 

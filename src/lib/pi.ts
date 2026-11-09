@@ -392,6 +392,8 @@ export type PiBridge = {
     autoApprove?: boolean,
     chain?: boolean,
   ) => Promise<{ ok: boolean; enabled?: boolean; error?: string }>;
+  remoteTunnelStart: () => Promise<{ ok: boolean; url?: string; port?: number; error?: string }>;
+  remoteTunnelStop: () => Promise<{ ok: boolean }>;
   send: (payload: Record<string, unknown>) => Promise<unknown>;
   pickFolder: () => Promise<string | null>;
   reveal: (target: string) => Promise<void>;
