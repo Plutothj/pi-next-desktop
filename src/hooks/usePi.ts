@@ -230,6 +230,16 @@ export function usePi() {
   const stateRef = useRef(state);
   stateRef.current = state;
   const started = useRef(false);
+  // 排队消息的原始 payload（含图片 base64）。pi 的 queue_update 只暴露文本，
+  // 所以"立即插入"需要 clear_queue 再重放时，必须靠这份缓存把附件带回去。
+  const queuedPayloads = useRef<
+    { text: string; behavior: "steer" | "followUp"; payload: Record<string, unknown> }[]
+  >([]);
+
+  useEffect(() => {
+    const texts = new Set([...state.queue.steering, ...state.queue.followUp]);
+    queuedPayloads.current = queuedPayloads.current.filter((entry) => texts.has(entry.text));
+  }, [state.queue]);
 
   const refreshSessions = useCallback(async () => {
     const [sessions, projects] = await Promise.all([
@@ -406,10 +416,30 @@ export function usePi() {
   );
 
   const prompt = useCallback(
-    async (text: string, images?: FileUIPart[], behavior?: "steer" | "followUp") =>
-      send(await buildPromptPayload(text, images, behavior)),
+    async (text: string, images?: FileUIPart[], behavior?: "steer" | "followUp") => {
+      const payload = await buildPromptPayload(text, images, behavior);
+      // 流式中发送 = 进入 pi 的排队；记下完整 payload（含图片）供"立即插入"重放
+      if (behavior && stateRef.current?.isStreaming) {
+        const message = String(payload.message ?? text);
+        queuedPayloads.current.push({ text: message, behavior, payload });
+        if (queuedPayloads.current.length > 50) {
+          queuedPayloads.current.splice(0, queuedPayloads.current.length - 50);
+        }
+      }
+      return send(payload);
+    },
     [send, buildPromptPayload],
   );
+
+  /** 当前排队的消息 → 原始 payload 快照（在 clear_queue 之前调用）。 */
+  const snapshotQueuedPayloads = useCallback(() => {
+    const queue = stateRef.current?.queue;
+    if (!queue) return [];
+    const texts = new Set([...queue.steering, ...queue.followUp]);
+    return queuedPayloads.current
+      .filter((entry) => texts.has(entry.text))
+      .map((entry) => ({ ...entry, payload: { ...entry.payload } }));
+  }, []);
 
   // 定向发送：双模型链路可能在后台会话里继续跑，不能依赖"当前活动会话"。
   const promptFor = useCallback(
@@ -704,6 +734,7 @@ export function usePi() {
     openProject,
     prompt,
     promptFor,
+    snapshotQueuedPayloads,
     send,
     clearError,
     respondDialog,

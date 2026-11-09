@@ -93,6 +93,7 @@ function Shell() {
     openProject,
     prompt,
     promptFor,
+    snapshotQueuedPayloads,
     send,
     clearError,
     respondDialog,
@@ -451,13 +452,32 @@ function Shell() {
       if (idx === -1) return;
       targetList.splice(idx, 1);
 
+      // pi 的 queue_update 只有文本；clear_queue 会丢掉 pi 内部队列里的图片，
+      // 所以先在清空之前拿到每条消息的原始 payload（含图片 base64）。
+      const cached = snapshotQueuedPayloads();
+      const payloadFor = (value: string, source: "steering" | "followUp") =>
+        cached.find(
+          (entry) =>
+            entry.text === value &&
+            entry.behavior === (source === "steering" ? "steer" : "followUp"),
+        )?.payload;
+      const deliver = async (
+        value: string,
+        source: "steering" | "followUp",
+        behavior: "steer" | "followUp",
+      ) => {
+        const payload = payloadFor(value, source);
+        if (payload) await send({ ...payload, streamingBehavior: behavior });
+        else await prompt(value, undefined, behavior);
+      };
+
       await send({ type: "clear_queue" });
       // 目标先插（steer 会在当前回复的下一个边界立刻生效）
-      await prompt(text, undefined, "steer");
-      for (const m of steering) await prompt(m, undefined, "steer");
-      for (const m of followUp) await prompt(m, undefined, "followUp");
+      await deliver(text, kind, "steer");
+      for (const m of steering) await deliver(m, "steering", "steer");
+      for (const m of followUp) await deliver(m, "followUp", "followUp");
     },
-    [send, prompt, state.queue],
+    [send, prompt, state.queue, snapshotQueuedPayloads],
   );
 
   const submit = async (message: PromptInputMessage, behavior?: "steer" | "followUp") => {
