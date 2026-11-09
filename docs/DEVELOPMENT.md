@@ -560,6 +560,28 @@ error 回给模型并**保持计划模式**，空意见则结束本回合。
 > 计划正文随 `ExitPlanMode` 工具输入传递，审批通过才落盘。
 
 
+### 7.11.2 内置远程访问（pi-mobile）
+
+**内置，不是推荐扩展**：`electron/remote-extension.js` 在启动时把应用自带的 `pi-mobile`
+拷贝到 `<agent>/extensions/pi-mobile`，并把它的整棵依赖树平铺到
+`<agent>/extensions/node_modules`（pi 的扩展依赖按扩展文件解析）。带
+`.pi-mobile-version` 标记做幂等；如果用户已经通过 `pi install` 装过 `pi-mobile`
+（`settings.packages` 里有），跳过内置副本，避免 `/remote` 命令重复注册。
+
+- **入口**：标题栏手机图标 → `RemoteDialog`。命令以 prompt 文本发给当前会话
+  （`/remote`、`/remote pair|devices|settings|off`），pi 会先执行扩展命令，不会进入模型回合。
+- **配对信息**：pi-mobile 在 RPC 模式下用 `ui_notify` 回传 HTTPS 配对链接（TUI 才画终端二维码）。
+  main 清洗 ANSI 后存进 `usePi.state.notice`；`RemoteDialog` 提取 https URL，用 `qrcode`
+  在应用内生成二维码 + 复制/打开。
+- **状态**：pi-mobile 的 `setStatus("remote", ...)` 进入 `state.statuses.remote`，标题按钮高亮；
+  切会话/后台会话的 status/widget 走 7.11 的 `uiSnapshot`（返回前 `cleanUiSnapshot` 去 ANSI）。
+- **HTTPS**：手机只接受 HTTPS。推荐 Tailscale（电脑和手机同一 tailnet，`/remote` 自动配
+  `tailscale serve`）；也可在 `/remote settings` 填自己的 HTTPS 反代地址。hub 只监听
+  127.0.0.1，不暴露公网端口。配对是一次性二维码/链接，每台设备独立密钥、可撤销。
+- **多进程**：每会话一个 pi 进程时，任意一个进程 `/remote` 起 hub，其余进程会自动挂上去
+  （实测新会话 4 秒内 status 变成 `/remote`）。
+
+
 ### 7.12 应用内更新
 
 `electron-updater` + GitHub Releases（`build.publish`）。状态机：

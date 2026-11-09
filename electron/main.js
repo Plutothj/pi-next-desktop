@@ -26,6 +26,7 @@ import {
   runtimeVersion,
 } from "./pi-process.js";
 import { registerProjectHandlers } from "./projects.js";
+import { installPiMobileExtension } from "./remote-extension.js";
 import { createScheduler } from "./schedules.js";
 import { scanSessions } from "./session-files.js";
 import { createSessionPool } from "./session-pool.js";
@@ -178,6 +179,23 @@ function stripAnsi(text) {
     .trim();
 }
 
+// 池里缓存的扩展 UI 是 TUI 原文（可能带 ANSI）；返回渲染层前统一清洗。
+function cleanUiSnapshot(ui) {
+  return {
+    widgets: Object.fromEntries(
+      Object.entries(ui?.widgets ?? {}).map(([key, value]) => [
+        key,
+        { lines: (value.lines ?? []).map(stripAnsi), placement: value.placement },
+      ]),
+    ),
+    statuses: Object.fromEntries(
+      Object.entries(ui?.statuses ?? {})
+        .map(([key, value]) => [key, stripAnsi(value)])
+        .filter(([, value]) => value),
+    ),
+  };
+}
+
 // Dialog requests block pi until answered, so every one of them gets a reply.
 function handleExtensionUi(req) {
   if (req.method === "confirm") {
@@ -196,7 +214,7 @@ function handleExtensionUi(req) {
     return;
   }
   if (req.method === "notify") {
-    send({ type: "ui_notify", message: req.message, notifyType: req.notifyType ?? "info" });
+    send({ type: "ui_notify", message: stripAnsi(req.message), notifyType: req.notifyType ?? "info" });
     return;
   }
   if (req.method === "setTitle") {
@@ -570,7 +588,7 @@ safeHandle("pi:start", async (_e, { cwd, sessionFile = null } = {}) => {
       messages: messages?.data?.messages ?? [],
       cwd: resolved,
       sessionFile: assigned,
-      ui: pool.uiSnapshot(activeSession),
+      ui: cleanUiSnapshot(pool.uiSnapshot(activeSession)),
     };
   };
   // Serialise overlapping boots; the caller always gets the latest result.
@@ -620,7 +638,7 @@ safeHandle("pi:createSession", async (_e, { cwd } = {}) => {
       messages: messages?.data?.messages ?? [],
       cwd: resolved,
       sessionFile: assigned,
-      ui: pool.uiSnapshot(activeSession),
+      ui: cleanUiSnapshot(pool.uiSnapshot(activeSession)),
     };
   };
   const result = bootLock.then(run, run);
@@ -723,7 +741,7 @@ safeHandle("pi:switchSession", async (_e, { sessionFile, cwd } = {}) => {
   return {
     ok: true,
     running: pool.isRunning(sessionFile),
-    ui: pool.uiSnapshot(sessionFile),
+    ui: cleanUiSnapshot(pool.uiSnapshot(sessionFile)),
   };
 });
 
@@ -928,6 +946,8 @@ app.whenReady().then(() => {
   installTodoExtension(AGENT_DIR);
   // 计划模式扩展：EnterPlanMode / ExitPlanMode 工具 + 只读工具闸门 + plan 文档
   installPlanModeExtension(AGENT_DIR);
+  // 内置远程模块（pi-mobile）：手机扫码 / 网页端远程控制所有会话
+  installPiMobileExtension(AGENT_DIR, path.join(import.meta.dirname, ".."));
   // 表格工具扩展：让模型能读写带公式的 xlsx（SheetJS 随应用分发给扩展目录）
   installTableExtension(AGENT_DIR, path.join(import.meta.dirname, "..", "node_modules", "xlsx"));
   // HR 文案技能包（员工沟通 / 会议纪要 / 活动方案），随应用分发

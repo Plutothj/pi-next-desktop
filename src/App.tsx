@@ -11,6 +11,7 @@ import {
   MinusIcon,
   PanelLeftOpenIcon,
   RocketIcon,
+  SmartphoneIcon,
   SquareIcon,
   TerminalIcon,
   WorkflowIcon,
@@ -43,6 +44,7 @@ import { FilesPanel } from "@/components/files-panel";
 import { ModelPicker } from "@/components/model-picker";
 import { OnboardingTour, startTour } from "@/components/onboarding";
 import { PlanWorkbench } from "@/components/plan-workbench";
+import { RemoteDialog } from "@/components/remote-dialog";
 import { SessionTreePanel } from "@/components/session-tree";
 import { SettingsDialog, type SettingsTab } from "@/components/settings-dialog";
 import { ShortcutsDialog } from "@/components/shortcuts-dialog";
@@ -110,6 +112,7 @@ function Shell() {
   const controller = usePromptInputController();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
+  const [remoteOpen, setRemoteOpen] = useState(false);
   const [planMode, setPlanMode] = useState(false);
   // 计划模式是会话级事实（扩展每次 tool_call 读会话旁路的 sidecar），
   // 这里切会话/回合结束/流式中轮询把它同步到 UI（模型也能主动 EnterPlanMode）。
@@ -561,6 +564,17 @@ function Shell() {
     if (splitPane && splitPane.file === state.sessionFile) setSplitPane(null);
   }, [splitPane, state.sessionFile]);
 
+  // 远程面板命令：/remote 由 pi 当扩展命令执行，不会进模型回合
+  const runRemoteCommand = useCallback(
+    (command: string) => {
+      if (!state.sessionFile) return;
+      // 设备/设置会拉扩展 select/input 弹层，先关掉模态框，否则弹层被挡住
+      if (command === "/remote devices" || command === "/remote settings") setRemoteOpen(false);
+      void send({ type: "prompt", message: command });
+    },
+    [send, state.sessionFile],
+  );
+
   // 计划模式已有专门徽章/开关，不再重复渲染扩展的 status chip
   const statusChips = Object.entries(state.statuses).filter(([key]) => key !== "plan");
   // 后台会话的双模型链路不把"规划中/执行中"徽章显示在别的会话上
@@ -652,6 +666,14 @@ function Shell() {
               variant="ghost"
             >
               <Columns2Icon className="size-3.5" />
+            </Button>
+            <Button
+              className={cn("hidden h-7 px-2 text-xs @2xl:flex", state.statuses.remote && "bg-accent")}
+              onClick={() => setRemoteOpen(true)}
+              title="远程访问：手机扫码继续所有会话"
+              variant="ghost"
+            >
+              <SmartphoneIcon className="size-3.5" />
             </Button>
             <Button
               className={cn("hidden h-7 px-2 text-xs @2xl:flex", panel === "agents" && "bg-accent")}
@@ -856,6 +878,15 @@ function Shell() {
           ) : null}
         </div>
       </main>
+
+      <RemoteDialog
+        notice={state.notice}
+        onCommand={runRemoteCommand}
+        onOpenChange={setRemoteOpen}
+        open={remoteOpen}
+        ready={state.status === "ready" && Boolean(state.sessionFile)}
+        status={state.statuses.remote}
+      />
 
       <SettingsDialog
         cwd={state.cwd}

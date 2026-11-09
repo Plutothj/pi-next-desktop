@@ -101,6 +101,8 @@ export type RpcEvent = {
   isStreaming?: boolean;
   alive?: boolean;
   message_text?: string;
+  // extension ui_notify（远程配对地址等）；message 与 PiMessage 冲突，读取时强转
+  notifyType?: string;
   aborted?: boolean;
   reason?: string;
 };

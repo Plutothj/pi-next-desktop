@@ -47,6 +47,8 @@ export type State = {
   dialog: UiDialogRequest | null;
   /** 正在跑的会话（含后台会话）：侧栏/标题栏据此显示运行指示. */
   runningSessions: Record<string, boolean>;
+  /** 最近一条扩展 ui_notify（远程配对地址等需要展示的提示）. */
+  notice?: { message: string; notifyType?: string; at: number };
   autoCompact: boolean;
 };
 
@@ -201,6 +203,14 @@ export function reduce(state: State, rec: RpcEvent): State {
       return { ...state, dialog: rec.dialog ?? null };
     case "ui_dialog_clear":
       return { ...state, dialog: null };
+    case "ui_notify": {
+      const message = (rec as { message?: string }).message;
+      if (typeof message !== "string" || !message.trim()) return state;
+      return {
+        ...state,
+        notice: { message, notifyType: rec.notifyType, at: Date.now() },
+      };
+    }
     case "child_exit":
       return {
         ...withRunning(state, state.sessionFile, false),
