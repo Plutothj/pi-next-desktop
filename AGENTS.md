@@ -68,4 +68,5 @@ Windows 与实际 macOS 均已真机日常使用（命名管道、`cmd /d /s /c`
 - **自研扩展的依赖解析以扩展文件为基准**（只有 typebox/@earendil-works 被别名进 runtime）：引第三方包要装到 `<agent>/extensions/node_modules`（table 扩展的 SheetJS 就是这么做的）。
 - **技能有两个用户级根**：`<AGENT_DIR>/skills` 与 `~/.agents/skills`（`config.USER_SKILL_ROOTS`）。删除/读取的路径守卫必须覆盖两者，否则共享技能会"点了删除没反应"。
 - **侧栏项目分组由会话的 cwd 推出来**：`projects:remove` 只改 projects.json 不会让有会话的项目消失。渲染层要用 `projects.state().removed` 把整组会话一起过滤掉（会话文件仍在磁盘上，重新添加文件夹即恢复）。
+- **想"逼模型补做一件事"要走 `agent_before_settle` boundary**（返回 `entries:[custom_message, …]` + `continue:true`）。`turn_end` 里 `sendUserMessage` 会落在"回合仍在跑"的状态里被拒，提醒根本到不了模型——todo 的自动打勾提醒曾因此完全失效。注意 `continue:true` 每次 boundary 只请求一次，同批要按签名防循环；新用户输入用 `input` 事件判断，别用 `agent_start`（它对每次 provider 请求都触发）。
 - `App.tsx`（~900 行）与 `settings-dialog.tsx`（~1700 行）偏大，改时优先局部修改，拆分是既定方向但尚未做。

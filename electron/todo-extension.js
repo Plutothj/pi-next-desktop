@@ -27,15 +27,20 @@ const Params = Type.Object({
 export default function (pi: ExtensionAPI) {
   let todos: Todo[] = [];
   let nextId = 1;
-  // turn_end 自动提醒的防循环：同一批未完成项（签名相同）只提醒一次；
+  // agent_before_settle 自动提醒的防循环：同一批未完成项（签名相同）只提醒一次；
   // 模型若依旧不动，说明它有自己的判断，不再打扰。
   let lastNudgeSig: string | null = null;
-  let nudging = false;
+  // 上一次模型运行里已经勾掉的项：下一次运行开始时从面板里撤掉（状态仍保留，
+  // 只是不再占地方）。对齐 rpiv-todo 的行为：完成的留到本回合结束，下一回合清掉。
+  let hiddenDoneIds = new Set<number>();
+  // 最近的 UI 上下文：agent_start 这类没有 ctx 的事件里重绘用
+  let lastCtx: ExtensionContext | null = null;
 
   // 从当前分支的 tool result details 重建（fork 后自动正确）
   const reconstruct = (ctx: ExtensionContext) => {
     todos = [];
     nextId = 1;
+    hiddenDoneIds = new Set();
     for (const entry of ctx.sessionManager.getBranch()) {
       if (entry.type !== "message") continue;
       const msg = entry.message as { role?: string; toolName?: string; details?: TodoDetails };
@@ -47,42 +52,68 @@ export default function (pi: ExtensionAPI) {
     }
   };
 
-  // 清单 → 字符串数组（widget 面板会解析标题/进度/✓✗）
+  // 清单 → 字符串数组（widget 面板会解析标题/进度/✓✗）。
+  // 已完成且"上一回合就完成了"的项不再显示；没有任何可见项时直接撤掉卡片。
   const paint = (ctx: ExtensionContext) => {
+    lastCtx = ctx;
     if (todos.length === 0) {
+      hiddenDoneIds = new Set();
+      ctx.ui.setWidget(WIDGET_KEY, undefined);
+      return;
+    }
+    const shown = todos.filter((t) => !(t.done && hiddenDoneIds.has(t.id)));
+    if (shown.length === 0) {
       ctx.ui.setWidget(WIDGET_KEY, undefined);
       return;
     }
     const done = todos.filter((t) => t.done).length;
     const lines = [
       \`--- Todo \${done}/\${todos.length} ---\`,
-      ...todos.map((t) => (t.done ? \`✓ #\${t.id} \${t.text}\` : \`▸ #\${t.id} \${t.text}\`)),
+      ...shown.map((t) => (t.done ? \`✓ #\${t.id} \${t.text}\` : \`▸ #\${t.id} \${t.text}\`)),
     ];
     ctx.ui.setWidget(WIDGET_KEY, lines, { placement: "aboveEditor" });
   };
 
-  pi.on("session_start", async (_e, ctx) => { reconstruct(ctx); paint(ctx); });
-  pi.on("session_tree", async (_e, ctx) => { reconstruct(ctx); paint(ctx); });
+  pi.on("session_start", async (_e, ctx) => { lastNudgeSig = null; reconstruct(ctx); paint(ctx); });
+  pi.on("session_tree", async (_e, ctx) => { lastNudgeSig = null; reconstruct(ctx); paint(ctx); });
+  // 新回合开始：把上一回合完成的项从面板撤掉（不再占地方），未完成的继续显示。
+  pi.on("agent_start", async () => {
+    for (const t of todos) if (t.done) hiddenDoneIds.add(t.id);
+    if (lastCtx) paint(lastCtx);
+  });
+  // 新的一次用户输入（prompt/steer）重新允许提醒一次：上一轮提醒过、模型
+  // 没理，用户再说一句时不该继续沉默。注意不能用 agent_start——boundary 的
+  // continue 会在同一轮里再发一次 provider 请求，agent_start 重置会无限提醒。
+  pi.on("input", async () => { lastNudgeSig = null; });
 
-  // 回合结束仍有未完成项 → 注入一条提醒让模型收尾（toggle/remove/继续干）。
-  // 这是 Claude Code 同款兜底：模型干完活最容易忘的就是回头打勾。
-  pi.on("turn_end", async () => {
-    if (nudging) return;
+  // 回合真正结束前（agent_before_settle）还有未完成项 → 注入一条隐藏的
+  // custom_message 并强制再跑一次模型请求。这是 pi 官方的 actionable
+  // boundary；在 turn_end 里直接 sendUserMessage 会落在"回合仍在跑"的状态里
+  // 被拒（历史 bug：提醒根本没送到模型，清单因此永远不打勾）。
+  pi.on("agent_before_settle", async (event) => {
     const pending = todos.filter((t) => !t.done);
-    if (pending.length === 0) return;
+    if (pending.length === 0) {
+      lastNudgeSig = null;
+      return;
+    }
     const sig = pending.map((t) => \`#\${t.id} \${t.text}\`).join(" | ");
     if (sig === lastNudgeSig) return;
     lastNudgeSig = sig;
-    nudging = true;
-    try {
-      await pi.sendUserMessage(
-        \`[todo 自动提醒] 清单里还有未完成项：\${pending.map((t) => \`#\${t.id} \${t.text}\`).join("；")}。已完成的请立即用 todo 工具 toggle 对应 id 标记；不再需要的用 remove 移除；确有剩余工作就继续执行，无需解释。\`,
-      );
-    } catch {
-      // 提醒失败不致命：下一轮 turn_end 换了签名还会再试
-    } finally {
-      nudging = false;
-    }
+    return {
+      entries: [
+        ...event.entries,
+        {
+          type: "custom_message" as const,
+          customType: "pi-desktop-todo-reminder",
+          display: false,
+          content:
+            \`[todo 自动提醒] 清单里还有未完成项：\${pending.map((t) => \`#\${t.id} \${t.text}\`).join("；")}。\` +
+            "已完成的事项请立即用 todo 工具 toggle 对应 id 标记；不再需要的用 remove 移除；" +
+            "确有剩余工作就继续执行。先处理清单，不要只用文字回复。",
+        },
+      ],
+      continue: true,
+    };
   });
 
   pi.registerTool({

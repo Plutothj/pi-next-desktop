@@ -21,15 +21,11 @@ function makePi() {
   return {
     tools,
     handlers,
-    sent: [],
     on(event, fn) {
       handlers.set(event, fn);
     },
     registerTool(def) {
       tools.set(def.name, def);
-    },
-    async sendUserMessage(content) {
-      this.sent.push(content);
     },
   };
 }
@@ -104,6 +100,32 @@ test("todo 扩展：add/toggle/list 产出状态与 widget 行", async () => {
   assert.match(listed.content[0].text, /清单为空/);
 });
 
+test("todo 扩展：agent_start 撤下上一回合完成的项，全部完成时移除卡片", async () => {
+  const factory = await loadTodoExtension();
+  const pi = makePi();
+  factory(pi);
+  const tool = pi.tools.get("todo");
+  const ctx = makeCtx();
+
+  await tool.execute("c1", { action: "add", text: "甲" }, null, null, ctx);
+  await tool.execute("c2", { action: "add", text: "乙" }, null, null, ctx);
+  await tool.execute("c3", { action: "toggle", id: 1 }, null, null, ctx);
+  let lines = ctx.calls.at(-1).lines;
+  assert.ok(lines.some((l) => l.startsWith("✓") && l.includes("甲")), "本回合内完成的项仍然显示");
+
+  // 下一回合开始：已完成的甲从面板撤掉，只剩乙（进度仍是 1/2）
+  await pi.handlers.get("agent_start")({}, ctx);
+  lines = ctx.calls.at(-1).lines;
+  assert.match(lines[0], /Todo 1\/2/);
+  assert.ok(!lines.some((l) => l.includes("甲")), "上一回合完成的项被撤下");
+  assert.ok(lines.some((l) => l.startsWith("▸") && l.includes("乙")));
+
+  // 全部完成 → 下一回合开始直接移除卡片（不是留一张空的）
+  await tool.execute("c4", { action: "toggle", id: 2 }, null, null, ctx);
+  await pi.handlers.get("agent_start")({}, ctx);
+  assert.equal(ctx.calls.at(-1).lines, undefined, "全部完成且已撤下时移除卡片");
+});
+
 test("todo 扩展：session_tree 从分支 details 重建状态", async () => {
   const factory = await loadTodoExtension();
   const pi = makePi();
@@ -144,44 +166,51 @@ test("todo 扩展：session_tree 从分支 details 重建状态", async () => {
   assert.equal(added.details.todos.at(-1).id, 3);
 });
 
-test("todo 扩展：turn_end 自动提醒未完成项 + 同批防循环", async () => {
+test("todo 扩展：agent_before_settle 注入提醒 + 同批防循环", async () => {
   const factory = await loadTodoExtension();
   const pi = makePi();
   factory(pi);
   const tool = pi.tools.get("todo");
   const ctx = makeCtx();
-  const turnEnd = () => pi.handlers.get("turn_end")({}, ctx);
+  // pi 的 actionable boundary：返回 entries（custom_message）+ continue 才会
+  // 真的多跑一次模型请求；turn_end 里 sendUserMessage 会被"回合仍在跑"拒掉。
+  const settle = () => pi.handlers.get("agent_before_settle")({ entries: [] }, ctx);
+  const reminderOf = (res) =>
+    res?.entries?.find((e) => e.type === "custom_message")?.content ?? "";
 
   // 无清单：不提醒
-  await turnEnd();
-  assert.equal(pi.sent.length, 0);
+  assert.equal(await settle(), undefined);
 
-  // 添加一项 → 回合结束 → 提醒一次（内容点名未完成项）
+  // 添加一项 → 结算边界提醒一次（内容点名未完成项），并请求继续
   await tool.execute("c1", { action: "add", text: "Stage A" }, null, null, ctx);
-  await turnEnd();
-  assert.equal(pi.sent.length, 1);
-  assert.match(pi.sent[0], /#1 Stage A/);
-  assert.match(pi.sent[0], /toggle/);
+  const nudged = await settle();
+  assert.equal(nudged.continue, true);
+  assert.match(reminderOf(nudged), /#1 Stage A/);
+  assert.match(reminderOf(nudged), /toggle/);
 
-  // 模型无动于衷回合再次结束：同一批不再重复提醒
-  await turnEnd();
-  assert.equal(pi.sent.length, 1);
+  // 模型无动于衷再次结算：同一批不再重复提醒
+  assert.equal(await settle(), undefined);
+
+  // 新一轮用户输入（input 事件）后允许再提醒一次
+  await pi.handlers.get("input")({}, ctx);
+  const nudgedAgain = await settle();
+  assert.equal(nudgedAgain.continue, true);
+  assert.match(reminderOf(nudgedAgain), /#1 Stage A/);
 
   // toggle 完成后：无未完成项不提醒
   await tool.execute("c2", { action: "toggle", id: 1 }, null, null, ctx);
-  await turnEnd();
-  assert.equal(pi.sent.length, 1);
+  assert.equal(await settle(), undefined);
 
   // 新的未完成状态（签名变化）可再次提醒
   await tool.execute("c3", { action: "add", text: "Stage B" }, null, null, ctx);
-  await turnEnd();
-  assert.equal(pi.sent.length, 2);
-  assert.match(pi.sent[1], /#2 Stage B/);
+  const nudged2 = await settle();
+  assert.equal(nudged2.continue, true);
+  assert.match(reminderOf(nudged2), /#2 Stage B/);
 
   // clear 后重建：nextId 不回卷，同文案新项的提醒签名不冲突
   await tool.execute("c4", { action: "clear" }, null, null, ctx);
+  assert.equal(await settle(), undefined, "清空后重置签名，不再提醒");
   await tool.execute("c5", { action: "add", text: "Stage B" }, null, null, ctx);
-  await turnEnd();
-  assert.equal(pi.sent.length, 3);
-  assert.match(pi.sent[2], /#3 Stage B/);
+  const nudged3 = await settle();
+  assert.match(reminderOf(nudged3), /#3 Stage B/);
 });

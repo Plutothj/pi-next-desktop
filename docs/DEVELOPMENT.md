@@ -729,7 +729,11 @@ npm run stage             # 把本机 pi bundle 复制进 runtime/
 - **文件预览**：`files:readTable/readDoc/readPdf/extractText` + AG Grid / mammoth /
   pdfjs-dist / DOMPurify（见 §7.10）；预览「问 AI」与回合结束自动重读
 - **table 扩展**：模型可读写带公式的 xlsx；依赖复制到 `<agent>/extensions/node_modules`
-- **todo 扩展**：`turn_end` 仍有未完成项时自动注入提醒（同批防循环）
+- **todo 扩展**：`agent_before_settle` 仍有未完成项时注入隐藏的 `custom_message` 并
+  `continue:true`，逼模型回头 toggle（同批签名只提醒一次；`input` 事件重置）。
+  **不要用 `turn_end` + `sendUserMessage`**——回合仍在跑时会被拒，提醒根本到不了模型
+  （历史 bug：清单永远不打勾）。面板在 `agent_start` 撤下上一回合已完成的项
+  （rpiv-todo 同款），全部完成/无可见项时直接移除卡片。
 - **草稿持久化**：输入框内容按工作区（`draft:<cwd>`）防抖 1s 写进 ui.json，重启/崩溃后自动恢复到输入框；发送成功后清键。按 cwd 而不是会话文件做键——会话每次都新建，用会话键重启后就找不到了。
 - **推荐扩展**：设置 → 插件页顶部列出 pi-subagents / billion-context，未装的给「一键安装」（走既有 `cfg:install`）
 - **图片尺寸提示不上屏**：pi 缩图后会在消息正文追加给模型看的
@@ -755,7 +759,7 @@ null，会导致段落反复折叠/展开、滚动位置跳动）。耗时 = 最
 `snapshotQueuedPayloads()`，clear 后按文本+原队列类型找 payload 重发，找不到才退回纯文本。
 缓存随 `queue_update` 收敛（自然出队的项会被清掉）。
 - **图片消息**：用户消息里的图片移到气泡外、右对齐显示为缩略图（max-h-40 / max-w-240，点击放大），气泡只装文字——宽图不会再撑出大片空白
-- **todo widget**：复选框 + 完成划线 + 头部进度（1/3）；全部完成后停留 4 秒自动消失（清单已完成无常驻价值）
+- **todo widget**：复选框 + 完成划线 + 头部进度（1/3）；上一回合完成的项在下一回合开始时撤下；全部完成后停留 4 秒自动消失（清单已完成无常驻价值）
 - **侧栏折叠**：头部「收起侧栏」按钮 / ⌘B（Ctrl+B），状态持久化在 ui.json；折叠后由主界面头部按钮展开
 - **附件落盘**：发送时原件存 `<APP_HOME>/attachments`，聊天 chip 可点开预览
 - **内置技能包**：HR 文案三件套（员工沟通 / 会议纪要 / 活动方案），启动时写入 <agent>/skills
