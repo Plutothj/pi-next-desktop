@@ -307,7 +307,7 @@ export function usePi() {
           // 扩展 UI 按会话替换，避免上一个会话的 todo/status 残留
           widgets: res.ui?.widgets ?? {},
           statuses: res.ui?.statuses ?? {},
-          dialog: null,
+          dialog: res.dialog ?? null,
           runningSessions:
             typeof st.sessionFile === "string"
               ? { ...s.runningSessions, [st.sessionFile]: Boolean(st.isStreaming) }
@@ -331,14 +331,7 @@ export function usePi() {
     [refreshSessions, applyThinkingPref],
   );
 
-  // Opening a project pins it to the project list, then boots pi inside it.
-  const openProject = useCallback(
-    async (dir: string) => {
-      await window.pi.projects.add(dir).catch(() => null);
-      await boot(dir);
-    },
-    [boot],
-  );
+  // 打开项目 = 固定进项目列表 + 在该目录新建会话槽（见下方 openProject）。
 
   // Subscribe on every mount: StrictMode's mount → cleanup → remount cycle
   // would otherwise leave the listener detached (dev builds only).
@@ -631,10 +624,10 @@ export function usePi() {
   // 新建会话 = 在主进程里新开一个会话槽（独立 pi 进程），不打断当前会话。
   // 旧实现走 pi 的 new_session：那是"替换当前进程里的会话"，会 teardown 正在
   // 跑的回合——同项目开第二个会话时第一个就被打断。
-  const newSession = useCallback(async () => {
+  const newSession = useCallback(async (cwd?: string) => {
     let res: Awaited<ReturnType<typeof window.pi.createSession>>;
     try {
-      res = await window.pi.createSession(stateRef.current?.cwd);
+      res = await window.pi.createSession(cwd ?? stateRef.current?.cwd);
     } catch (err) {
       setState((s) => ({ ...s, error: `新建会话失败：${(err as Error).message}` }));
       return;
@@ -656,7 +649,7 @@ export function usePi() {
         thinkingLevel: String(fresh.thinkingLevel ?? s.thinkingLevel),
         widgets: res.ui?.widgets ?? {},
         statuses: res.ui?.statuses ?? {},
-        dialog: null,
+        dialog: res.dialog ?? null,
         runningSessions: file
           ? { ...s.runningSessions, [file]: Boolean(fresh.isStreaming) }
           : s.runningSessions,
@@ -670,6 +663,17 @@ export function usePi() {
     if (applied) setState((s) => ({ ...s, thinkingLevel: applied }));
     refreshSessions();
   }, [refreshSessions, applyThinkingPref]);
+
+  // 打开项目 = 固定进项目列表 + 在该目录**新建一个会话槽**。
+  // 必须走 pi:createSession（唯一临时键、独立进程）：以前的 boot（pi:start）
+  // 用共享键起新会话，多项目并行时可能命中/重绑别的正在跑的槽。
+  const openProject = useCallback(
+    async (dir: string) => {
+      await window.pi.projects.add(dir).catch(() => null);
+      await newSession(dir);
+    },
+    [newSession],
+  );
 
   const deleteSession = useCallback(
     async (file: string) => {
@@ -709,7 +713,7 @@ export function usePi() {
       // 切换 = 换界面显示的活动会话；后台会话的 pi 进程继续跑，不中断。
       const switched = await window.pi
         .switchSession(file, cwd)
-        .catch(() => ({ ok: false }));
+        .catch(() => ({ ok: false, dialog: null as UiDialogRequest | null }));
       if (!switched?.ok || seq !== openSeq.current) return;
       const [st, msgs] = await Promise.all([
         send({ type: "get_state" }),
@@ -733,7 +737,8 @@ export function usePi() {
         // 扩展 UI 跟着会话走：todo/status 一律整体替换，杜绝跨会话串台
         widgets: ui?.widgets ?? {},
         statuses: ui?.statuses ?? {},
-        dialog: null,
+        // 切到这个会话时它还在等回答的阻塞对话框（后台 pi 一直挂着）
+        dialog: switched?.dialog ?? null,
         runningSessions: { ...s.runningSessions, [file]: Boolean(state_.isStreaming) },
         // Session files record their own cwd; cross-project switches follow it.
         ...(cwd ? { cwd } : {}),

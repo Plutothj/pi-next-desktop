@@ -57,7 +57,9 @@ function send(record) {
 process.on("uncaughtException", (err) => logLine("uncaught", err));
 process.on("unhandledRejection", (err) => logLine("unhandled-rejection", err));
 
-const pendingDialogs = new Set();
+// 待回答的扩展对话框：id → { sessionFile, request }。带上所属会话才能在切走
+// 时把对话框暂存回对应槽（否则 pi 一直等、回合卡死，见 dismissPendingDialogs）。
+const pendingDialogs = new Map();
 const taskManager = createTaskManager({ userDataDir: APP_HOME, send });
 
 // 并行 agent 任务板（独立 pi 子进程，见 agents.js）
@@ -154,21 +156,49 @@ function piEnv(rt) {
 let bootLock = Promise.resolve();
 let newSessionSeq = 0;
 
+// 切会话 / 开新会话前：把当前会话的阻塞对话框暂存回它的槽（切回来会重放），
+// 再把界面上的对话框清掉。直接丢弃会让 pi 永远等一个没人回答的响应，
+// 正在跑的回合停在半路——用户看到的就是"在别的项目新建会话把这边打断了"。
+function stashPendingDialogs() {
+  for (const [id, entry] of pendingDialogs) {
+    if (entry?.sessionFile) pool.stashDialog(entry.sessionFile, entry.request);
+    else logLine("ui", `无法归位的对话框: ${id}`);
+  }
+  pendingDialogs.clear();
+}
+
+function dismissPendingDialogs() {
+  stashPendingDialogs();
+  send({ type: "ui_dialog_clear" });
+}
+
+/** 某会话当前待回答的对话框（切会话时回传给渲染层，避免先清后补的时序问题）。 */
+function pendingDialogFor(file) {
+  for (const entry of pendingDialogs.values()) {
+    if (entry?.sessionFile === file) return entry.dialog ?? null;
+  }
+  return null;
+}
+
 async function startPi(cwd, sessionFile = null) {
-  // 切到目标会话（null = 新会话，由 pi 分配文件）；其余会话进程保持运行。
+  // 切到目标会话（sessionFile 为空 = 新会话，由 pi 分配文件）；其余会话进程保持运行。
+  // 新会话必须用**唯一临时键**（以前用 null 当键：一次 boot 还没拿到 pi 分配的
+  // 文件路径时，下一次 boot 会命中同一个 null 槽，把正在跑的会话当成"新会话"
+  // 复用/重绑，表现为"在别的项目新建对话把正在跑的会话打断"）。
   // 注意：activeSession 先保持旧值，等新进程起来再切换，避免 ensure 期间
   // 事件被路由到错误会话。
-  pendingDialogs.clear();
-  send({ type: "ui_dialog_clear" });
+  dismissPendingDialogs();
 
-  await pool.ensure(sessionFile, cwd, { active: true });
-  activeSession = sessionFile;
-  pool.activate(sessionFile);
+  let key = sessionFile;
+  if (!key) key = `__boot-${Date.now()}-${++newSessionSeq}`;
+  await pool.ensure(key, cwd, { active: true });
+  activeSession = key;
+  pool.activate(key);
 
   const rt = resolveRuntime();
   const version = (await cliVersion(rt)) ?? runtimeVersion(rt);
   logLine("pi", `session ready: ${sessionFile ?? "(new)"} in ${cwd} (pi v${version})`);
-  return { rt, version };
+  return { rt, version, key };
 }
 
 // Extension text is written for a TUI; strip CSI/OSC escapes and control chars.
@@ -199,19 +229,14 @@ function cleanUiSnapshot(ui) {
 
 // Dialog requests block pi until answered, so every one of them gets a reply.
 function handleExtensionUi(req) {
+  // 池转发时带 sessionFile；兜底用当前活动会话（同一请求重放时也走这里）。
+  const owner = req.sessionFile ?? activeSession;
   if (req.method === "confirm") {
     // 走应用内卡片而不是系统 message box：计划审批要把整份 markdown 计划
     // 展示给用户（ZCode 的计划审批也是输入框上方的卡片，而不是原生弹窗）。
-    pendingDialogs.add(req.id);
-    send({
-      type: "ui_dialog",
-      dialog: {
-        id: req.id,
-        method: "confirm",
-        title: req.title,
-        message: req.message,
-      },
-    });
+    const dialog = { id: req.id, method: "confirm", title: req.title, message: req.message };
+    pendingDialogs.set(req.id, { sessionFile: owner, request: req, dialog });
+    send({ type: "ui_dialog", dialog });
     return;
   }
   if (req.method === "notify") {
@@ -235,18 +260,16 @@ function handleExtensionUi(req) {
   // select / input / editor are answered from the renderer; pi keeps the
   // request open until pi:uiRespond writes the matching response.
   if (["select", "input", "editor"].includes(req.method)) {
-    pendingDialogs.add(req.id);
-    send({
-      type: "ui_dialog",
-      dialog: {
-        id: req.id,
-        method: req.method,
-        title: req.title,
-        options: req.options,
-        placeholder: req.placeholder,
-        prefill: req.prefill,
-      },
-    });
+    const dialog = {
+      id: req.id,
+      method: req.method,
+      title: req.title,
+      options: req.options,
+      placeholder: req.placeholder,
+      prefill: req.prefill,
+    };
+    pendingDialogs.set(req.id, { sessionFile: owner, request: req, dialog });
+    send({ type: "ui_dialog", dialog });
   }
 }
 
@@ -561,7 +584,7 @@ safeHandle("pi:start", async (_e, { cwd, sessionFile = null } = {}) => {
         ? saved
         : os.homedir();
   const run = async () => {
-    await startPi(resolved, sessionFile);
+    const started = await startPi(resolved, sessionFile);
     writeLastWorkspace(resolved);
     // Cold start: get_state can answer before the session/model exist, so poll.
     let state = null;
@@ -576,11 +599,11 @@ safeHandle("pi:start", async (_e, { cwd, sessionFile = null } = {}) => {
       pool.command(activeSession, { type: "get_messages" }).catch(() => null),
     ]);
     // 会话文件由 pi 分配（新会话第一次落盘后才拿到）；回传给渲染层做键。
-    // 池里的槽也要跟着改键，否则后续 command 会落在不存在的 null 键上。
+    // 池里的槽也要跟着从临时键改到真实文件，否则后续 command 会落空。
     const assigned =
       state?.data?.sessionFile ?? (sessionFile && fs.existsSync(sessionFile) ? sessionFile : null);
     if (assigned) {
-      if (!sessionFile) pool.rebind(null, assigned);
+      if (!sessionFile) pool.rebind(started.key, assigned);
       activeSession = assigned;
     }
     return {
@@ -590,6 +613,8 @@ safeHandle("pi:start", async (_e, { cwd, sessionFile = null } = {}) => {
       cwd: resolved,
       sessionFile: assigned,
       ui: cleanUiSnapshot(pool.uiSnapshot(activeSession)),
+      // 同一个会话重启（设置变更）时，还挂着的审批对话框要回到界面上
+      dialog: pendingDialogFor(activeSession),
     };
   };
   // Serialise overlapping boots; the caller always gets the latest result.
@@ -616,7 +641,7 @@ safeHandle("pi:createSession", async (_e, { cwd } = {}) => {
     const key = `__new-${Date.now()}-${++newSessionSeq}`;
     await pool.ensure(key, resolved, { active: true, fresh: true });
     activeSession = key;
-    pendingDialogs.clear();
+    dismissPendingDialogs();
     let state = null;
     for (let i = 0; i < 40; i++) {
       await new Promise((r) => setTimeout(r, 250));
@@ -640,6 +665,8 @@ safeHandle("pi:createSession", async (_e, { cwd } = {}) => {
       cwd: resolved,
       sessionFile: assigned,
       ui: cleanUiSnapshot(pool.uiSnapshot(activeSession)),
+      // 新会话没有待回答的对话框（旧会话的已经随 stash 归位）
+      dialog: (assigned && pendingDialogFor(assigned)) || null,
     };
   };
   const result = bootLock.then(run, run);
@@ -769,6 +796,8 @@ safeHandle("remote:tunnelStop", () => stopRemoteTunnel());
 // 切换界面显示的会话：只切活动指针（后台会话进程继续跑，不中断）。
 safeHandle("pi:switchSession", async (_e, { sessionFile, cwd } = {}) => {
   if (typeof sessionFile !== "string" || !sessionFile) return { ok: false, error: "缺少会话路径" };
+  // 旧会话的阻塞对话框暂存回它的槽：pi 在等回答，丢掉会让那个回合永远卡住。
+  if (activeSession !== sessionFile) stashPendingDialogs();
   activeSession = sessionFile;
   pool.activate(sessionFile);
   const running = pool.isRunning(sessionFile);
@@ -780,6 +809,7 @@ safeHandle("pi:switchSession", async (_e, { sessionFile, cwd } = {}) => {
     ok: true,
     running: pool.isRunning(sessionFile),
     ui: cleanUiSnapshot(pool.uiSnapshot(sessionFile)),
+    dialog: pendingDialogFor(sessionFile),
   };
 });
 
@@ -832,13 +862,17 @@ safeHandle("pi:reveal", (_e, target) => {
 });
 
 safeHandle("pi:uiRespond", (_e, { id, value, cancelled, confirmed } = {}) => {
-  if (!pendingDialogs.has(id)) return { ok: false, error: "请求已失效" };
+  const entry = pendingDialogs.get(id);
+  if (!entry) return { ok: false, error: "请求已失效" };
   pendingDialogs.delete(id);
   const payload = { type: "extension_ui_response", id };
   if (cancelled) payload.cancelled = true;
   else if (confirmed !== undefined) payload.confirmed = Boolean(confirmed);
   else payload.value = typeof value === "string" ? value : "";
-  pool.write(activeSession, payload);
+  // 回答发给对话框所属的会话（可能是重放出来的后台会话），不是当前活动会话。
+  // 会话文件是 pi 后来分配的，键理论上不会变；万一槽已不在就退回活动会话。
+  const owner = entry.sessionFile ?? activeSession;
+  if (!pool.write(owner, payload) && owner !== activeSession) pool.write(activeSession, payload);
   return { ok: true };
 });
 
@@ -846,8 +880,11 @@ safeHandle("pi:uiRespond", (_e, { id, value, cancelled, confirmed } = {}) => {
 if (process.env.PI_DEBUG) {
   safeHandle("pi:debugDialog", (_e, dialogRequest) => {
     const id = `debug-${Date.now()}`;
-    pendingDialogs.add(id);
-    send({ type: "ui_dialog", dialog: { ...dialogRequest, id } });
+    const dialog = { ...dialogRequest, id };
+    // 合成一份扩展请求，切走/切回时能被 stash→replay 完整重放
+    const request = { type: "extension_ui_request", sessionFile: activeSession, ...dialog };
+    pendingDialogs.set(id, { sessionFile: activeSession, request, dialog });
+    send({ type: "ui_dialog", dialog });
     return { ok: true, id };
   });
 

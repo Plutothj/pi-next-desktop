@@ -351,13 +351,21 @@ export type PiBridge = {
   switchSession: (
     sessionFile: string,
     cwd?: string,
-  ) => Promise<{ ok: boolean; running?: boolean; error?: string; ui?: UiSnapshot }>;
+  ) => Promise<{
+    ok: boolean;
+    running?: boolean;
+    error?: string;
+    ui?: UiSnapshot;
+    /** 该会话切回来时还没回答的阻塞对话框（pi 一直在等） */
+    dialog?: UiDialogRequest | null;
+  }>;
   start: (cwd?: string) => Promise<{
     state: Record<string, unknown> | null;
     models: ModelInfo[];
     messages: PiMessage[];
     cwd: string;
     ui?: UiSnapshot;
+    dialog?: UiDialogRequest | null;
   }>;
   // 新开一个独立会话槽（独立 pi 进程），不打断当前会话正在跑的回合。
   createSession: (cwd?: string) => Promise<{
@@ -367,6 +375,7 @@ export type PiBridge = {
     cwd: string;
     sessionFile: string | null;
     ui?: UiSnapshot;
+    dialog?: UiDialogRequest | null;
   }>;
   // 并排窗格：确保会话进程在跑并开始转发完整事件，返回首帧快照。
   sessionPane: (

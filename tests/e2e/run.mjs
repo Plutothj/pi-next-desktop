@@ -568,14 +568,65 @@ async function main() {
     if (!JSON.parse(aAfterCreate).running) throw new Error(`新建后 A 进程被顶掉: ${aAfterCreate}`);
   });
 
-  // 17. 项目树：创建项目后出现在侧栏的项目分组里
+  // 17. 阻塞对话框跟着会话走：在 A 等项目审批时去别的项目新建会话，
+  //     对话框要被暂存而不是丢弃（丢掉 pi 会永远等，A 的回合卡死"停止"）。
+  await check("切换会话保留待回答的审批对话框", async () => {
+    const workA = path.join(agentDir, "..", `pi-e2e-dialog-a-${process.pid}`);
+    const workB = path.join(agentDir, "..", `pi-e2e-dialog-b-${process.pid}`);
+    fs.mkdirSync(workA, { recursive: true });
+    fs.mkdirSync(workB, { recursive: true });
+    const createdA = JSON.parse(
+      await evaluate(
+        `window.pi.createSession(${JSON.stringify(workA)}).then(r => JSON.stringify({ file: r.sessionFile }))`,
+      ),
+    );
+    if (!createdA.file) throw new Error("A 会话未创建");
+    const dialog = JSON.parse(
+      await evaluate(
+        `window.pi.debugDialog({ method: 'confirm', title: '批准这份实施计划？', message: '# 测试计划' }).then(r => JSON.stringify(r))`,
+      ),
+    );
+    await waitForExpr(
+      `window.__pi.dialog && window.__pi.dialog.id === ${JSON.stringify(dialog.id)} ? 'shown' : null`,
+      10_000,
+      "审批对话框",
+    );
+    // 别的项目新建会话：对话框从界面消失，但 A 的 pi 仍在等回答
+    await evaluate(
+      `window.pi.createSession(${JSON.stringify(workB)}).then(r => JSON.stringify({ file: r.sessionFile }))`,
+    );
+    await waitForExpr(`window.__pi.dialog ? null : 'cleared'`, 5_000, "对话框清除");
+    await evaluate(
+      `window.__piOpenSession(${JSON.stringify(createdA.file)}, ${JSON.stringify(workA)})`,
+    );
+    await waitForExpr(
+      `window.__pi.dialog && window.__pi.dialog.id === ${JSON.stringify(dialog.id)} ? 'restored' : null`,
+      10_000,
+      "对话框恢复",
+    );
+    // 回答后请求从主进程的待回答表里消失（渲染层的卡片由 answerDialog 收掉）
+    const answered = JSON.parse(
+      await evaluate(
+        `window.pi.respondUi(${JSON.stringify(dialog.id)}, { cancelled: true }).then(r => JSON.stringify(r))`,
+      ),
+    );
+    if (!answered.ok) throw new Error(`对话框回答失败: ${JSON.stringify(answered)}`);
+    const again = JSON.parse(
+      await evaluate(
+        `window.pi.respondUi(${JSON.stringify(dialog.id)}, { cancelled: true }).then(r => JSON.stringify(r))`,
+      ),
+    );
+    if (again.ok) throw new Error("对话框回答后仍留在待回答表里");
+  });
+
+  // 18. 项目树：创建项目后出现在侧栏的项目分组里
   await check("创建项目", async () => {
     await evaluate(`window.pi.projects.add(${JSON.stringify(agentDir)}).then(r => JSON.stringify(r))`);
     const projects = await evaluate(`window.pi.projects.list().then(l => JSON.stringify(l.map(p => p.path)))`);
     if (!JSON.parse(projects).includes(agentDir)) throw new Error(`项目未登记: ${projects}`);
   });
 
-  // 18. 删除项目：有会话时也必须真的消失（曾经因为侧栏分组由会话 cwd 推出，
+  // 19. 删除项目：有会话时也必须真的消失（曾经因为侧栏分组由会话 cwd 推出，
   //     删掉项目后会话立刻把它"变回"项目），而且确认框必须是应用内对话框。
   await check("删除项目（有会话）：应用内确认 + 整组隐藏", async () => {
     const work = path.join(agentDir, "..", `pi-e2e-projdel-${process.pid}`);
@@ -630,7 +681,7 @@ async function main() {
     if (!fs.existsSync(sessionPath)) throw new Error(`会话文件被误删: ${sessionPath}`);
   });
 
-  // 19. 删除技能：设置页里点垃圾桶 → 应用内确认框（叠在设置页之上）→ 真的删掉
+  // 20. 删除技能：设置页里点垃圾桶 → 应用内确认框（叠在设置页之上）→ 真的删掉
   await check("删除技能：应用内确认 + 目录真的删除", async () => {
     // 技能目录在 fixture 启动时已创建（设置页 cfg 只在打开时读一次）
     const skillDir = path.join(agentDir, "skills", "e2e-demo-skill");
@@ -691,7 +742,7 @@ async function main() {
     await sleep(300);
   });
 
-  // 20. 文件预览：xlsx 网格 / docx 正文 / pdf canvas / 问 AI 预填
+  // 21. 文件预览：xlsx 网格 / docx 正文 / pdf canvas / 问 AI 预填
   //     fixture 项目里放三种样例文件，走真实 UI 动线（文件树 → 点开）
   await check("文件预览（xlsx/docx/pdf）+ 问 AI", async () => {
     const work = path.join(agentDir, "..", `pi-e2e-preview-${process.pid}`);
@@ -777,7 +828,7 @@ async function main() {
     fs.rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
-  // 21. 侧栏折叠：收起后消失、头部出现展开按钮、再展开回来
+  // 22. 侧栏折叠：收起后消失、头部出现展开按钮、再展开回来
   await check("侧栏折叠/展开", async () => {
     // 注意：右侧面板也是 <aside>，这里只认左侧栏（含「项目」标题的那块）
     const hasSidebar = () => evaluate("Boolean(document.querySelector('aside.w-64'))");

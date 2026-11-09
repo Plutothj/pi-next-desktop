@@ -135,6 +135,18 @@ export function createSessionPool({ send, makeEnv, buildArgs, activeKey, idleMs 
     };
   }
 
+  /**
+   * 把活动会话的阻塞对话框暂存回它的槽：切走再切回时要重新弹出。
+   * 直接从"待回答"表里丢掉是不行的——pi 会永远等一个没人回答的响应，
+   * 正在跑的回合就卡死在半路（表现为"切到别的会话，这边的对话停住"）。
+   */
+  function stashDialog(file, rec) {
+    const slot = slots.get(file);
+    if (!slot || !rec) return false;
+    slot.pendingDialog = rec;
+    return true;
+  }
+
   async function command(file, payload) {
     const slot = slots.get(file);
     if (!slot?.proc.running) throw new Error("pi 未运行");
@@ -194,6 +206,7 @@ export function createSessionPool({ send, makeEnv, buildArgs, activeKey, idleMs 
     ensure,
     activate,
     observe,
+    stashDialog,
     uiSnapshot,
     rebind,
     command,

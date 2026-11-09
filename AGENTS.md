@@ -44,7 +44,8 @@ git push --follow-tags                       # 推提交和 tag；release.yml �
 - **prompt 总是带 `streamingBehavior`**：空闲时 pi 忽略，流式中缺失会被拒。
 - 会话 JSONL 是 pi 的内部格式（当前 v3，`SUPPORTED_SESSION_VERSION`）：手写/复制文件前必须过版本守卫；标题解析已有廉价预过滤，别逐行 `JSON.parse` 全量。
 - `PiProcess` 的 exit 回调：被新进程顶替的旧进程不算新闻，但 `stop()` 主动停的**必须**照常触发 `onExit`（`this.stopped` 标记）——槽清理与退出钩子都挂在上面，历史 bug。
-- **新建会话必须走 `pi:createSession`（新开池槽），不要用 pi 的 `new_session`**：后者是替换当前进程里的会话，会 teardown 正在跑的回合——"同项目开第二个会话就把第一个打断"的根因。后台会话的完整事件不转发，只发 `session_status` 驱动运行指示。
+- **新建会话必须走 `pi:createSession`（新开池槽），不要用 pi 的 `new_session`**：后者是替换当前进程里的会话，会 teardown 正在跑的回合——"同项目开第二个会话就把第一个打断"的根因。后台会话的完整事件不转发，只发 `session_status` 驱动运行指示。项目里的「+」/打开项目也要走它；`pi:start` 的新会话必须用**唯一临时键**，绝不能拿 `null` 当池键（两次 boot 会命中同一个槽，把正在跑的会话当成新会话复用）。
+- **阻塞型扩展对话框按会话归属记账**（`pendingDialogs: id → {sessionFile, request, dialog}`）：切会话/开新会话时用 `pool.stashDialog` 暂存回对应槽、切回时重放，回答也发给对话框所属会话。直接丢弃会让 pi 永远等一个没人回答的响应，正在跑的回合卡死在半路——表现为"在别的项目新建对话把这边打断了"。
 - 渲染层事件订阅 effect 每次挂载都要重新注册，boot 用 `started` ref 护栏只跑一次（StrictMode 双挂载，历史 bug）。
 - 注释与用户可见文案用中文，标识符用英文，与现有代码一致。
 - **危险操作（删除/卸载/还原）的确认框必须用 `useConfirm()`（`src/components/ui/confirm-dialog.tsx`），不要用 `window.confirm`**：原生弹框和暗色 UI 割裂，阻塞渲染；CDP 驱动的 E2E 遇到原生 confirm 会直接挂住。

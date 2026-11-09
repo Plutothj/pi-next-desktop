@@ -126,6 +126,13 @@ pi.stop() → 清理挂起对话框 → resolveRuntime()
   `switch_session` / `new_session` 会 teardown 当前回合，不用于切视图）。
 - `pi:createSession` 用临时键 `__new-*` 开新槽（`ensure(key, cwd, { fresh: true })` 不传
   `--session`），等 pi 分配 sessionFile 后 `rebind` 到真实路径——**新建会话不会顶掉正在跑的会话**。
+  项目行「+」/打开项目也走它；`pi:start` 的新会话同样用唯一临时键 `__boot-*`，
+  **绝不能拿 `null` 当池键**（两次 boot 会命中同一个槽，把正在跑的会话当成"新会话"）。
+- **阻塞对话框按会话暂存**：`pendingDialogs` 是 `id → {sessionFile, request, dialog}` 的 Map；
+  切会话/开新会话时 `pool.stashDialog(owner, request)` 暂存回槽（切回 `activate` 重放），
+  回答经 `pi:uiRespond → pool.write(owner)`。直接丢弃会让 pi 永远等一个没人回答的响应，
+  那个回合就卡死在半路（用户报"A 项目在跑，去 B 项目新建对话把 A 打断了"）。
+  切会话响应里带 `dialog`（`pendingDialogFor`），渲染层整体替换而不是先清后补。
 - 后台会话的完整事件不转发（避免污染活动视图），只发轻量 `session_status`
   （`{sessionFile, isStreaming, alive}`）：渲染层的 `runningSessions` 据此驱动侧栏运行点与
   后台完成通知。
