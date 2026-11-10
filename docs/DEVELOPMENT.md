@@ -531,7 +531,7 @@ npm 包，照这个模式办，**不要指望 stage 脚本 vendor**（那是给 
 | 技能 | 用途 |
 |---|---|
 | `hr-employee-writing` | 入职/离职/晋升调岗沟通、绩效反馈、PIP、节日关怀文案 |
-| `meeting-notes` | 会议纪要 → 结论/行动项表格，行动项 ≥3 条时用 `todo` 工具建清单 |
+| `meeting-notes` | 会议纪要 → 结论/行动项表格，行动项 ≥3 条时用 `TodoWrite` 建清单 |
 | `event-plan` | 活动方案结构 + 预算表（金额用 `=SUM` 公式，交付表走 `table` 工具） |
 
 技能是"按需检索的领域提示词"：模型仅在相关任务上读到正文，不占常驻上下文，
@@ -546,7 +546,7 @@ npm 包，照这个模式办，**不要指望 stage 脚本 vendor**（那是给 
 1. **工具**：注册 `EnterPlanMode` / `ExitPlanMode`。模型可主动进入只读规划；`ExitPlanMode`
    的 `plan` 参数就是用户审批时看到的完整计划正文。
 2. **`pi.on("tool_call")`**：计划模式开启时拦截所有非只读工具（`read/grep/glob/find/ls`、
-   `todo`、`ask_user_question`、`table` 的 `read` 放行；`write/edit/bash/table write/未知工具`
+   `TodoWrite`、`ask_user_question`、`table` 的 `read` 放行；`write/edit/bash/table write/未知工具`
    返回 `{block:true, reason}`），pi 会把它变成带原因的 tool error，模型能看懂并转向读代码。
 3. **`before_agent_start`**：开启时往 `systemPromptOptions.sections` 注入 `plan_mode` 区块
    （名字必须匹配 `^[a-z][a-z0-9_-]*$`，写成 "Plan mode" 会报 *Invalid system prompt section name*）。
@@ -681,7 +681,7 @@ npm run stage             # 把本机 pi bundle 复制进 runtime/
   喂一行 `{"id":1,"type":"get_state"}`），stderr 会给出 `Cannot find module '…'` 的真实原因
 
 测试：`npm test`（`node --test tests/`）覆盖会话标题/扫描排序/fork 构建/版本守卫、任务桥（真实 spawn + socket），
-以及 todo / table 扩展（jiti 加载真实 TS 源码 + SheetJS 回读断言公式）。CI 见 `.github/workflows/ci.yml`
+以及 TodoWrite / table 扩展（jiti 加载真实 TS 源码 + SheetJS 回读断言公式）。CI 见 `.github/workflows/ci.yml`
 （stage（扩展测试要 runtime/node_modules）→ tsc --noEmit → build → test；e2e 用 xvfb + `ELECTRON_DISABLE_SANDBOX`）。
 
 常见冒烟清单：
@@ -729,11 +729,16 @@ npm run stage             # 把本机 pi bundle 复制进 runtime/
 - **文件预览**：`files:readTable/readDoc/readPdf/extractText` + AG Grid / mammoth /
   pdfjs-dist / DOMPurify（见 §7.10）；预览「问 AI」与回合结束自动重读
 - **table 扩展**：模型可读写带公式的 xlsx；依赖复制到 `<agent>/extensions/node_modules`
-- **todo 扩展**：`agent_before_settle` 仍有未完成项时注入隐藏的 `custom_message` 并
-  `continue:true`，逼模型回头 toggle（同批签名只提醒一次；`input` 事件重置）。
-  **不要用 `turn_end` + `sendUserMessage`**——回合仍在跑时会被拒，提醒根本到不了模型
-  （历史 bug：清单永远不打勾）。面板在 `agent_start` 撤下上一回合已完成的项
-  （rpiv-todo 同款），全部完成/无可见项时直接移除卡片。
+- **todo 扩展（`TodoWrite`）**：契约对齐 Claude Code / ZCode / opencode——工具名
+  `TodoWrite`，**每次调用发送全量列表**（`todos: [{content, status: pending|in_progress|completed, priority?}]`），
+  整份替换上一份。旧的 add/toggle/remove 增量接口模型懒得维护，已废弃（`reconstruct` 仍兼容旧 `todo` 的 `done` 格式）。
+  引导语写死"3+ 步骤 / 多个任务 / 用户要求时主动用，拿不准就用"。治"懒"的三层：
+  1. 回合边界（`turn_end`）**定期提醒**：连续 6 个 assistant 回合没写清单（其中 ≥4 轮在跑工具）
+     就注入隐藏 `custom_message` + `continue:true`（ZCode 同类机制的更早阈值），提醒后计数清零；
+  2. 结算边界（`agent_before_settle`）仍有未完成项 → 注入提醒逼模型标 completed
+     （同批签名只提醒一次；`input` 事件重置）；
+  3. 面板在 `agent_start` 撤下上一回合已完成的项，全部完成/无可见项时直接移除卡片（rpiv-todo 同款）。
+  **不要用 `sendUserMessage` 做提醒**（回合仍在跑时会被拒），必须走 boundary 的 `entries`。
 - **草稿持久化**：输入框内容按工作区（`draft:<cwd>`）防抖 1s 写进 ui.json，重启/崩溃后自动恢复到输入框；发送成功后清键。按 cwd 而不是会话文件做键——会话每次都新建，用会话键重启后就找不到了。
 - **推荐扩展**：设置 → 插件页顶部列出 pi-subagents / billion-context，未装的给「一键安装」（走既有 `cfg:install`）
 - **图片尺寸提示不上屏**：pi 缩图后会在消息正文追加给模型看的

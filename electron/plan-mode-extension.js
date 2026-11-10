@@ -19,10 +19,10 @@ import path from "node:path";
 
 const MAX_PLAN_CHARS = 20_000;
 const STATUS_KEY = "plan";
-// 只读工具白名单：文件浏览/搜索；todo 与提问是会话内操作，不碰工作区。
+// 只读工具白名单：文件浏览/搜索；TodoWrite 与提问是会话内操作，不碰工作区。
 const READONLY_TOOLS = new Set([
   "read", "grep", "glob", "find", "ls", "fd", "ripgrep", "search",
-  "web_search", "websearch", "todo", "ask_user_question",
+  "web_search", "websearch", "todo", "TodoWrite", "todowrite", "ask_user_question",
 ]);
 
 function sessionFile(ctx: ExtensionContext): string | undefined {

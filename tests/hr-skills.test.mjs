@@ -32,7 +32,7 @@ test("hr-skills：安装后三套技能可被 listSkills 解析", async () => {
 
   // 关键内容抽查
   const meeting = fs.readFileSync(path.join(agent, "skills", "meeting-notes", "SKILL.md"), "utf8");
-  assert.match(meeting, /todo/, "会议纪要要接 todo 工具");
+  assert.match(meeting, /TodoWrite/, "会议纪要要接 TodoWrite 工具");
   assert.match(meeting, /负责人/, "行动项要有责任人列");
 
   const event = fs.readFileSync(path.join(agent, "skills", "event-plan", "SKILL.md"), "utf8");
