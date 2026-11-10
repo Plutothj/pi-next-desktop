@@ -333,23 +333,60 @@ export function usePi() {
 
   // 打开项目 = 固定进项目列表 + 在该目录新建会话槽（见下方 openProject）。
 
+  // 流式 delta 按帧合并：每条 IPC 都 setState 会让 markdown 每个 token 重新解析，
+  // 长回复 + 滚动时最容易掉帧。合并到下一拍再进 reducer；其它事件先同步冲刷，
+  // 保证 message_end / agent_end 永远排在 delta 之后。用 setTimeout 而不是
+  // requestAnimationFrame：窗口被遮挡/最小化时 rAF 会被暂停，deltas 会一直憋
+  // 到 message_end 才一次性出现（实测门控窗口下就是"流式全丢"）。
+  const pendingDeltas = useRef<RpcEvent[]>([]);
+  const deltaTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Subscribe on every mount: StrictMode's mount → cleanup → remount cycle
   // would otherwise leave the listener detached (dev builds only).
   useEffect(() => {
-    return window.pi.onEvent((rec) =>
-      setState((s) => {
-        // 并排窗格会同时订阅同一批事件；活动视图只吃自己的会话。
-        // 其他会话的 agent_* 仍要更新 runningSessions（侧栏运行点）。
-        if (rec.sessionFile && s.sessionFile && rec.sessionFile !== s.sessionFile) {
-          if (rec.type === "session_status") return reduce(s, rec);
-          if (rec.type === "agent_start" || rec.type === "agent_settled" || rec.type === "agent_end") {
-            return withRunning(s, rec.sessionFile, rec.type === "agent_start");
-          }
-          return s;
+    const applyEvent = (s: State, rec: RpcEvent): State => {
+      // 并排窗格会同时订阅同一批事件；活动视图只吃自己的会话。
+      // 其他会话的 agent_* 仍要更新 runningSessions（侧栏运行点）。
+      if (rec.sessionFile && s.sessionFile && rec.sessionFile !== s.sessionFile) {
+        if (rec.type === "session_status") return reduce(s, rec);
+        if (rec.type === "agent_start" || rec.type === "agent_settled" || rec.type === "agent_end") {
+          return withRunning(s, rec.sessionFile, rec.type === "agent_start");
         }
-        return reduce(s, rec);
-      }),
-    );
+        return s;
+      }
+      return reduce(s, rec);
+    };
+    const flushDeltas = (s: State): State => {
+      if (!pendingDeltas.current.length) return s;
+      const batch = pendingDeltas.current;
+      pendingDeltas.current = [];
+      if (deltaTimer.current !== null) {
+        clearTimeout(deltaTimer.current);
+        deltaTimer.current = null;
+      }
+      return batch.reduce(applyEvent, s);
+    };
+    const unsub = window.pi.onEvent((rec) => {
+      if (rec.type === "message_update") {
+        pendingDeltas.current.push(rec);
+        if (deltaTimer.current === null) {
+          deltaTimer.current = setTimeout(() => {
+            deltaTimer.current = null;
+            const batch = pendingDeltas.current;
+            pendingDeltas.current = [];
+            if (batch.length) setState((s) => batch.reduce(applyEvent, s));
+          }, 16);
+        }
+        return;
+      }
+      setState((s) => applyEvent(flushDeltas(s), rec));
+    });
+    return () => {
+      unsub();
+      if (deltaTimer.current !== null) clearTimeout(deltaTimer.current);
+      deltaTimer.current = null;
+      pendingDeltas.current = [];
+    };
   }, []);
 
   useEffect(() => {

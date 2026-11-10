@@ -1,5 +1,6 @@
-import { Fragment, memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { mermaid } from "@streamdown/mermaid";
+import { useStickToBottomContext } from "use-stick-to-bottom";
 import { stripAttachmentBlocks, stripDirective, stripImageNotes } from "@/lib/promptPrefixes";
 import {
   BrainIcon,
@@ -628,7 +629,24 @@ function BashCard({ message }: { message: PiMessage }) {
 const PAGE = 60;
 
 /** 主聊天与并行会话共用的转录视图：消息流 + 流式块 + 等待占位。 */
-export function Transcript({
+export function Transcript(props: {
+  messages: PiMessage[];
+  streaming: ContentBlock[] | null;
+  isStreaming: boolean;
+  tools: Record<string, ToolExec>;
+  cwd: string;
+  onFork?: (message: PiMessage) => void;
+}) {
+  return (
+    <Conversation>
+      {/* body 必须在 StickToBottom 的 provider 内：滚动续页要拿 scrollRef */}
+      <TranscriptBody {...props} />
+      <ConversationScrollButton />
+    </Conversation>
+  );
+}
+
+function TranscriptBody({
   messages,
   streaming,
   isStreaming,
@@ -647,6 +665,11 @@ export function Transcript({
   // many turns the transcript holds.
   const [limit, setLimit] = useState(PAGE);
   const resolveAttachments = useSavedAttachments(cwd);
+  // 滚到顶部附近自动续一页（ZCode 的 loadOlder / opencode 的窗口化同思路）：
+  // 不要求用户点按钮。前置内容会让视口跳动，所以加载前后用 scrollHeight 差值回补。
+  const { scrollRef } = useStickToBottomContext();
+  const loadAnchor = useRef<{ top: number; height: number } | null>(null);
+  const startRef = useRef(0);
 
   // toolResult messages live in the transcript but render inside their card.
   const results = useMemo(() => {
@@ -662,10 +685,45 @@ export function Transcript({
   );
   const start = Math.max(0, visible.length - limit);
   const windowed = visible.slice(start);
+  startRef.current = start;
+
+  const loadOlder = useCallback(() => {
+    if (startRef.current <= 0) return;
+    const el = scrollRef.current;
+    if (el) loadAnchor.current = { top: el.scrollTop, height: el.scrollHeight };
+    setLimit((n) => n + PAGE);
+  }, [scrollRef]);
+
+  // 补页后把视口钉在原来那条消息上（否则新内容插到上面会让画面往上跳）
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const anchor = loadAnchor.current;
+    if (!el || !anchor) return;
+    loadAnchor.current = null;
+    el.scrollTop = anchor.top + (el.scrollHeight - anchor.height);
+  }, [limit, scrollRef]);
+
+  // 滚到顶部附近自动续页（留一点余量，手感更连续）
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        if (el.scrollTop < 200) loadOlder();
+      });
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [scrollRef, loadOlder]);
 
   return (
-    <Conversation>
-      <ConversationContent className="mx-auto w-full max-w-3xl gap-2 px-5 py-4 lg:max-w-4xl xl:max-w-5xl 2xl:max-w-6xl min-[1800px]:max-w-7xl">
+    <ConversationContent className="mx-auto w-full max-w-3xl gap-2 px-5 py-4 lg:max-w-4xl xl:max-w-5xl 2xl:max-w-6xl min-[1800px]:max-w-7xl">
         {visible.length === 0 && !streaming ? (
           <ConversationEmptyState
             title="开始对话"
@@ -676,7 +734,7 @@ export function Transcript({
         {start > 0 ? (
           <button
             className="mx-auto rounded-md border px-3 py-1 text-xs text-muted-foreground hover:bg-accent"
-            onClick={() => setLimit((n) => n + PAGE)}
+            onClick={loadOlder}
             type="button"
           >
             加载更早的 {Math.min(start, PAGE)} 条消息（共 {visible.length} 条）
@@ -780,7 +838,13 @@ export function Transcript({
               ),
             });
           }
-          return nodes.map((n) => <Fragment key={n.key}>{n.node}</Fragment>);
+          // 离屏回合跳过布局/绘制（ZCode 同款 content-visibility）：长会话滚动
+          // 不再为看不见的历史反复排版；最后一段（可能是正在流式的回合）保持活跃。
+          return nodes.map((n, idx) => (
+            <div className={idx === nodes.length - 1 ? undefined : "chat-cv"} data-chat-node={n.key} key={n.key}>
+              {n.node}
+            </div>
+          ));
         })()}
 
         {messages
@@ -795,8 +859,6 @@ export function Transcript({
         ) : null}
 
       </ConversationContent>
-      <ConversationScrollButton />
-    </Conversation>
   );
 }
 
@@ -805,6 +867,8 @@ export function Chat(props: { state: State; onFork?: (message: PiMessage) => voi
   const { state, onFork } = props;
   return (
     <Transcript
+      // 会话切换要重置分页状态与滚动位置（否则上一会话的 limit 会带过来）
+      key={state.sessionFile ?? ""}
       cwd={state.cwd}
       isStreaming={state.isStreaming}
       messages={state.messages}

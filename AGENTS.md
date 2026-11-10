@@ -50,6 +50,7 @@ git push --follow-tags                       # 推提交和 tag；release.yml �
 - 注释与用户可见文案用中文，标识符用英文，与现有代码一致。
 - **危险操作（删除/卸载/还原）的确认框必须用 `useConfirm()`（`src/components/ui/confirm-dialog.tsx`），不要用 `window.confirm`**：原生弹框和暗色 UI 割裂，阻塞渲染；CDP 驱动的 E2E 遇到原生 confirm 会直接挂住。
 - **模型专用的注入文本不上屏**：附件解析正文（`<attachment name=…>` 块）、`[Image: original …]` 尺寸提示、计划/双模型指令前缀都只留在会话记录里；渲染层（用户气泡、排队 chip、会话树、顶栏标题）用 `src/lib/promptPrefixes.ts` 的 `stripAttachmentBlocks` / `stripImageNotes` / `stripDirective` 剥离，侧栏标题用 `session-files.js` 的 `titleFromUserText`。
+- **长会话滚动**：`Transcript` 只渲染最近 `PAGE=60` 条，滚到顶部 200px 内自动续页并用 `scrollHeight` 差值回补视口；每条回合节点套 `.chat-cv`（`content-visibility:auto`），最后一条不套；会话切换用 `key={sessionFile}` 重挂载。**流式 delta 必须合并**（`message_update` 攒 16ms 再进 reducer），且**不要用 requestAnimationFrame 做合并**——窗口被遮挡/最小化时 rAF 暂停，deltas 会憋到 `message_end` 一次性出现（实测"流式全丢"）。
 - UI 交互默认对齐 ZCode Desktop 的行为（Enter 发送、流式排队/steer、弹层从输入框上方出、模型选择器内嵌输入框）。
 
 ## 跨平台

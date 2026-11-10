@@ -101,6 +101,7 @@ export function BoardPanel({
         <div className="min-h-0 flex-1 overflow-hidden">
           {view && view.messages.length + (view.streaming?.length ?? 0) > 0 ? (
             <Transcript
+              key={openAgent.id}
               cwd={openAgent.cwd}
               isStreaming={view.isStreaming}
               messages={view.messages}

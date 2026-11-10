@@ -764,6 +764,18 @@ null，会导致段落反复折叠/展开、滚动位置跳动）。耗时 = 最
 会把完整 payload（含图片 base64）缓存到 `queuedPayloads`；插入前先
 `snapshotQueuedPayloads()`，clear 后按文本+原队列类型找 payload 重发，找不到才退回纯文本。
 缓存随 `queue_update` 收敛（自然出队的项会被清掉）。
+- **长会话滚动（v0.2.72 调研 ZCode/opencode 后）**：
+  - 页面窗口：`Transcript` 一次渲染最后 60 条消息（`PAGE`），**滚到距顶 200px 自动续一页**
+    （ZCode 的 `loadOlder` / 服务端 `rowsRange` 的本地版）；续页前记 `scrollTop+scrollHeight`，
+    `useLayoutEffect` 里用高度差回补，视口不会跳。会话切换用 `key={sessionFile}` 重挂载，
+    重置分页与滚动位置。
+  - 离屏跳过：每条回合节点套 `.chat-cv`（`content-visibility: auto; contain-intrinsic-size: auto 360px`），
+    浏览器跳过看不见的回合的布局/绘制（ZCode 同款）；最后一条（可能是流式回合）不套。
+  - 贴底跟随：`use-stick-to-bottom`（`initial/resize="smooth"`，opencode 用自研 follow machine + 虚拟化，
+    我们沿用 AI Elements 这套）。用户上滚即脱锁，不会被新内容拽回底部。
+  - 流式合并：`message_update` 的 delta 攒 16ms 再进 reducer（`setTimeout`，**不要用 rAF**：
+    窗口被遮挡/最小化时 rAF 暂停，deltas 会憋到 `message_end` 一次性出现 = 流式全丢，实测踩过）；
+    其它事件先同步冲刷，保证 `message_end/agent_end` 顺序。
 - **图片消息**：用户消息里的图片移到气泡外、右对齐显示为缩略图（max-h-40 / max-w-240，点击放大），气泡只装文字——宽图不会再撑出大片空白
 - **todo widget**：复选框 + 完成划线 + 头部进度（1/3）；上一回合完成的项在下一回合开始时撤下；全部完成后停留 4 秒自动消失（清单已完成无常驻价值）
 - **侧栏折叠**：头部「收起侧栏」按钮 / ⌘B（Ctrl+B），状态持久化在 ui.json；折叠后由主界面头部按钮展开
