@@ -815,6 +815,16 @@ null，会导致段落反复折叠/展开、滚动位置跳动）。耗时 = 最
     与一遍 React 渲染。**收尾/阻塞事件必须同步 flush**（`message_end` / `agent_end` /
     `agent_settled` / `child_exit` / `ui_dialog` / `ui_dialog_clear`）：先 flush 积压批次
     再应用该事件，顺序不能反。仍用 `setTimeout`（不要 rAF）。
+  - **代码高亮进 Worker**（v0.4.3）：Streamdown 2.x 已把 Shiki 拆成独立的
+    `plugins.code` 插件（不传就**只显示原文、完全不高亮**，历史版本这里其实一直没高亮）。
+    `src/lib/highlight-plugin.ts` 实现同步接口 + `callback` 异步回填：`highlight()`
+    先返回 null（先显示原文），Worker（`src/lib/highlight.worker.ts`）用 Shiki Core +
+    Oniguruma 按需加载 grammar（`shiki/langs/*.mjs` 动态 import）与双主题
+    （github-light / github-dark-dimmed），只回传 token 数组。主线程不做分词；
+    语言/主题/超时（8s）失败时保留原文。插件与 Worker 各有一份 LRU 结果缓存。
+    `chat.tsx` 的 `MD_PLUGINS` 必须是模块级常量（Streamdown 用引用比较 plugins）。
+    正在写的那一块（`liveText`）改传 `MD_PLUGINS_LIVE`（只有 mermaid），
+    避免流式期间每个 delta 都把变长的代码重发进 Worker；`isIncomplete` 时也直接返回 null。
   - **Composer / 顶栏 memo**（v0.4.2）：`Composer`、新拆出的 `HeaderBar` 都是 memo。
     配套约束：children 用 `useMemo` 稳定（`composerTools`，只依赖 stats/模型/思考档位）；
     提交/本地命令/计划开关/并排切换等回调要用 ref 包一层保持身份（`stableSubmit` 等）。

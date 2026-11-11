@@ -588,7 +588,20 @@ async function main() {
         const ts = now - (60 - i) * 60000;
         const message = {
           role,
-          content: [{ type: "text", text: role === "user" ? `问题 ${i}` : `回答 ${i}：` + "较长的说明文字。".repeat(40) }],
+          content: [{
+            type: "text",
+            // 每条回复都带同一个代码块：不管虚拟化初始落在顶部还是底部，
+            // 可视区里一定有代码可测（只测首块，Worker 有缓存）
+            text:
+              role === "user"
+                ? `问题 ${i}`
+                : `回答 ${i}：
+\`\`\`ts
+const answer: number = 42; // 高亮测试
+\`\`\`
+` +
+                  "较长的说明文字。".repeat(40),
+          }],
           timestamp: ts,
         };
         if (role === "assistant") {
@@ -618,6 +631,21 @@ async function main() {
     const info = JSON.parse(loaded);
     if (info.msgs < 100) throw new Error(`长会话消息数异常: ${loaded}`);
     if (info.nodes > 30) throw new Error(`虚拟化未生效，挂了 ${info.nodes} 行`);
+  });
+
+  // 17b. 代码高亮走 Worker：主线程只拿到 token；这里只验证最终确实着色且保留原文
+  await check("代码高亮（Worker）", async () => {
+    await waitForExpr(
+      `[...document.querySelectorAll('[data-streamdown="code-block-body"] code span')].some((s) => (s.getAttribute('style') || '').includes('--sdm-c'))`,
+      20_000,
+      "code highlighted",
+    );
+    const code = await evaluate(
+      `document.querySelector('[data-streamdown="code-block-body"]')?.textContent || ''`,
+    );
+    if (!code.includes("const answer: number = 42")) {
+      throw new Error(`代码块内容异常: ${code.slice(0, 80)}`);
+    }
   });
 
   // 18. 阻塞对话框跟着会话走：在 A 等项目审批时去别的项目新建会话，

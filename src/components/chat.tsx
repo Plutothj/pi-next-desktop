@@ -3,6 +3,7 @@ import { mermaid } from "@streamdown/mermaid";
 import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
 import { useStickToBottomContext } from "use-stick-to-bottom";
 import { stripAttachmentBlocks, stripDirective, stripImageNotes, stripSkillBlock } from "@/lib/promptPrefixes";
+import { workerCodeHighlighter } from "@/lib/highlight-plugin";
 import {
   BrainIcon,
   CheckIcon,
@@ -42,6 +43,13 @@ import { cn } from "@/lib/utils";
 import { FileDiff, editsOf } from "@/components/file-diff";
 import { blocksOf, textOf, type ContentBlock, type PiMessage, type ToolExec } from "@/lib/pi";
 import type { State } from "@/hooks/usePi";
+
+// 模块级常量：Streamdown 的 memo 比较 plugins 引用，别每次渲染新建对象。
+// code 插件把 Shiki 分词放进 Worker，主线程只收 token 数组。
+const MD_PLUGINS = { mermaid, code: workerCodeHighlighter };
+// 正在写的那一块先不挂 code 插件：流式期间每个 delta 都会得到一段更长的代码，
+// 反复丢给 Worker 没有意义（而且首帧之前也没有高亮价值）。块结束后再换回高亮。
+const MD_PLUGINS_LIVE = { mermaid };
 
 const TOOL_ICONS: Record<string, typeof WrenchIcon> = {
   bash: TerminalIcon,
@@ -261,7 +269,7 @@ function Block({
     return (
       <MessageResponse
         className={cn("chat-md", liveText && "after:animate-pulse")}
-        plugins={{ mermaid }}
+        plugins={liveText ? MD_PLUGINS_LIVE : MD_PLUGINS}
         shikiTheme={liveText ? undefined : ["github-light", "github-dark-dimmed"]}
       >
         {shownText}
@@ -417,7 +425,7 @@ const UserMessage = memo(function UserMessage({
         {text ? (
           <MessageResponse
             className="chat-md"
-            plugins={{ mermaid }}
+            plugins={MD_PLUGINS}
             shikiTheme={["github-light", "github-dark-dimmed"]}
           >
             {text}
