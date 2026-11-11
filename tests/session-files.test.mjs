@@ -129,3 +129,27 @@ test("sessionTitle: 附件解析正文不进标题，只发附件时用文件名
   ]);
   assert.equal(sessionTitle(onlyAttachment).title, "方案.pdf（附件）");
 });
+
+test("sessionTitle: /skill 展开的正文不进标题，只留参数或技能名", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-sessions-"));
+  const withArgs = makeSession(dir, [
+    JSON.stringify({ type: "session", version: 3, id: uuid(), timestamp: "t", cwd: "/tmp/proj" }),
+    JSON.stringify({
+      type: "message", id: uuid(), parentId: null,
+      message: {
+        role: "user",
+        content: [{ type: "text", text: '<skill name="meeting-notes" location="/x/SKILL.md"> 会议纪要正文 </skill>  整理这份纪要' }],
+      },
+    }),
+  ]);
+  assert.equal(sessionTitle(withArgs).title, "整理这份纪要");
+
+  const onlySkill = makeSession(dir, [
+    JSON.stringify({ type: "session", version: 3, id: uuid(), timestamp: "t", cwd: "/tmp/proj" }),
+    JSON.stringify({
+      type: "message", id: uuid(), parentId: null,
+      message: { role: "user", content: [{ type: "text", text: '<skill name="pdf-tools" location="/x/SKILL.md"> 正文 </skill>' }] },
+    }),
+  ]);
+  assert.equal(sessionTitle(onlySkill).title, "技能：pdf-tools");
+});

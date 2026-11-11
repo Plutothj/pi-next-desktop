@@ -11,7 +11,8 @@ contextBridge.exposeInMainWorld("pi", {
     ipcRenderer.invoke("pi:setPlanMode", { sessionFile, enabled, autoApprove, chain }),
   remoteTunnelStart: () => ipcRenderer.invoke("remote:tunnelStart"),
   remoteTunnelStop: () => ipcRenderer.invoke("remote:tunnelStop"),
-  switchSession: (sessionFile, cwd) => ipcRenderer.invoke("pi:switchSession", { sessionFile, cwd }),
+  switchSession: (sessionFile, cwd, options) =>
+    ipcRenderer.invoke("pi:switchSession", { sessionFile, cwd, ...options }),
   send: (payload) => ipcRenderer.invoke("pi:send", payload),
   pickFolder: () => ipcRenderer.invoke("pi:pickFolder"),
   sessions: () => ipcRenderer.invoke("pi:sessions"),

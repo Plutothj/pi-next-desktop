@@ -351,9 +351,12 @@ export type PiBridge = {
   switchSession: (
     sessionFile: string,
     cwd?: string,
+    options?: { wait?: boolean },
   ) => Promise<{
     ok: boolean;
     running?: boolean;
+    /** 进程被回收时是否在后台预热（界面应先显示缓存内容） */
+    warming?: boolean;
     error?: string;
     ui?: UiSnapshot;
     /** 该会话切回来时还没回答的阻塞对话框（pi 一直在等） */

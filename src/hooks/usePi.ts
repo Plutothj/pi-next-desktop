@@ -15,6 +15,7 @@ import type {
 
 // Transcript windows render a few dozen turns; older tool entries can go.
 const TOOL_LIMIT = 400;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 function trimTools(tools: Record<string, ToolExec>) {
   const ids = Object.keys(tools);
   if (ids.length <= TOOL_LIMIT) return tools;
@@ -744,21 +745,77 @@ export function usePi() {
 
   // Rapid clicks on different rows race each other; only the latest applies.
   const openSeq = useRef(0);
+  // 每个会话最近一次的视图（消息 + 状态 + 扩展 UI）。来回切换时先用缓存即时上屏，
+  // 再只在 messageCount 变化时重取全量消息：切会话不再每次都搬整个历史
+  // （ZCode 的 tail-window 思路；长会话一次 get_messages 就是几 MB）。
+  const viewCache = useRef(
+    new Map<
+      string,
+      {
+        messages: PiMessage[];
+        state: Record<string, unknown>;
+        ui?: { widgets: State["widgets"]; statuses: State["statuses"] };
+      }
+    >(),
+  );
+
   const openSession = useCallback(
     async (file: string, cwd?: string) => {
       const seq = ++openSeq.current;
+      const cached = viewCache.current.get(file);
+      if (cached) {
+        // 缓存优先：先把界面切过去（含消息和扩展 UI），不阻塞在 pi 启动上
+        setState((s) => ({
+          ...s,
+          messages: cached.messages,
+          streaming: null,
+          tools: {},
+          queue: { steering: [], followUp: [] },
+          isStreaming: Boolean(cached.state.isStreaming),
+          sessionFile: file,
+          sessionName: cached.state.sessionName as string | undefined,
+          model: (cached.state.model as ModelInfo) ?? s.model,
+          thinkingLevel: String(cached.state.thinkingLevel ?? s.thinkingLevel),
+          widgets: cached.ui?.widgets ?? {},
+          statuses: cached.ui?.statuses ?? {},
+          dialog: null,
+          runningSessions: { ...s.runningSessions, [file]: Boolean(cached.state.isStreaming) },
+          ...(cwd ? { cwd } : {}),
+        }));
+      }
       // 切换 = 换界面显示的活动会话；后台会话的 pi 进程继续跑，不中断。
+      // 有缓存时不等进程拉起（wait=false），主进程后台预热后再轮询补数据。
       const switched = await window.pi
-        .switchSession(file, cwd)
-        .catch(() => ({ ok: false, dialog: null as UiDialogRequest | null }));
+        .switchSession(file, cwd, { wait: !cached })
+        .catch(() => ({ ok: false, warming: false, ui: undefined, dialog: null as UiDialogRequest | null }));
       if (!switched?.ok || seq !== openSeq.current) return;
-      const [st, msgs] = await Promise.all([
-        send({ type: "get_state" }),
-        send({ type: "get_messages" }),
-      ]);
+      // 目标会话的扩展 UI / 待回答对话框（很便宜，优先补齐）
+      if (cached) {
+        setState((s) => ({
+          ...s,
+          widgets: switched.ui?.widgets ?? s.widgets,
+          statuses: switched.ui?.statuses ?? s.statuses,
+          dialog: switched.dialog ?? null,
+        }));
+      }
+      // get_state 很轻；进程还在后台拉起时重试几次（pi 未运行 会立即抛错）
+      let st = await window.pi.send({ type: "get_state" }).catch(() => null);
+      for (let i = 0; !st && i < 60 && (switched.warming || !cached); i++) {
+        await sleep(250);
+        if (seq !== openSeq.current) return;
+        st = await window.pi.send({ type: "get_state" }).catch(() => null);
+      }
+      if (st === null && cached) return; // 预热失败：先保留缓存视图
       if (seq !== openSeq.current) return;
       const state_ = (st as any)?.state ?? (st as any) ?? {};
-      const messages = (msgs as any)?.messages ?? [];
+      const count = typeof state_.messageCount === "number" ? state_.messageCount : null;
+      // 消息数没变（且不在流式）就完全跳过全量 get_messages
+      const fresh = !cached || (count !== null && count !== cached.messages.length) || Boolean(state_.isStreaming);
+      const msgs = fresh
+        ? await window.pi.send({ type: "get_messages" }).catch(() => null)
+        : null;
+      if (seq !== openSeq.current) return;
+      const messages = ((msgs as any)?.messages ?? cached?.messages ?? []) as PiMessage[];
       const ui = "ui" in switched ? switched.ui : undefined;
       setState((s) => ({
         ...s,
@@ -772,8 +829,8 @@ export function usePi() {
         model: state_.model ?? s.model,
         thinkingLevel: state_.thinkingLevel ?? s.thinkingLevel,
         // 扩展 UI 跟着会话走：todo/status 一律整体替换，杜绝跨会话串台
-        widgets: ui?.widgets ?? {},
-        statuses: ui?.statuses ?? {},
+        widgets: ui?.widgets ?? s.widgets,
+        statuses: ui?.statuses ?? s.statuses,
         // 切到这个会话时它还在等回答的阻塞对话框（后台 pi 一直挂着）
         dialog: switched?.dialog ?? null,
         runningSessions: { ...s.runningSessions, [file]: Boolean(state_.isStreaming) },
@@ -781,8 +838,33 @@ export function usePi() {
         ...(cwd ? { cwd } : {}),
       }));
     },
-    [send],
+    [],
   );
+
+  // 活动会话的视图随消息更新写回缓存（切走再切回能直接用）
+  useEffect(() => {
+    const file = state.sessionFile;
+    if (!file) return;
+    viewCache.current.set(file, {
+      messages: state.messages,
+      state: {
+        sessionName: state.sessionName,
+        model: state.model,
+        thinkingLevel: state.thinkingLevel,
+        isStreaming: state.isStreaming,
+      },
+      ui: { widgets: state.widgets, statuses: state.statuses },
+    });
+  }, [
+    state.sessionFile,
+    state.messages,
+    state.sessionName,
+    state.model,
+    state.thinkingLevel,
+    state.isStreaming,
+    state.widgets,
+    state.statuses,
+  ]);
 
   return {
     state,

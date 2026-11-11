@@ -793,8 +793,24 @@ safeHandle("remote:tunnelStart", async () => {
 
 safeHandle("remote:tunnelStop", () => stopRemoteTunnel());
 
+// 后台预热（不阻塞切会话）：只把进程拉起来，不动 activeSession，也不清对话框。
+// 渲染层有缓存时先显示旧内容，再由 `session_status(alive)` / 轮询拿到新数据。
+async function warmSession(file, cwd) {
+  try {
+    await pool.ensure(file, cwd && fs.existsSync(cwd) ? cwd : os.homedir(), { active: false });
+    for (let i = 0; i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      const st = await pool.command(file, { type: "get_state" }).catch(() => null);
+      if (st?.data?.model) break;
+    }
+    send({ type: "session_status", sessionFile: file, isStreaming: false, alive: true });
+  } catch (err) {
+    logLine("warm", err);
+  }
+}
+
 // 切换界面显示的会话：只切活动指针（后台会话进程继续跑，不中断）。
-safeHandle("pi:switchSession", async (_e, { sessionFile, cwd } = {}) => {
+safeHandle("pi:switchSession", async (_e, { sessionFile, cwd, wait = true } = {}) => {
   if (typeof sessionFile !== "string" || !sessionFile) return { ok: false, error: "缺少会话路径" };
   // 旧会话的阻塞对话框暂存回它的槽：pi 在等回答，丢掉会让那个回合永远卡住。
   if (activeSession !== sessionFile) stashPendingDialogs();
@@ -802,12 +818,18 @@ safeHandle("pi:switchSession", async (_e, { sessionFile, cwd } = {}) => {
   pool.activate(sessionFile);
   const running = pool.isRunning(sessionFile);
   if (!running) {
-    // 进程已被回收：按 --session 重新拉起（历史完整恢复）
-    await startPi(cwd && fs.existsSync(cwd) ? cwd : os.homedir(), sessionFile);
+    // 进程已被回收：wait=true 时按 --session 重新拉起（历史完整恢复）；
+    // 渲染层有缓存时传 wait=false，后台预热，界面先显示缓存内容。
+    if (wait) {
+      await startPi(cwd && fs.existsSync(cwd) ? cwd : os.homedir(), sessionFile);
+    } else {
+      void warmSession(sessionFile, cwd);
+    }
   }
   return {
     ok: true,
     running: pool.isRunning(sessionFile),
+    warming: !pool.isRunning(sessionFile),
     ui: cleanUiSnapshot(pool.uiSnapshot(sessionFile)),
     dialog: pendingDialogFor(sessionFile),
   };

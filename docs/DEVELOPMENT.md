@@ -749,6 +749,10 @@ npm run stage             # 把本机 pi bundle 复制进 runtime/
 块拼进 prompt（模型要读它）。`stripAttachmentBlocks` 在**用户气泡、排队 chip、会话树、
 顶栏标题**里剥掉这些块和 `【附件 …】` 标记，只留用户原文；附件由气泡上方 chip 承载（点开看原件）。
 侧栏标题同样只取用户写的字，只发附件时用「文件名（附件）」——会话存真相，展示层剥离。
+- **`/skill:name` 的技能正文也不上屏**：pi 会把整篇 `SKILL.md` 展开成
+  `<skill name="…" location="…">…正文…</skill>` + 用户参数。`stripSkillBlock`（promptPrefixes.ts）
+  剥掉正文，气泡只显示参数 + 「技能 · name」徽章；排队 chip、会话树、顶栏/侧栏标题同样处理
+  （只发技能时标题为「技能：name」）。
 - **排队项「插入」loading**：点插入后把**目标那一行就地**换成「插入中…」（带 spinner、
   其它插入按钮禁用），不额外再叠占位 chip——否则会出现两条一模一样的 item（用户截图报障）。
   目标消息会被 clear_queue + 重放改成 steer，所以「插入中」按**文本**跟随它，直到两个
@@ -770,7 +774,7 @@ null，会导致段落反复折叠/展开、滚动位置跳动）。耗时 = 最
 `snapshotQueuedPayloads()`，clear 后按文本+原队列类型找 payload 重发，找不到才退回纯文本。
 缓存随 `queue_update` 收敛（自然出队的项会被清掉）。
 - **长会话滚动（v0.2.72 调研 ZCode/opencode 后）**：
-  - 页面窗口：`Transcript` 一次渲染最后 60 条消息（`PAGE`），**滚到距顶 200px 自动续一页**
+  - 页面窗口：`Transcript` 一次渲染最后 24 条消息（`PAGE`），**滚到距顶 200px 自动续一页**
     （ZCode 的 `loadOlder` / 服务端 `rowsRange` 的本地版）；续页前记 `scrollTop+scrollHeight`，
     `useLayoutEffect` 里用高度差回补，视口不会跳。会话切换用 `key={sessionFile}` 重挂载，
     重置分页与滚动位置。
@@ -778,6 +782,10 @@ null，会导致段落反复折叠/展开、滚动位置跳动）。耗时 = 最
     浏览器跳过看不见的回合的布局/绘制（ZCode 同款）；最后一条（可能是流式回合）不套。
   - 贴底跟随：`use-stick-to-bottom`（`initial/resize="smooth"`，opencode 用自研 follow machine + 虚拟化，
     我们沿用 AI Elements 这套）。用户上滚即脱锁，不会被新内容拽回底部。
+  - 切会话不重搬历史（ZCode 的 tail-window 思路）：渲染层 `viewCache` 按会话缓存
+    `{messages, state, ui}`，切回时先即时上屏；`get_state.messageCount` 没变就**跳过**
+    `get_messages`；进程被回收时 `pi:switchSession({wait:false})` 返回后主进程 `warmSession`
+    后台预热，渲染层轮询补齐。实测重会话（1000 条/2.9MB）切换从 ~400ms 降到 ~70ms。
   - 流式合并：`message_update` 的 delta 攒 16ms 再进 reducer（`setTimeout`，**不要用 rAF**：
     窗口被遮挡/最小化时 rAF 暂停，deltas 会憋到 `message_end` 一次性出现 = 流式全丢，实测踩过）；
     其它事件先同步冲刷，保证 `message_end/agent_end` 顺序。

@@ -60,3 +60,20 @@ export function stripAttachmentBlocks(text: string): string {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
+
+// pi 把 `/skill:name args` 展开成整段技能正文（SKILL.md 全文）再发给模型：
+//   <skill name="pdf-tools" location="/…/SKILL.md"> References are relative to … 正文 </skill>  参数
+// 正文是给模型读的，气泡里只留用户写的参数，技能名用徽章标出来（同 stripDirective）。
+const SKILL_BLOCK_RE = /<skill\s+name="([^"]*)"[^>]*>[\s\S]*?<\/skill>/;
+
+export function stripSkillBlock(text: string): { name: string | null; text: string } {
+  const match = text.match(SKILL_BLOCK_RE);
+  if (!match) return { name: null, text };
+  return {
+    name: match[1] || null,
+    text: text
+      .replace(SKILL_BLOCK_RE, "\n\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim(),
+  };
+}

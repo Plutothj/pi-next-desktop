@@ -26,7 +26,7 @@ import {
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
 import { cn } from "@/lib/utils";
-import { stripAttachmentBlocks } from "@/lib/promptPrefixes";
+import { stripAttachmentBlocks, stripSkillBlock } from "@/lib/promptPrefixes";
 import type { CommandInfo, QueueState } from "@/lib/pi";
 
 /** Local commands the composer handles itself, merged with pi's own list. */
@@ -203,8 +203,13 @@ export function Composer({
       const key = `${kind}|${raw}`;
       const ordinal = (seen.get(key) ?? 0) + 1;
       seen.set(key, ordinal);
-      // 队列 chip 只显示用户原文：附件解析正文是给模型的，不塞进排队预览
-      return { raw, text: stripAttachmentBlocks(raw), kind, ordinal };
+      // 队列 chip 只显示用户原文：附件解析正文 / skill 全文都是给模型的
+      return {
+        raw,
+        text: stripSkillBlock(stripAttachmentBlocks(raw)).text,
+        kind,
+        ordinal,
+      };
     };
     return [
       ...queue.steering.map((raw) => make(raw, "打断")),

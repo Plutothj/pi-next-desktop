@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { mermaid } from "@streamdown/mermaid";
 import { useStickToBottomContext } from "use-stick-to-bottom";
-import { stripAttachmentBlocks, stripDirective, stripImageNotes } from "@/lib/promptPrefixes";
+import { stripAttachmentBlocks, stripDirective, stripImageNotes, stripSkillBlock } from "@/lib/promptPrefixes";
 import {
   BrainIcon,
   CheckIcon,
@@ -334,8 +334,10 @@ const UserMessage = memo(function UserMessage({
   const { kind, text: stripped } = stripDirective(raw);
   // 去掉 pi 追加的图片尺寸提示（[Image: original …]），那是给模型看的
   // 附件解析正文同样只给模型：气泡里只留用户自己写的话（附件由 chip 承载）
-  const text = stripAttachmentBlocks(stripImageNotes(stripped));
-  const badge = kind === "plain" ? null : BADGES[kind];
+  const cleaned = stripAttachmentBlocks(stripImageNotes(stripped));
+  // `/skill:name` 展开的整篇 SKILL.md 正文也不上屏：只留参数，技能名做徽章
+  const { name: skillName, text } = stripSkillBlock(cleaned);
+  const badge = skillName ? `技能 · ${skillName}` : kind === "plain" ? null : BADGES[kind];
   const images = blocksOf(message).filter((b) => b.type === "image");
   return (
     <Message from="user">
@@ -626,7 +628,9 @@ function BashCard({ message }: { message: PiMessage }) {
   );
 }
 
-const PAGE = 60;
+// 每页消息数：首屏只挂最近 24 条（约 12 个回合），滚上去再按页续；
+// 长会话首屏渲染成本因此降到 1/3 以下（60 条大消息在重会话里要 300-500ms）。
+const PAGE = 24;
 
 /** 主聊天与并行会话共用的转录视图：消息流 + 流式块 + 等待占位。 */
 export function Transcript(props: {

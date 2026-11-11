@@ -46,15 +46,20 @@ function readLines(file, size) {
 const ATTACHMENT_BLOCK_RE = /<attachment\s+[^>]*>[\s\S]*?<\/attachment>/g;
 const ATTACHMENT_MARK_RE = /【附件\s+[^】\n]*】/g;
 const ATTACHMENT_NAME_RE = /<attachment\s+name="([^"]+)"/;
+// pi 的 `/skill:name` 会把整篇 SKILL.md 展开进用户消息：标题只留用户参数/技能名
+const SKILL_BLOCK_RE = /<skill\s+name="([^"]*)"[^>]*>[\s\S]*?<\/skill>/;
 
 function titleFromUserText(text) {
   const name = text.match(ATTACHMENT_NAME_RE)?.[1];
+  const skill = text.match(SKILL_BLOCK_RE)?.[1];
   const clean = text
+    .replace(SKILL_BLOCK_RE, " ")
     .replace(ATTACHMENT_BLOCK_RE, " ")
     .replace(ATTACHMENT_MARK_RE, " ")
     .replace(/\s+/g, " ")
     .trim();
   if (clean) return clean.slice(0, 80);
+  if (skill) return `技能：${skill}`;
   if (name) return `${name}（附件）`;
   return null;
 }

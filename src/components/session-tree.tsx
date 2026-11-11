@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { GitForkIcon, Loader2Icon, MessageSquareIcon, WrenchIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { stripAttachmentBlocks, stripDirective } from "@/lib/promptPrefixes";
+import { stripAttachmentBlocks, stripDirective, stripSkillBlock } from "@/lib/promptPrefixes";
 
 type TreeNode = {
   entry: {
@@ -29,7 +29,9 @@ const nodeText = (node: TreeNode): string => {
           .filter((b) => b.type === "text")
           .map((b) => b.text ?? "")
           .join(" ");
-  const text = stripAttachmentBlocks(stripDirective(raw).text).replace(/\s+/g, " ").trim();
+  const skill = stripSkillBlock(stripAttachmentBlocks(stripDirective(raw).text));
+  const text = skill.text.replace(/\s+/g, " ").trim();
+  if (!text && skill.name) return `技能：${skill.name}`;
   if (!text) return m.role === "user" ? "（附件/图片）" : "（无文本）";
   return text.length > 44 ? `${text.slice(0, 44)}…` : text;
 };
