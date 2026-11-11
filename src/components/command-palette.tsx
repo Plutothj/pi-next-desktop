@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   BotIcon,
   FilesIcon,
@@ -20,6 +20,8 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import type { SessionInfo } from "@/lib/pi";
+
+type SearchHit = { path: string; title: string; cwd: string | null; mtime: number; snippet: string };
 import { baseName } from "@/lib/utils";
 
 export type PanelTab = "files" | "terminal" | "agents" | "browser" | "board" | "tree" | "plan";
@@ -62,11 +64,55 @@ export function CommandPalette({
     fn();
   };
 
+  // ⌘K 里输入 ≥2 个字时做全量会话全文搜索（SQLite FTS5，不读文件）
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<SearchHit[]>([]);
+  useEffect(() => {
+    const text = query.trim();
+    if (text.length < 2) {
+      setHits([]);
+      return;
+    }
+    let alive = true;
+    const timer = setTimeout(() => {
+      window.pi
+        .searchSessions(text)
+        .then((r) => {
+          if (alive) setHits(r.hits.slice(0, 8));
+        })
+        .catch(() => null);
+    }, 250);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [query]);
+
   return (
     <CommandDialog onOpenChange={onOpenChange} open={open}>
-      <CommandInput placeholder="搜索任务或命令…" />
+      <CommandInput onValueChange={setQuery} placeholder="搜索会话全文或命令…" value={query} />
       <CommandList>
         <CommandEmpty>没有匹配的结果</CommandEmpty>
+        {hits.length > 0 ? (
+          <CommandGroup heading="全文匹配">
+            {hits.map((hit) => (
+              <CommandItem
+                key={`hit-${hit.path}`}
+                onSelect={run(() => actions.openSession(hit.path, hit.cwd ?? undefined))}
+                value={`${hit.title} ${hit.path} ${query} ${hit.snippet}`}
+              >
+                <MessageSquareIcon className="size-3.5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">
+                  {hit.title}
+                  <span className="ml-2 text-[10px] text-muted-foreground">{hit.snippet}</span>
+                </span>
+                <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
+                  {baseName(hit.cwd ?? "")}
+                </span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        ) : null}
         <CommandGroup heading="任务">
           {sessions.slice(0, 30).map((s) => (
             <CommandItem

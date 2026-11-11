@@ -159,6 +159,46 @@ export function scanSessions(root = sessionsRoot()) {
   return out.sort((a, b) => b.mtime - a.mtime);
 }
 
+// 会话消息文本（全文索引用）：只取 user/assistant 的正文，跳过 thinking/toolCall/
+// toolResult/system；单条截到 16k 字符，文件超过 32MB 直接放弃（返回 null）。
+const INDEX_FILE_MAX = 32 * 1024 * 1024;
+const INDEX_TEXT_MAX = 16_000;
+const textOfContent = (content) => {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((b) => b?.type === "text" && typeof b.text === "string")
+    .map((b) => b.text)
+    .join("\n");
+};
+
+export function sessionMessageTexts(file) {
+  let raw;
+  try {
+    if (fs.statSync(file).size > INDEX_FILE_MAX) return null;
+    raw = fs.readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+  const out = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    let rec;
+    try {
+      rec = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (rec.type !== "message" || !rec.message) continue;
+    const { role, content } = rec.message;
+    if (role !== "user" && role !== "assistant") continue;
+    const text = textOfContent(content).trim();
+    if (!text) continue;
+    out.push({ id: rec.id ?? "", role, text: text.slice(0, INDEX_TEXT_MAX) });
+  }
+  return out;
+}
+
 // 会话全文搜索：显式动作才触发（O(总字节)，与 scanSessions 同源已知代价）。
 // 上限：最近 200 个文件、单文件 20MB、命中 30 条即止。
 export function searchSessions(query, root = sessionsRoot()) {

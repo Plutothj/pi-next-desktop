@@ -63,3 +63,63 @@ test("scanSessionsIndexed：写入索引、热扫描命中、变更重解析、�
   assert.equal(fourth.length, 1);
   assert.equal(fourth[0].title, "改名后");
 });
+
+test("FTS5 全文搜索与会话视图缓存", async () => {
+  const dir = path.join(process.env.PI_AGENT_DIR, "sessions", "--tmp-search--");
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, "search.jsonl");
+  const lines = [
+    header(),
+    user("请帮我排查登录页面的白屏问题"),
+    JSON.stringify({
+      type: "message",
+      id: uuid(),
+      parentId: null,
+      timestamp: "t",
+      message: { role: "assistant", content: [{ type: "text", text: "白屏是因为渲染进程里 contextUsage 为空时崩溃了。" }] },
+    }),
+  ];
+  fs.writeFileSync(file, `${lines.join("\n")}\n`);
+
+  const {
+    scanSessionsIndexed,
+    searchSessionsIndexed,
+    readSessionView,
+    writeSessionView,
+    closeSessionIndex,
+  } = await import("../electron/session-index.js");
+
+  await scanSessionsIndexed();
+  const found = await searchSessionsIndexed("白屏");
+  assert.ok(found.hits.length >= 1, JSON.stringify(found));
+  assert.equal(found.hits[0].path, file);
+  assert.match(found.hits[0].snippet, /白屏/);
+
+  // 追加新内容 → 再次扫描后能搜到新词
+  fs.appendFileSync(file, `${user("后来又发现导出功能也挂了")}\n`);
+  await scanSessionsIndexed();
+  const found2 = await searchSessionsIndexed("导出");
+  assert.ok(found2.hits.some((h) => h.path === file), JSON.stringify(found2));
+
+  // 视图缓存：只保留尾部 120 条；图片 data 被清空
+  const messages = Array.from({ length: 200 }, (_, i) => ({
+    role: i % 2 ? "assistant" : "user",
+    content: [{ type: "text", text: `消息 ${i}` }],
+  }));
+  messages.push({ role: "user", content: [{ type: "image", mimeType: "image/png", data: "AAAA" }] });
+  writeSessionView(file, messages);
+  const view = readSessionView(file);
+  assert.ok(view, "视图缓存应可读");
+  assert.equal(view.messages.length, 120);
+  const image = view.messages.at(-1).content[0];
+  assert.equal(image.type, "image");
+  assert.equal(image.data, "");
+
+  // 冷启动后仍能读
+  closeSessionIndex();
+  await scanSessionsIndexed();
+  const afterCold = readSessionView(file);
+  assert.ok(afterCold, "冷启动后视图缓存仍在");
+  const coldSearch = await searchSessionsIndexed("白屏");
+  assert.ok(coldSearch.hits.length >= 1);
+});

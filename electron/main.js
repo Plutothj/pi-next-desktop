@@ -32,6 +32,7 @@ import { createScheduler } from "./schedules.js";
 import { scanSessions } from "./session-files.js";
 import { createSessionPool } from "./session-pool.js";
 import { registerSessionHandlers } from "./sessions.js";
+import { readSessionView, writeSessionView } from "./session-index.js";
 import { createTaskManager, installTermCli } from "./tasks.js";
 import { installHrSkills } from "./hr-skills.js";
 import { installPlanModeExtension } from "./plan-mode-extension.js";
@@ -835,12 +836,22 @@ safeHandle("pi:switchSession", async (_e, { sessionFile, cwd, wait = true } = {}
   };
 });
 
+// 重启后的首屏：渲染层在 pi 热起来之前先拿 SQLite 里的尾部消息缓存
+safeHandle("pi:sessionView", (_e, { path: file } = {}) => {
+  const target = requireString(file, "path");
+  return readSessionView(target);
+});
+
 safeHandle("pi:send", async (_e, payload = {}) => {
   // payload 可带 sessionFile 定向发给某个会话（多会话并行时用）；
   // 不传则维持旧行为：发给当前活动会话。
   const { sessionFile, ...body } = payload ?? {};
   const target = typeof sessionFile === "string" && sessionFile ? sessionFile : activeSession;
   const res = await pool.command(target, body);
+  // 消息视图写穿到 SQLite：重启后打开会话先显示缓存，不必等 pi 重新解析 JSONL
+  if (body?.type === "get_messages" && Array.isArray(res?.data?.messages)) {
+    setImmediate(() => writeSessionView(target, res.data.messages));
+  }
   return res.data ?? null;
 });
 

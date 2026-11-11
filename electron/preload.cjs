@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld("pi", {
   pickFolder: () => ipcRenderer.invoke("pi:pickFolder"),
   sessions: () => ipcRenderer.invoke("pi:sessions"),
   searchSessions: (query) => ipcRenderer.invoke("pi:searchSessions", { query }),
+  sessionView: (path) => ipcRenderer.invoke("pi:sessionView", { path }),
   deleteSession: (filePath) => ipcRenderer.invoke("pi:deleteSession", { path: filePath }),
   forkSessionAt: (entryId) => ipcRenderer.invoke("pi:forkSessionAt", { entryId }),
   respondUi: (id, values) => ipcRenderer.invoke("pi:uiRespond", { id, ...values }),

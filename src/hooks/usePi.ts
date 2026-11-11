@@ -791,12 +791,19 @@ export function usePi() {
     async (file: string, cwd?: string) => {
       const seq = ++openSeq.current;
       const cached = viewCache.current.get(file);
+      // 本次运行没打开过时，先拿 SQLite 里的尾部消息缓存（重启后的秒开）
+      let seed = cached?.messages ?? null;
+      if (!seed) {
+        const saved = await window.pi.sessionView(file).catch(() => null);
+        if (seq !== openSeq.current) return;
+        if (saved?.messages?.length) seed = saved.messages;
+      }
       let skeletonTimer: ReturnType<typeof setTimeout> | null = null;
       if (cached) {
-        // 缓存优先：先把界面切过去（含消息和扩展 UI），不阻塞在 pi 启动上
+        // 内存缓存优先：先把界面切过去（含消息和扩展 UI），不阻塞在 pi 启动上
         setState((s) => ({
           ...s,
-          messages: cached.messages,
+          messages: seed ?? cached.messages,
           streaming: null,
           tools: {},
           queue: { steering: [], followUp: [] },
@@ -812,9 +819,26 @@ export function usePi() {
           runningSessions: { ...s.runningSessions, [file]: Boolean(cached.state.isStreaming) },
           ...(cwd ? { cwd } : {}),
         }));
+      } else if (seed) {
+        // 有持久缓存但内存里没有（重启/首次打开）：先渲染缓存，后台再刷新
+        setState((s) => ({
+          ...s,
+          messages: seed,
+          streaming: null,
+          tools: {},
+          queue: { steering: [], followUp: [] },
+          isStreaming: false,
+          sessionFile: file,
+          sessionName: undefined,
+          widgets: {},
+          statuses: {},
+          dialog: null,
+          loadingSession: false,
+          ...(cwd ? { cwd } : {}),
+        }));
       } else {
-        // 没缓存（本次运行第一次点开）：先清空视图，150ms 后才显示骨架——
-        // pi 进程已经在跑时通常一瞬间就拿到数据，骨架不会闪一下。
+        // 连持久缓存都没有：清空视图，150ms 后显示骨架——pi 进程已经在跑时
+        // 通常一瞬间就拿到数据，骨架不会闪一下。
         setState((s) => ({
           ...s,
           messages: [],
@@ -879,12 +903,13 @@ export function usePi() {
       const state_ = (st as any)?.state ?? (st as any) ?? {};
       const count = typeof state_.messageCount === "number" ? state_.messageCount : null;
       // 消息数没变（且不在流式）就完全跳过全量 get_messages
-      const fresh = !cached || (count !== null && count !== cached.messages.length) || Boolean(state_.isStreaming);
+      const seedCount = seed?.length ?? 0;
+      const fresh = !seed || (count !== null && count !== seedCount) || Boolean(state_.isStreaming);
       const msgs = fresh
         ? await window.pi.send({ type: "get_messages" }).catch(() => null)
         : null;
       if (seq !== openSeq.current) return;
-      const messages = ((msgs as any)?.messages ?? cached?.messages ?? []) as PiMessage[];
+      const messages = ((msgs as any)?.messages ?? seed ?? []) as PiMessage[];
       const ui = "ui" in switched ? switched.ui : undefined;
       setState((s) => ({
         ...s,

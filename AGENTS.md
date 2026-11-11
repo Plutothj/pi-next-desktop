@@ -63,7 +63,7 @@ Windows 与实际 macOS 均已真机日常使用（命名管道、`cmd /d /s /c`
 
 ## 已知风险（改相关区域时注意）
 
-- 会话列表走 SQLite 元数据索引（`electron/session-index.js`，`node:sqlite`）：只 stat + SELECT，未变文件不重读；`scanSessions()` 仍是回退路径，别在扫描里加逐行 `JSON.parse`。
+- 会话存储保持 pi 的 JSONL（唯一事实来源，别换存储）；外壳的 SQLite（`electron/session-index.js`，`node:sqlite`）只做索引：`sessions` 元数据（只 stat + SELECT）、`messages_fts` 全文（**CJK 要在字符间插空格再建索引/查询**，否则 unicode61 搜不到子串）、`session_views` 尾部消息缓存（`get_messages` 写穿，重启先上屏）。`scanSessions()` 仍是回退路径。
 - **pi 的 `settings.json` 是 pi 进程私有**：旁路写会被它下一次 save 整文件覆盖（思考档位因此走 ui.json + 注入，见 DEVELOPMENT §7.9）。
 - **计划模式不要再用 prompt 前缀**：走 `plan-mode.ts` 扩展（Enter/ExitPlanMode 工具 + `tool_call` 闸门 + `before_agent_start` 系统提示注入 + 审批卡片），状态是与会话文件同级的 `.plan-mode.json`。注意系统提示 section 名必须匹配 `^[a-z][a-z0-9_-]*$`（写成 `"Plan mode"` 会让 pi 拒绝整个请求，见 DEVELOPMENT §7.11.1）。
 - **远程访问是内置模块**：`electron/remote-extension.js` 把应用自带的 `pi-mobile` 及整棵依赖复制到 `<agent>/extensions/pi-mobile` + `extensions/node_modules`；不要再把 `pi-mobile` 加进「推荐扩展」。`/remote` 是 pi 扩展命令，必须以 prompt 文本发送（pi 会先执行命令、不入模型回合），并且手机只走 HTTPS（Tailscale/自建反代），hub 只监听回环。

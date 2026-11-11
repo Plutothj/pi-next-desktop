@@ -144,10 +144,16 @@ pi.stop() → 清理挂起对话框 → resolveRuntime()
   返回，渲染层**整体替换** `widgets/statuses`（不是合并）。否则 A 会话的 todo 会留在
   B 的界面上（历史 bug）。
 - 空闲回收仍按 10 分钟；切回被回收的会话时 `switchSession` 会按 `--session` 重新拉起。
-- **会话列表索引（v0.3.0）**：`electron/session-index.js` 用 `node:sqlite`（Electron 45 自带的
-  Node 22）持久化 `path/cwd/title/mtime/size/changed`。扫描只 `stat` + `SELECT`，文件没变
-  就不再重读 JSONL；变更的行 upsert，删除的文件 prune。`pi:sessions` 走索引版；`node:sqlite`
-  不可用或库损坏时自动回退 `scanSessions()`。
+- **会话索引（v0.3.0/v0.3.10，`electron/session-index.js`）**：`node:sqlite`（Electron 45 自带
+  Node 24，**支持 FTS5**）持久化三张表：
+  - `sessions`：path/cwd/title/mtime/size/changed → 列表扫描只 `stat` + `SELECT`；
+  - `messages_fts`（FTS5）：user/assistant 正文全文索引，后台队列按 tick 增量重建（文件变了才做）；
+    **CJK 必须特殊处理**：unicode61 把连续汉字当一个词，"白屏"搜不到"请排查白屏问题" ——
+    入索引时在 CJK 字符之间插空格（每字一 token），查询同样转成短语（`"白 屏"`），
+    snippet 再删掉 CJK 之间的空格。`⌘K` 面板输入 ≥2 字调用它（FTS 失败回退全量扫描）；
+  - `session_views`：每个会话尾部 ≤120 条消息的持久缓存（图片 data 置空、tool details 丢弃、
+    单条 text 截 8k、整体 ≤3MB）。`pi:send` 的 `get_messages` 结果写穿，重启后 `openSession`
+    先用 `pi:sessionView` 读它上屏（实测冷启动 101ms 出第一屏，pi 还没热起来）。
 
 ### 3.3 PiProcess（`pi-process.js`）
 

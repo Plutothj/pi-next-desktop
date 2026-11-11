@@ -454,6 +454,8 @@ export type PiBridge = {
       scanned: number;
       truncated: boolean;
     }>;
+  /** 持久化的尾部消息缓存（重启后 pi 还没热起来时先用它渲染） */
+  sessionView: (path: string) => Promise<{ messages: PiMessage[] } | null>;
   deleteSession: (filePath: string) => Promise<{ ok: boolean; switched?: boolean; error?: string }>;
   forkSessionAt: (entryId: string) => Promise<{ ok: boolean; sessionFile?: string; error?: string }>;
   respondUi: (
