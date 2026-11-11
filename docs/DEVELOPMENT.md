@@ -810,6 +810,16 @@ null，会导致段落反复折叠/展开、滚动位置跳动）。耗时 = 最
   - **侧栏 memo**（v0.4.0）：`SessionSidebar` 只比较 sessionFile/sessions/projects/removed/
     runningSessions/isStreaming/cwd/theme/update，流式 delta 不再触发侧栏重渲染（实测
     10s 回合：App 77 次渲染、侧栏 1 次；调优时可用 `window.__perfRender` 计数）。
+  - **全事件批量合并**（v0.4.2）：不止 delta——`tool_execution_start/end`、`queue_update`、
+    `ui_status`、`ui_widget`、`ui_notify` 全部进 16ms 批次，一次 `setState` 跑一遍 reducer
+    与一遍 React 渲染。**收尾/阻塞事件必须同步 flush**（`message_end` / `agent_end` /
+    `agent_settled` / `child_exit` / `ui_dialog` / `ui_dialog_clear`）：先 flush 积压批次
+    再应用该事件，顺序不能反。仍用 `setTimeout`（不要 rAF）。
+  - **Composer / 顶栏 memo**（v0.4.2）：`Composer`、新拆出的 `HeaderBar` 都是 memo。
+    配套约束：children 用 `useMemo` 稳定（`composerTools`，只依赖 stats/模型/思考档位）；
+    提交/本地命令/计划开关/并排切换等回调要用 ref 包一层保持身份（`stableSubmit` 等）。
+    实测 20 个事件批次：App 渲染 20 次，Composer/顶栏 0 次、侧栏 ≤1 次（E2E
+    「高频事件不重渲染 Composer/顶栏」会在 App 渲染 ≥1 且三者不跟批次增长时通过）。
   - **悬停预热 + LRU 上限**（v0.4.1）：侧栏 `TaskRow` 指针停留 150ms 触发
     `pi:warmSession`（离开即取消）；主进程 `warming` Map 去重、**并发上限 3**（快速扫过
     一列会话不会一次拉起一堆进程）；每次预热结束 `pool.trim(MAX_WARM_SESSIONS=8)`，

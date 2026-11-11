@@ -350,13 +350,24 @@ export function usePi() {
 
   // 打开项目 = 固定进项目列表 + 在该目录新建会话槽（见下方 openProject）。
 
-  // 流式 delta 按帧合并：每条 IPC 都 setState 会让 markdown 每个 token 重新解析，
-  // 长回复 + 滚动时最容易掉帧。合并到下一拍再进 reducer；其它事件先同步冲刷，
-  // 保证 message_end / agent_end 永远排在 delta 之后。用 setTimeout 而不是
-  // requestAnimationFrame：窗口被遮挡/最小化时 rAF 会被暂停，deltas 会一直憋
-  // 到 message_end 才一次性出现（实测门控窗口下就是"流式全丢"）。
-  const pendingDeltas = useRef<RpcEvent[]>([]);
-  const deltaTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 事件按帧合并：每条 IPC 都 setState 会让 markdown 每个 token 重新解析，
+  // 长回复 + 滚动时最容易掉帧。delta 之外的 tool_execution / widget / status /
+  // queue 也一起攒 16ms 再进 reducer（一次 setState 只跑一遍 React 渲染）。
+  // 但 message_end / agent_end / 对话框这类"必须立刻看到"的事件先 flush 队列，
+  // 保证它们严格排在已到达的 delta 之后。用 setTimeout 而不是 rAF：窗口被
+  // 遮挡/最小化时 rAF 会被暂停，deltas 会一直憋到 message_end 才一次性出现
+  // （实测门控窗口下就是"流式全丢"）。
+  const pendingEvents = useRef<RpcEvent[]>([]);
+  const batchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 这些事件不能被延迟：回合/消息的收尾决定 streaming 状态，阻塞对话框要立即上屏
+  const URGENT_EVENTS = new Set<RpcEvent["type"]>([
+    "message_end",
+    "agent_end",
+    "agent_settled",
+    "child_exit",
+    "ui_dialog",
+    "ui_dialog_clear",
+  ]);
 
   // Subscribe on every mount: StrictMode's mount → cleanup → remount cycle
   // would otherwise leave the listener detached (dev builds only).
@@ -373,14 +384,14 @@ export function usePi() {
       }
       return reduce(s, rec);
     };
-    const flushDeltas = (s: State): State => {
-      if (!pendingDeltas.current.length) return s;
-      const batch = pendingDeltas.current;
-      pendingDeltas.current = [];
-      if (deltaTimer.current !== null) {
-        clearTimeout(deltaTimer.current);
-        deltaTimer.current = null;
+    const flushPending = (s: State): State => {
+      if (batchTimer.current !== null) {
+        clearTimeout(batchTimer.current);
+        batchTimer.current = null;
       }
+      if (!pendingEvents.current.length) return s;
+      const batch = pendingEvents.current;
+      pendingEvents.current = [];
       return batch.reduce(applyEvent, s);
     };
     const unsub = window.pi.onEvent((rec) => {
@@ -391,25 +402,24 @@ export function usePi() {
       ) {
         scheduleRefreshRef.current();
       }
-      if (rec.type === "message_update") {
-        pendingDeltas.current.push(rec);
-        if (deltaTimer.current === null) {
-          deltaTimer.current = setTimeout(() => {
-            deltaTimer.current = null;
-            const batch = pendingDeltas.current;
-            pendingDeltas.current = [];
-            if (batch.length) setState((s) => batch.reduce(applyEvent, s));
-          }, 16);
-        }
+      if (URGENT_EVENTS.has(rec.type)) {
+        // 先把积压的事件应用掉，再应用这条（顺序不能反）
+        setState((s) => applyEvent(flushPending(s), rec));
         return;
       }
-      setState((s) => applyEvent(flushDeltas(s), rec));
+      pendingEvents.current.push(rec);
+      if (batchTimer.current === null) {
+        batchTimer.current = setTimeout(() => {
+          batchTimer.current = null;
+          setState((s) => flushPending(s));
+        }, 16);
+      }
     });
     return () => {
       unsub();
-      if (deltaTimer.current !== null) clearTimeout(deltaTimer.current);
-      deltaTimer.current = null;
-      pendingDeltas.current = [];
+      if (batchTimer.current !== null) clearTimeout(batchTimer.current);
+      batchTimer.current = null;
+      pendingEvents.current = [];
       if (pendingRefresh.current) clearTimeout(pendingRefresh.current);
       pendingRefresh.current = null;
     };

@@ -17,7 +17,7 @@ import {
   WorkflowIcon,
   XIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentsPanel } from "@/components/agents-panel";
 import {
   PromptInputButton,
@@ -290,6 +290,11 @@ function Shell() {
     setSidebarCollapsed(next);
     window.pi.setPref("sidebarCollapsed", next).catch(() => null);
   }, []);
+  const expandSidebar = useCallback(() => toggleSidebar(false), [toggleSidebar]);
+  const togglePanel = useCallback((id: PanelTab) => {
+    setPanel((prev) => (prev === id ? null : id));
+  }, []);
+  const openRemote = useCallback(() => setRemoteOpen(true), []);
 
   // 聊天附件 chip 点开预览：{abs,name,seq} 传给文件面板
   const [previewFile, setPreviewFile] = useState<{ abs: string; name: string; seq: number } | null>(null);
@@ -519,6 +524,24 @@ function Shell() {
     else if (name === "compact") compact();
     else if (name === "plan") void togglePlanMode();
   };
+  // Composer 是 memo 的：提交/本地命令/计划开关用 ref 包一层，身份在整个会话期间
+  // 保持不变（否则 App 每次渲染都给它新 props，memo 形同虚设）。
+  const submitRef = useRef(submit);
+  submitRef.current = submit;
+  const localCommandRef = useRef(localCommand);
+  localCommandRef.current = localCommand;
+  const togglePlanRef = useRef(togglePlanMode);
+  togglePlanRef.current = togglePlanMode;
+  const stableSubmit = useCallback((message: PromptInputMessage, behavior?: "steer" | "followUp") => {
+    void submitRef.current(message, behavior);
+  }, []);
+  const stableLocalCommand = useCallback((name: string) => localCommandRef.current(name), []);
+  const stableTogglePlan = useCallback(() => {
+    void togglePlanRef.current();
+  }, []);
+  const clearQueue = useCallback(() => {
+    void send({ type: "clear_queue" });
+  }, [send]);
 
   // 调试/E2E 句柄：直接提交一条消息（双模型链路等动线用）
   (window as unknown as Record<string, unknown>).__piSubmit = submit;
@@ -574,6 +597,12 @@ function Shell() {
       })[0];
     if (candidate) setSplitPane({ file: candidate.path, cwd: candidate.cwd });
   }, [splitPane, state.sessions, state.sessionFile, state.runningSessions]);
+
+  // 顶栏是 memo 的，但并排选择依赖 sessions/runningSessions；用 ref 包一层，
+  // 后台会话开始/结束、侧栏刷新都不再击穿顶栏的浅比较。
+  const toggleSplitRef = useRef(toggleSplit);
+  toggleSplitRef.current = toggleSplit;
+  const stableToggleSplit = useCallback(() => toggleSplitRef.current(), []);
 
   // 聚焦右栏：把它的会话变成活动会话，原活动会话转到右栏继续跑。
   const focusSplit = useCallback(
@@ -663,6 +692,63 @@ function Shell() {
   // 后台会话的双模型链路不把"规划中/执行中"徽章显示在别的会话上
   const chainHere = dualChain.phase !== "idle" && dualChain.sessionFile === state.sessionFile;
   const plannerModel = dual.find(state.models, dual.config.planner);
+  const tasksRunning = tasks.some((t) => t.status === "running");
+  // Composer 的 children 也要稳定，否则 memo 每次都被新元素击穿。
+  // 只依赖 Composer 实际用到的低速字段（统计/模型/思考档位/双模型开关）。
+  const composerTools = useMemo(
+    () => (
+      <>
+        <ContextUsage onRefresh={refreshStats} stats={stats} />
+        <PromptInputButton
+          className={cn("gap-1 text-xs", dual.config.enabled && "text-primary")}
+          onClick={() => setDualOpen(true)}
+          title="双模型：规划模型出方案，执行模型落地"
+        >
+          <WorkflowIcon className="size-3.5" />
+          {dual.config.enabled ? "双模型" : "单模型"}
+        </PromptInputButton>
+        {dual.config.enabled ? (
+          <PromptInputButton
+            className="gap-1 text-xs text-muted-foreground"
+            onClick={() => setDualOpen(true)}
+            title="规划模型（只出方案）；右侧模型是执行模型，点此修改双模型配置"
+          >
+            <WorkflowIcon className="size-3.5" />
+            规划
+            <span className="max-w-24 truncate font-medium text-foreground/80">
+              {plannerModel?.name ?? "未选"}
+            </span>
+          </PromptInputButton>
+        ) : null}
+        <ModelPicker model={state.model} models={state.models} onSelect={setModel} />
+        <PromptInputSelect onValueChange={setThinking} value={state.thinkingLevel}>
+          <PromptInputSelectTrigger className="h-7 gap-1 text-xs">
+            <BrainIcon className="size-3.5" />
+            <PromptInputSelectValue />
+          </PromptInputSelectTrigger>
+          <PromptInputSelectContent>
+            {THINKING.map((t) => (
+              <PromptInputSelectItem key={t} value={t}>
+                {t}
+              </PromptInputSelectItem>
+            ))}
+          </PromptInputSelectContent>
+        </PromptInputSelect>
+      </>
+    ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只跟低速状态变化
+    [
+      stats,
+      refreshStats,
+      dual.config.enabled,
+      plannerModel,
+      state.model,
+      state.models,
+      state.thinkingLevel,
+      setModel,
+      setThinking,
+    ],
+  );
 
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
@@ -690,160 +776,21 @@ function Shell() {
       )}
 
       <main className="flex min-w-0 flex-1 flex-col">
-        <header
-          className="@container drag flex h-12 shrink-0 items-center gap-2 border-b px-4"
-          onDoubleClick={(e) => {
-            // 自绘标题栏：双击切换最大化（点在按钮上除外）
-            if (window.pi.platform === "darwin") return;
-            if ((e.target as HTMLElement).closest("button")) return;
-            void window.pi.win.toggleMaximize();
-          }}
-        >
-          {sidebarCollapsed ? (
-            <Button
-              // 头部整条是拖拽区（-webkit-app-region: drag），按钮必须显式
-              // 标 no-drag，否则 Windows 无边框窗口下点击被系统当成拖动吞掉
-              className="no-drag h-7 shrink-0 px-2 text-muted-foreground"
-              onClick={() => toggleSidebar(false)}
-              size="sm"
-              title="展开侧栏（⌘B）"
-              variant="ghost"
-            >
-              <PanelLeftOpenIcon className="size-3.5" />
-            </Button>
-          ) : null}
-          <span className="min-w-0 max-w-56 truncate text-xs text-muted-foreground" title={headerTitle}>
-            {headerTitle}
-          </span>
-          {planMode ? (
-            <Badge className="text-[10px]" variant="secondary">
-              计划模式
-            </Badge>
-          ) : null}
-
-          {/* 工具区可收缩：窗口控制块固定不参与压缩，窄了先藏次要按钮 */}
-          <div className="no-drag ml-auto flex min-w-0 items-center gap-1.5 self-stretch">
-            <Button
-              className={cn("h-7 px-2 text-xs", panel === "terminal" && "bg-accent")}
-              onClick={() => setPanel(panel === "terminal" ? null : "terminal")}
-              title="终端 / 后台任务"
-              variant="ghost"
-            >
-              <TerminalIcon className="size-3.5" />
-              {tasks.some((t) => t.status === "running") ? (
-                <span className="ml-0.5 size-1.5 rounded-full bg-amber-500" />
-              ) : null}
-            </Button>
-            <Button
-              className={cn("h-7 px-2 text-xs", panel === "files" && "bg-accent")}
-              onClick={() => setPanel(panel === "files" ? null : "files")}
-              title="文件"
-              variant="ghost"
-            >
-              <FilesIcon className="size-3.5" />
-            </Button>
-            <Button
-              className={cn("hidden h-7 px-2 text-xs @2xl:flex", splitPane && "bg-accent")}
-              onClick={toggleSplit}
-              title="并排显示另一个会话（再点关闭）"
-              variant="ghost"
-            >
-              <Columns2Icon className="size-3.5" />
-            </Button>
-            <Button
-              className={cn("hidden h-7 px-2 text-xs @2xl:flex", state.statuses.remote && "bg-accent")}
-              onClick={() => setRemoteOpen(true)}
-              title="远程访问：手机扫码继续所有会话"
-              variant="ghost"
-            >
-              <SmartphoneIcon className="size-3.5" />
-            </Button>
-            <Button
-              className={cn("hidden h-7 px-2 text-xs @2xl:flex", panel === "agents" && "bg-accent")}
-              onClick={() => setPanel(panel === "agents" ? null : "agents")}
-              title="子智能体"
-              variant="ghost"
-            >
-              <BotIcon className="size-3.5" />
-            </Button>
-            <Button
-              className={cn("hidden h-7 px-2 text-xs @2xl:flex", panel === "board" && "bg-accent")}
-              onClick={() => setPanel(panel === "board" ? null : "board")}
-              title="并行任务"
-              variant="ghost"
-            >
-              <RocketIcon className="size-3.5" />
-            </Button>
-            <Button
-              className={cn("hidden h-7 px-2 text-xs @2xl:flex", panel === "tree" && "bg-accent")}
-              onClick={() => setPanel(panel === "tree" ? null : "tree")}
-              title="会话树"
-              variant="ghost"
-            >
-              <ListTreeIcon className="size-3.5" />
-            </Button>
-            <Button
-              className={cn("hidden h-7 px-2 text-xs @3xl:flex", panel === "plan" && "bg-accent")}
-              onClick={() => setPanel(panel === "plan" ? null : "plan")}
-              title="计划"
-              variant="ghost"
-            >
-              <ClipboardListIcon className="size-3.5" />
-            </Button>
-            <Button
-              className={cn("hidden h-7 px-2 text-xs @3xl:flex", panel === "browser" && "bg-accent")}
-              onClick={() => setPanel(panel === "browser" ? null : "browser")}
-              title="内置浏览器"
-              variant="ghost"
-            >
-              <GlobeIcon className="size-3.5" />
-            </Button>
-            <Button
-              className="hidden h-7 px-2 text-xs @3xl:flex"
-              onClick={compact}
-              title="压缩上下文"
-              variant="ghost"
-            >
-              <Minimize2Icon className="size-3.5" />
-            </Button>
-
-            {/* OS 领地（仅无边框平台）：Windows caption 语法——贴角、满高、
-                方角，与应用工具之间用发丝线分界；关闭悬停用系统关闭红。
-                关闭走 close 拦截转托盘，与原生 X 行为一致。 */}
-            {window.pi.platform !== "darwin" ? (
-              <div className="-mr-4 ml-2 flex shrink-0 self-stretch border-l border-border/60">
-                <button
-                  className="flex w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  onClick={() => void window.pi.win.minimize()}
-                  title="最小化"
-                  type="button"
-                >
-                  <MinusIcon className="size-3.5" />
-                </button>
-                <button
-                  className="flex w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  onClick={() => void window.pi.win.toggleMaximize()}
-                  title={winMaximized ? "还原" : "最大化"}
-                  type="button"
-                >
-                  {winMaximized ? (
-                    <CopyIcon className="size-3" />
-                  ) : (
-                    <SquareIcon className="size-3" />
-                  )}
-                </button>
-                <button
-                  className="flex w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-[#e81123] hover:text-white"
-                  onClick={() => void window.pi.win.closeApp()}
-                  title="关闭"
-                  type="button"
-                >
-                  <XIcon className="size-4" />
-                </button>
-              </div>
-            ) : null}
-          </div>
-        </header>
+        <HeaderBar
+          maximized={winMaximized}
+          onCompact={compact}
+          onExpandSidebar={expandSidebar}
+          onOpenRemote={openRemote}
+          onTogglePanel={togglePanel}
+          onToggleSplit={stableToggleSplit}
+          panel={panel}
+          planMode={planMode}
+          remoteEnabled={Boolean(state.statuses.remote)}
+          sidebarCollapsed={sidebarCollapsed}
+          splitPaneOpen={Boolean(splitPane)}
+          tasksRunning={tasksRunning}
+          title={headerTitle}
+        />
 
         {state.error || state.status === "exited" || state.status === "error" ? (
           <div className="flex items-center gap-2 border-b bg-destructive/10 px-4 py-2 text-destructive text-xs">
@@ -892,56 +839,17 @@ function Shell() {
             <Composer
               commands={state.commands}
               cwd={state.cwd}
-              onClearQueue={() => send({ type: "clear_queue" })}
+              onClearQueue={clearQueue}
               onQueueInsert={insertQueued}
-              onLocalCommand={localCommand}
+              onLocalCommand={stableLocalCommand}
               onStop={dualChain.stopAll}
-              onSubmit={submit}
-              onTogglePlan={() => void togglePlanMode()}
+              onSubmit={stableSubmit}
+              onTogglePlan={stableTogglePlan}
               planMode={planMode}
               queue={state.queue}
               streaming={state.isStreaming}
             >
-              <ContextUsage onRefresh={refreshStats} stats={stats} />
-              <PromptInputButton
-                className={cn("gap-1 text-xs", dual.config.enabled && "text-primary")}
-                onClick={() => setDualOpen(true)}
-                title="双模型：规划模型出方案，执行模型落地"
-              >
-                <WorkflowIcon className="size-3.5" />
-                {dual.config.enabled ? "双模型" : "单模型"}
-              </PromptInputButton>
-              {dual.config.enabled ? (
-                <PromptInputButton
-                  className="gap-1 text-xs text-muted-foreground"
-                  onClick={() => setDualOpen(true)}
-                  title="规划模型（只出方案）；右侧模型是执行模型，点此修改双模型配置"
-                >
-                  <WorkflowIcon className="size-3.5" />
-                  规划
-                  <span className="max-w-24 truncate font-medium text-foreground/80">
-                    {plannerModel?.name ?? "未选"}
-                  </span>
-                </PromptInputButton>
-              ) : null}
-              <ModelPicker
-                model={state.model}
-                models={state.models}
-                onSelect={setModel}
-              />
-              <PromptInputSelect onValueChange={setThinking} value={state.thinkingLevel}>
-                <PromptInputSelectTrigger className="h-7 gap-1 text-xs">
-                  <BrainIcon className="size-3.5" />
-                  <PromptInputSelectValue />
-                </PromptInputSelectTrigger>
-                <PromptInputSelectContent>
-                  {THINKING.map((t) => (
-                    <PromptInputSelectItem key={t} value={t}>
-                      {t}
-                    </PromptInputSelectItem>
-                  ))}
-                </PromptInputSelectContent>
-              </PromptInputSelect>
+              {composerTools}
             </Composer>
           </div>
           <WidgetStrip placement="below" widgets={state.widgets} />
@@ -1188,3 +1096,175 @@ function Shell() {
     </div>
   );
 }
+// 顶栏是 memo 的：流式 delta 每 16ms 让 Shell 渲染一次，但标题/面板/运行点没变时
+// 整条顶栏（含十几个按钮和窗口控制）直接跳过 reconcile。
+type HeaderBarProps = {
+  title: string;
+  planMode: boolean;
+  sidebarCollapsed: boolean;
+  panel: PanelTab | null;
+  tasksRunning: boolean;
+  remoteEnabled: boolean;
+  splitPaneOpen: boolean;
+  maximized: boolean;
+  onExpandSidebar: () => void;
+  onTogglePanel: (panel: PanelTab) => void;
+  onOpenRemote: () => void;
+  onToggleSplit: () => void;
+  onCompact: () => void;
+};
+
+const HeaderBar = memo(function HeaderBar(props: HeaderBarProps) {
+  if ((window as any).__perfRender) (window as any).__perfRender.header++;
+  const { title, planMode, panel, maximized } = props;
+  return (
+    <header
+      className="@container drag flex h-12 shrink-0 items-center gap-2 border-b px-4"
+      onDoubleClick={(e) => {
+        // 自绘标题栏：双击切换最大化（点在按钮上除外）
+        if (window.pi.platform === "darwin") return;
+        if ((e.target as HTMLElement).closest("button")) return;
+        void window.pi.win.toggleMaximize();
+      }}
+    >
+      {props.sidebarCollapsed ? (
+        <Button
+          // 头部整条是拖拽区（-webkit-app-region: drag），按钮必须显式
+          // 标 no-drag，否则 Windows 无边框窗口下点击被系统当成拖动吞掉
+          className="no-drag h-7 shrink-0 px-2 text-muted-foreground"
+          onClick={props.onExpandSidebar}
+          size="sm"
+          title="展开侧栏（⌘B）"
+          variant="ghost"
+        >
+          <PanelLeftOpenIcon className="size-3.5" />
+        </Button>
+      ) : null}
+      <span className="min-w-0 max-w-56 truncate text-xs text-muted-foreground" title={title}>
+        {title}
+      </span>
+      {planMode ? (
+        <Badge className="text-[10px]" variant="secondary">
+          计划模式
+        </Badge>
+      ) : null}
+
+      {/* 工具区可收缩：窗口控制块固定不参与压缩，窄了先藏次要按钮 */}
+      <div className="no-drag ml-auto flex min-w-0 items-center gap-1.5 self-stretch">
+        <Button
+          className={cn("h-7 px-2 text-xs", panel === "terminal" && "bg-accent")}
+          onClick={() => props.onTogglePanel("terminal")}
+          title="终端 / 后台任务"
+          variant="ghost"
+        >
+          <TerminalIcon className="size-3.5" />
+          {props.tasksRunning ? <span className="ml-0.5 size-1.5 rounded-full bg-amber-500" /> : null}
+        </Button>
+        <Button
+          className={cn("h-7 px-2 text-xs", panel === "files" && "bg-accent")}
+          onClick={() => props.onTogglePanel("files")}
+          title="文件"
+          variant="ghost"
+        >
+          <FilesIcon className="size-3.5" />
+        </Button>
+        <Button
+          className={cn("hidden h-7 px-2 text-xs @2xl:flex", props.splitPaneOpen && "bg-accent")}
+          onClick={props.onToggleSplit}
+          title="并排显示另一个会话（再点关闭）"
+          variant="ghost"
+        >
+          <Columns2Icon className="size-3.5" />
+        </Button>
+        <Button
+          className={cn("hidden h-7 px-2 text-xs @2xl:flex", props.remoteEnabled && "bg-accent")}
+          onClick={props.onOpenRemote}
+          title="远程访问：手机扫码继续所有会话"
+          variant="ghost"
+        >
+          <SmartphoneIcon className="size-3.5" />
+        </Button>
+        <Button
+          className={cn("hidden h-7 px-2 text-xs @2xl:flex", panel === "agents" && "bg-accent")}
+          onClick={() => props.onTogglePanel("agents")}
+          title="子智能体"
+          variant="ghost"
+        >
+          <BotIcon className="size-3.5" />
+        </Button>
+        <Button
+          className={cn("hidden h-7 px-2 text-xs @2xl:flex", panel === "board" && "bg-accent")}
+          onClick={() => props.onTogglePanel("board")}
+          title="并行任务"
+          variant="ghost"
+        >
+          <RocketIcon className="size-3.5" />
+        </Button>
+        <Button
+          className={cn("hidden h-7 px-2 text-xs @2xl:flex", panel === "tree" && "bg-accent")}
+          onClick={() => props.onTogglePanel("tree")}
+          title="会话树"
+          variant="ghost"
+        >
+          <ListTreeIcon className="size-3.5" />
+        </Button>
+        <Button
+          className={cn("hidden h-7 px-2 text-xs @3xl:flex", panel === "plan" && "bg-accent")}
+          onClick={() => props.onTogglePanel("plan")}
+          title="计划"
+          variant="ghost"
+        >
+          <ClipboardListIcon className="size-3.5" />
+        </Button>
+        <Button
+          className={cn("hidden h-7 px-2 text-xs @3xl:flex", panel === "browser" && "bg-accent")}
+          onClick={() => props.onTogglePanel("browser")}
+          title="内置浏览器"
+          variant="ghost"
+        >
+          <GlobeIcon className="size-3.5" />
+        </Button>
+        <Button
+          className="hidden h-7 px-2 text-xs @3xl:flex"
+          onClick={props.onCompact}
+          title="压缩上下文"
+          variant="ghost"
+        >
+          <Minimize2Icon className="size-3.5" />
+        </Button>
+
+        {/* OS 领地（仅无边框平台）：Windows caption 语法——贴角、满高、
+            方角，与应用工具之间用发丝线分界；关闭悬停用系统关闭红。
+            关闭走 close 拦截转托盘，与原生 X 行为一致。 */}
+        {window.pi.platform !== "darwin" ? (
+          <div className="-mr-4 ml-2 flex shrink-0 self-stretch border-l border-border/60">
+            <button
+              className="flex w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              onClick={() => void window.pi.win.minimize()}
+              title="最小化"
+              type="button"
+            >
+              <MinusIcon className="size-3.5" />
+            </button>
+            <button
+              className="flex w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              onClick={() => void window.pi.win.toggleMaximize()}
+              title={maximized ? "还原" : "最大化"}
+              type="button"
+            >
+              {maximized ? <CopyIcon className="size-3" /> : <SquareIcon className="size-3" />}
+            </button>
+            <button
+              className="flex w-11 items-center justify-center text-muted-foreground transition-colors hover:bg-[#e81123] hover:text-white"
+              onClick={() => void window.pi.win.closeApp()}
+              title="关闭"
+              type="button"
+            >
+              <XIcon className="size-4" />
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </header>
+  );
+});

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUpIcon,
   CornerDownLeftIcon,
@@ -40,7 +40,10 @@ type Suggestion =
   | { kind: "command"; name: string; description: string }
   | { kind: "file"; path: string };
 
-export function Composer({
+// memo：流式 delta 只影响 Transcript。App 每 16ms 重渲染时，只要命令列表/队列/
+// 流式状态没变，Composer（含输入框、模型选择器、工具行）整块跳过 reconcile。
+// 注意 children 必须在调用方用 useMemo 稳定住，否则浅比较永远失败。
+function ComposerBase({
   streaming,
   commands,
   cwd,
@@ -68,6 +71,7 @@ export function Composer({
   planMode: boolean;
   children?: React.ReactNode;
 }) {
+  if ((window as any).__perfRender) (window as any).__perfRender.composer++;
   const controller = usePromptInputController();
   const attachments = usePromptInputAttachments();
   const text = controller.textInput.value;
@@ -382,6 +386,8 @@ export function Composer({
     </div>
   );
 }
+
+export const Composer = memo(ComposerBase);
 
 function SuggestionRow({
   item,

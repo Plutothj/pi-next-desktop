@@ -476,11 +476,12 @@ async function main() {
     await evaluate(
       `window.pi.debugWidget({ key: "todo", lines: ["--- Todo 3/3 ---", "✓ #1 甲", "✓ #2 乙", "✓ #3 丙"] })`,
     );
-    await sleep(400);
-    const collapsed = await evaluate(
+    // 事件管线现在是 16ms 批量进 reducer，固定 sleep 容易踩在批次边缘；轮询等折叠
+    await waitForExpr(
       `document.querySelectorAll('[data-widget-card] li').length === 0`,
+      3_000,
+      "todo collapsed",
     );
-    if (collapsed !== true) throw new Error("全部完成后没有折叠");
     await evaluate(`window.pi.debugWidget({ key: "todo", lines: [] })`);
   });
 
@@ -898,6 +899,29 @@ async function main() {
     );
     await sleep(500);
     if (!(await hasSidebar())) throw new Error("展开后侧栏没回来");
+  });
+
+  // 25. 性能回归：事件批量进入 reducer 时，Composer/顶栏/侧栏（memo）不跟着
+  // 流式帧反复重渲染。等所有 debounce/预热都静下来再测，避免把无关更新算进来。
+  await check("高频事件不重渲染 Composer/顶栏", async () => {
+    await sleep(2000);
+    const perf = await evaluate(`(async () => {
+      window.__perfRender = { app: 0, sidebar: 0, header: 0, composer: 0 };
+      for (let i = 1; i <= 20; i++) {
+        await window.pi.debugWidget({ key: "perf", lines: ["进度 " + i] });
+        await new Promise((r) => setTimeout(r, 16));
+      }
+      await new Promise((r) => setTimeout(r, 300));
+      const out = { ...window.__perfRender, cards: document.querySelectorAll('[data-widget-card]').length };
+      window.__perfRender = null;
+      await window.pi.debugWidget({ key: "perf", lines: [] });
+      return out;
+    })()`);
+    if (!perf || perf.app < 1) throw new Error(`没有渲染: ${JSON.stringify(perf)}`);
+    if (perf.header !== 0) throw new Error(`顶栏不该重渲染: ${JSON.stringify(perf)}`);
+    if (perf.composer !== 0) throw new Error(`Composer 不该重渲染: ${JSON.stringify(perf)}`);
+    // 侧栏可能因一次合法的会话列表刷新重渲染一次，但不能跟着 20 个批次走
+    if (perf.sidebar > 2) throw new Error(`侧栏重渲染过多: ${JSON.stringify(perf)}`);
   });
 
   ws.close();
