@@ -487,6 +487,8 @@ function Shell() {
   const submit = async (message: PromptInputMessage, behavior?: "steer" | "followUp") => {
     const text = message.text.trim();
     if (!text) return;
+    // 新会话还在后台预热：此时发 prompt 会路由到还没起来的 pi
+    if (state.loadingSession) return;
     // 附件分流：图片走原生 image part，其余解析为文本块内联进 prompt
     const { images, extraText, saved } = await expandAttachments(message.files);
     // 附件落盘索引：按 (cwd, ts) 记账，聊天里的 chip 据此点开预览

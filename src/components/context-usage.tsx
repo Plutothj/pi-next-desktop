@@ -5,8 +5,8 @@ import { cn } from "@/lib/utils";
 import type { SessionStats } from "@/hooks/useSessionStats";
 
 /** 223000 -> "22.3万"; keeps the panel compact like ZCode's capacity card. */
-function fmt(n: number | undefined) {
-  if (n === undefined) return "—";
+function fmt(n: number | null | undefined) {
+  if (n === null || n === undefined) return "—";
   if (n >= 10_000) {
     const w = n / 10_000;
     return `${w >= 100 ? w.toFixed(0) : w.toFixed(1).replace(/\.0$/, "")}万`;
@@ -39,7 +39,10 @@ export function ContextUsage({
   }, [open, onRefresh]);
 
   const ctx = stats?.contextUsage;
-  const percent = Math.min(ctx?.percent ?? 0, 100);
+  // pi 在上下文窗口未知/刚开始时可能给 percent=null，别让格式化把整棵 UI 崩掉
+  const ctxPercent = typeof ctx?.percent === "number" ? ctx.percent : null;
+  const percentLabel = ctxPercent === null ? "—" : ctxPercent.toFixed(1);
+  const percent = Math.min(ctxPercent ?? 0, 100);
   const radius = 7;
   const circumference = 2 * Math.PI * radius;
   // Providers only report cache usage when they support prompt caching (and
@@ -57,7 +60,7 @@ export function ContextUsage({
           className="text-muted-foreground"
           title={
             ctx
-              ? `上下文 ${fmt(ctx.tokens)} / ${fmt(ctx.contextWindow)}（${ctx.percent.toFixed(1)}%）`
+              ? `上下文 ${fmt(ctx.tokens)} / ${fmt(ctx.contextWindow)}（${percentLabel}%）`
               : "上下文用量与花费"
           }
         >
@@ -96,7 +99,7 @@ export function ContextUsage({
           <div className="flex items-baseline justify-between">
             <span className="font-medium text-xs">上下文容量</span>
             <span className="text-muted-foreground text-xs">
-              {ctx ? `${fmt(ctx.tokens)}/${fmt(ctx.contextWindow)}（${ctx.percent.toFixed(1)}%）` : "暂无数据"}
+              {ctx ? `${fmt(ctx.tokens)}/${fmt(ctx.contextWindow)}（${percentLabel}%）` : "暂无数据"}
             </span>
           </div>
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
@@ -132,7 +135,7 @@ export function ContextUsage({
                   label="缓存命中率"
                   value={cacheHit === null ? "—" : `${cacheHit.toFixed(1)}%`}
                 />
-                <Row label="费用" value={`$${stats.cost.toFixed(4)}`} />
+                <Row label="费用" value={typeof stats.cost === "number" ? `$${stats.cost.toFixed(4)}` : "—"} />
               </div>
               {!hasCacheData ? (
                 <p className="text-[10px] text-muted-foreground/70">

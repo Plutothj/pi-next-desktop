@@ -53,6 +53,8 @@ export type State = {
   /** 最近一条扩展 ui_notify（远程配对地址等需要展示的提示）. */
   notice?: { message: string; notifyType?: string; at: number };
   autoCompact: boolean;
+  /** 正在打开一个本次运行还没碰过的会话：先出骨架，等 pi 进程热好再填内容. */
+  loadingSession: boolean;
 };
 
 export const initialState: State = {
@@ -74,6 +76,7 @@ export const initialState: State = {
   dialog: null,
   autoCompact: true,
   runningSessions: {},
+  loadingSession: false,
 };
 
 // Deltas arrive only for the block being written, so patch by contentIndex.
@@ -260,6 +263,18 @@ export function usePi() {
     }));
   }, []);
 
+  // 回合结束后再更新会话列表（标题/时间/改动数），切视图本身不需要扫描。
+  const pendingRefresh = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleRefreshRef = useRef<() => void>(() => {});
+  const scheduleRefresh = useCallback(() => {
+    if (pendingRefresh.current) clearTimeout(pendingRefresh.current);
+    pendingRefresh.current = setTimeout(() => {
+      pendingRefresh.current = null;
+      void refreshSessions();
+    }, 350);
+  }, [refreshSessions]);
+  scheduleRefreshRef.current = scheduleRefresh;
+
   // 每模型思考档位记忆：存 ui.json（我们自己的文件，pi 永不覆盖），
   // boot/切会话/切模型后按记忆注入。pi 的 settings.json 旁路写会被它
   // 的进程内存覆盖，所以不走那条路。直接走 window.pi.send（不依赖下方
@@ -303,6 +318,7 @@ export function usePi() {
           thinkingLevel: String(st.thinkingLevel ?? "off"),
           sessionName: st.sessionName as string | undefined,
           sessionFile: st.sessionFile as string | undefined,
+          loadingSession: false,
           commands: commands?.commands ?? [],
           autoCompact: Boolean((st.autoCompactionEnabled as boolean) ?? true),
           // 扩展 UI 按会话替换，避免上一个会话的 todo/status 残留
@@ -368,6 +384,13 @@ export function usePi() {
       return batch.reduce(applyEvent, s);
     };
     const unsub = window.pi.onEvent((rec) => {
+      // 会话结束（前台或后台）再 debounce 刷新侧栏元数据；切视图不再扫描
+      if (
+        rec.type === "agent_settled" ||
+        (rec.type === "session_status" && rec.isStreaming === false)
+      ) {
+        scheduleRefreshRef.current();
+      }
       if (rec.type === "message_update") {
         pendingDeltas.current.push(rec);
         if (deltaTimer.current === null) {
@@ -387,6 +410,8 @@ export function usePi() {
       if (deltaTimer.current !== null) clearTimeout(deltaTimer.current);
       deltaTimer.current = null;
       pendingDeltas.current = [];
+      if (pendingRefresh.current) clearTimeout(pendingRefresh.current);
+      pendingRefresh.current = null;
     };
   }, []);
 
@@ -526,6 +551,7 @@ export function usePi() {
         queue: { steering: [], followUp: [] },
         isStreaming: Boolean(state_.isStreaming),
         sessionFile: file,
+        loadingSession: false,
         sessionName: state_.sessionName,
         model: state_.model ?? s.model,
         thinkingLevel: state_.thinkingLevel ?? s.thinkingLevel,
@@ -682,6 +708,7 @@ export function usePi() {
         queue: { steering: [], followUp: [] },
         isStreaming: Boolean(fresh.isStreaming),
         sessionFile: file,
+        loadingSession: false,
         sessionName: fresh.sessionName as string | undefined,
         model: (fresh.model as ModelInfo | undefined) ?? s.model,
         thinkingLevel: String(fresh.thinkingLevel ?? s.thinkingLevel),
@@ -732,6 +759,7 @@ export function usePi() {
           queue: { steering: [], followUp: [] },
           isStreaming: false,
           sessionFile: fresh.sessionFile as string | undefined,
+          loadingSession: false,
           sessionName: fresh.sessionName as string | undefined,
           widgets: {},
           statuses: {},
@@ -763,6 +791,7 @@ export function usePi() {
     async (file: string, cwd?: string) => {
       const seq = ++openSeq.current;
       const cached = viewCache.current.get(file);
+      let skeletonTimer: ReturnType<typeof setTimeout> | null = null;
       if (cached) {
         // 缓存优先：先把界面切过去（含消息和扩展 UI），不阻塞在 pi 启动上
         setState((s) => ({
@@ -779,16 +808,43 @@ export function usePi() {
           widgets: cached.ui?.widgets ?? {},
           statuses: cached.ui?.statuses ?? {},
           dialog: null,
+          loadingSession: false,
           runningSessions: { ...s.runningSessions, [file]: Boolean(cached.state.isStreaming) },
           ...(cwd ? { cwd } : {}),
         }));
+      } else {
+        // 没缓存（本次运行第一次点开）：先清空视图，150ms 后才显示骨架——
+        // pi 进程已经在跑时通常一瞬间就拿到数据，骨架不会闪一下。
+        setState((s) => ({
+          ...s,
+          messages: [],
+          streaming: null,
+          tools: {},
+          queue: { steering: [], followUp: [] },
+          isStreaming: false,
+          sessionFile: file,
+          sessionName: undefined,
+          widgets: {},
+          statuses: {},
+          dialog: null,
+          loadingSession: false,
+          ...(cwd ? { cwd } : {}),
+        }));
+        skeletonTimer = setTimeout(() => {
+          if (seq === openSeq.current) {
+            setState((s) => (s.sessionFile === file ? { ...s, loadingSession: true } : s));
+          }
+        }, 150);
       }
       // 切换 = 换界面显示的活动会话；后台会话的 pi 进程继续跑，不中断。
-      // 有缓存时不等进程拉起（wait=false），主进程后台预热后再轮询补数据。
+      // 不等进程拉起（wait=false）：主进程后台预热，渲染层轮询补数据。
       const switched = await window.pi
-        .switchSession(file, cwd, { wait: !cached })
+        .switchSession(file, cwd, { wait: false })
         .catch(() => ({ ok: false, warming: false, ui: undefined, dialog: null as UiDialogRequest | null }));
-      if (!switched?.ok || seq !== openSeq.current) return;
+      if (!switched?.ok || seq !== openSeq.current) {
+        if (skeletonTimer) clearTimeout(skeletonTimer);
+        return;
+      }
       // 目标会话的扩展 UI / 待回答对话框（很便宜，优先补齐）
       if (cached) {
         setState((s) => ({
@@ -798,14 +854,27 @@ export function usePi() {
           dialog: switched.dialog ?? null,
         }));
       }
-      // get_state 很轻；进程还在后台拉起时重试几次（pi 未运行 会立即抛错）
+      // get_state 很轻；进程还在后台拉起时重试（pi 未运行 会立即抛错）
       let st = await window.pi.send({ type: "get_state" }).catch(() => null);
-      for (let i = 0; !st && i < 60 && (switched.warming || !cached); i++) {
+      for (let i = 0; !st && i < 80; i++) {
         await sleep(250);
-        if (seq !== openSeq.current) return;
+        if (seq !== openSeq.current) {
+          if (skeletonTimer) clearTimeout(skeletonTimer);
+          return;
+        }
         st = await window.pi.send({ type: "get_state" }).catch(() => null);
       }
-      if (st === null && cached) return; // 预热失败：先保留缓存视图
+      if (skeletonTimer) clearTimeout(skeletonTimer);
+      if (st === null) {
+        if (!cached) {
+          setState((s) => ({
+            ...s,
+            loadingSession: false,
+            error: "打开会话超时：pi 进程未能启动",
+          }));
+        }
+        return; // 缓存视图保留
+      }
       if (seq !== openSeq.current) return;
       const state_ = (st as any)?.state ?? (st as any) ?? {};
       const count = typeof state_.messageCount === "number" ? state_.messageCount : null;
@@ -833,6 +902,7 @@ export function usePi() {
         statuses: ui?.statuses ?? s.statuses,
         // 切到这个会话时它还在等回答的阻塞对话框（后台 pi 一直挂着）
         dialog: switched?.dialog ?? null,
+        loadingSession: false,
         runningSessions: { ...s.runningSessions, [file]: Boolean(state_.isStreaming) },
         // Session files record their own cwd; cross-project switches follow it.
         ...(cwd ? { cwd } : {}),

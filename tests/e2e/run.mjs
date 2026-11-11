@@ -568,7 +568,58 @@ async function main() {
     if (!JSON.parse(aAfterCreate).running) throw new Error(`新建后 A 进程被顶掉: ${aAfterCreate}`);
   });
 
-  // 17. 阻塞对话框跟着会话走：在 A 等项目审批时去别的项目新建会话，
+  // 17. 长会话虚拟化：只有可视区附近的行被挂载（切换/首屏与历史长度解耦）
+  await check("长会话虚拟化（只挂可视区）", async () => {
+    const work = path.join(agentDir, "..", `pi-e2e-virt-${process.pid}`);
+    fs.mkdirSync(work, { recursive: true });
+    const dir = path.join(agentDir, "sessions", `e2e-virt-${process.pid}`);
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, "session.jsonl");
+    const now = Date.now();
+    const lines = [
+      JSON.stringify({ type: "session", version: 3, id: "virt", timestamp: new Date(now).toISOString(), cwd: work }),
+    ];
+    let parent = null;
+    let seq = 0;
+    for (let i = 1; i <= 60; i++) {
+      for (const role of ["user", "assistant"]) {
+        const id = `v${++seq}`;
+        const ts = now - (60 - i) * 60000;
+        const message = {
+          role,
+          content: [{ type: "text", text: role === "user" ? `问题 ${i}` : `回答 ${i}：` + "较长的说明文字。".repeat(40) }],
+          timestamp: ts,
+        };
+        if (role === "assistant") {
+          message.api = "openai-completions";
+          message.provider = "mock";
+          message.model = "mock-model";
+          message.usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+          message.stopReason = "stop";
+          message.durationMs = 1000;
+        }
+        lines.push(JSON.stringify({ type: "message", id, parentId: parent, timestamp: new Date(ts).toISOString(), message }));
+        parent = id;
+      }
+    }
+    fs.writeFileSync(file, `${lines.join("\n")}\n`);
+    await evaluate(`window.__piRefreshSessions()`);
+    await evaluate(`window.__piOpenSession(${JSON.stringify(file)}, ${JSON.stringify(work)})`);
+    await waitForExpr(
+      `window.__pi.sessionFile === ${JSON.stringify(file)} && document.querySelectorAll('[data-chat-node]').length > 0`,
+      30_000,
+      "长会话加载",
+    );
+    await sleep(300);
+    const loaded = await evaluate(
+      `JSON.stringify({ msgs: window.__pi.messages.length, nodes: document.querySelectorAll('[data-chat-node]').length })`,
+    );
+    const info = JSON.parse(loaded);
+    if (info.msgs < 100) throw new Error(`长会话消息数异常: ${loaded}`);
+    if (info.nodes > 30) throw new Error(`虚拟化未生效，挂了 ${info.nodes} 行`);
+  });
+
+  // 18. 阻塞对话框跟着会话走：在 A 等项目审批时去别的项目新建会话，
   //     对话框要被暂存而不是丢弃（丢掉 pi 会永远等，A 的回合卡死"停止"）。
   await check("切换会话保留待回答的审批对话框", async () => {
     const workA = path.join(agentDir, "..", `pi-e2e-dialog-a-${process.pid}`);
@@ -619,14 +670,14 @@ async function main() {
     if (again.ok) throw new Error("对话框回答后仍留在待回答表里");
   });
 
-  // 18. 项目树：创建项目后出现在侧栏的项目分组里
+  // 19. 项目树：创建项目后出现在侧栏的项目分组里
   await check("创建项目", async () => {
     await evaluate(`window.pi.projects.add(${JSON.stringify(agentDir)}).then(r => JSON.stringify(r))`);
     const projects = await evaluate(`window.pi.projects.list().then(l => JSON.stringify(l.map(p => p.path)))`);
     if (!JSON.parse(projects).includes(agentDir)) throw new Error(`项目未登记: ${projects}`);
   });
 
-  // 19. 删除项目：有会话时也必须真的消失（曾经因为侧栏分组由会话 cwd 推出，
+  // 20. 删除项目：有会话时也必须真的消失（曾经因为侧栏分组由会话 cwd 推出，
   //     删掉项目后会话立刻把它"变回"项目），而且确认框必须是应用内对话框。
   await check("删除项目（有会话）：应用内确认 + 整组隐藏", async () => {
     const work = path.join(agentDir, "..", `pi-e2e-projdel-${process.pid}`);
@@ -681,7 +732,7 @@ async function main() {
     if (!fs.existsSync(sessionPath)) throw new Error(`会话文件被误删: ${sessionPath}`);
   });
 
-  // 20. 删除技能：设置页里点垃圾桶 → 应用内确认框（叠在设置页之上）→ 真的删掉
+  // 21. 删除技能：设置页里点垃圾桶 → 应用内确认框（叠在设置页之上）→ 真的删掉
   await check("删除技能：应用内确认 + 目录真的删除", async () => {
     // 技能目录在 fixture 启动时已创建（设置页 cfg 只在打开时读一次）
     const skillDir = path.join(agentDir, "skills", "e2e-demo-skill");
@@ -742,7 +793,7 @@ async function main() {
     await sleep(300);
   });
 
-  // 21. 文件预览：xlsx 网格 / docx 正文 / pdf canvas / 问 AI 预填
+  // 22. 文件预览：xlsx 网格 / docx 正文 / pdf canvas / 问 AI 预填
   //     fixture 项目里放三种样例文件，走真实 UI 动线（文件树 → 点开）
   await check("文件预览（xlsx/docx/pdf）+ 问 AI", async () => {
     const work = path.join(agentDir, "..", `pi-e2e-preview-${process.pid}`);
@@ -828,7 +879,7 @@ async function main() {
     fs.rmSync(work, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
-  // 22. 侧栏折叠：收起后消失、头部出现展开按钮、再展开回来
+  // 23. 侧栏折叠：收起后消失、头部出现展开按钮、再展开回来
   await check("侧栏折叠/展开", async () => {
     // 注意：右侧面板也是 <aside>，这里只认左侧栏（含「项目」标题的那块）
     const hasSidebar = () => evaluate("Boolean(document.querySelector('aside.w-64'))");

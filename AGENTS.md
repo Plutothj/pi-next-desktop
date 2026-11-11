@@ -50,7 +50,7 @@ git push --follow-tags                       # 推提交和 tag；release.yml �
 - 注释与用户可见文案用中文，标识符用英文，与现有代码一致。
 - **危险操作（删除/卸载/还原）的确认框必须用 `useConfirm()`（`src/components/ui/confirm-dialog.tsx`），不要用 `window.confirm`**：原生弹框和暗色 UI 割裂，阻塞渲染；CDP 驱动的 E2E 遇到原生 confirm 会直接挂住。
 - **模型专用的注入文本不上屏**：附件解析正文（`<attachment name=…>` 块）、`/skill:` 展开的 `<skill …>` 正文、`[Image: original …]` 尺寸提示、计划/双模型指令前缀都只留在会话记录里；渲染层（用户气泡、排队 chip、会话树、顶栏标题）用 `src/lib/promptPrefixes.ts` 的 `stripAttachmentBlocks` / `stripSkillBlock` / `stripImageNotes` / `stripDirective` 剥离，侧栏标题用 `session-files.js` 的 `titleFromUserText`。
-- **长会话滚动**：`Transcript` 只渲染最近 `PAGE=24` 条，滚到顶部 200px 内自动续页并用 `scrollHeight` 差值回补视口；每条回合节点套 `.chat-cv`（`content-visibility:auto`），最后一条不套；会话切换用 `key={sessionFile}` 重挂载；渲染层 `viewCache` 按会话缓存消息/状态/UI，切回先上屏、`messageCount` 不变就跳过 `get_messages`，进程被回收时 `pi:switchSession({wait:false})` + 主进程后台预热（避免切会话搬整个历史）。**流式 delta 必须合并**（`message_update` 攒 16ms 再进 reducer），且**不要用 requestAnimationFrame 做合并**——窗口被遮挡/最小化时 rAF 暂停，deltas 会憋到 `message_end` 一次性出现（实测"流式全丢"）。
+- **长会话滚动**：`Transcript` 用 `@tanstack/react-virtual` 按回合虚拟化（只挂可视区 + overscan，`measureElement` 动态测高）；**不要手工 `scrollToIndex`**（会让 `use-stick-to-bottom` 误判用户上滚、停止跟随）。会话切换用 `key={sessionFile}` 重挂载；渲染层 `viewCache` 按会话缓存消息/状态/UI，切回先上屏、`messageCount` 不变就跳过 `get_messages`，进程被回收时 `pi:switchSession({wait:false})` + 主进程后台预热；切视图**不要** `refreshSessions()`（改为 `agent_settled`/后台 `session_status(false)` 后 debounce）。**流式 delta 必须合并**（`message_update` 攒 16ms 再进 reducer），且**不要用 requestAnimationFrame 做合并**——窗口被遮挡/最小化时 rAF 暂停，deltas 会憋到 `message_end` 一次性出现（实测"流式全丢"）。
 - UI 交互默认对齐 ZCode Desktop 的行为（Enter 发送、流式排队/steer、弹层从输入框上方出、模型选择器内嵌输入框）。
 
 ## 跨平台
@@ -63,7 +63,7 @@ Windows 与实际 macOS 均已真机日常使用（命名管道、`cmd /d /s /c`
 
 ## 已知风险（改相关区域时注意）
 
-- 会话扫描每次全量读 `<AGENT_DIR>/sessions`，O(总字节)，别再加重扫描逻辑。
+- 会话列表走 SQLite 元数据索引（`electron/session-index.js`，`node:sqlite`）：只 stat + SELECT，未变文件不重读；`scanSessions()` 仍是回退路径，别在扫描里加逐行 `JSON.parse`。
 - **pi 的 `settings.json` 是 pi 进程私有**：旁路写会被它下一次 save 整文件覆盖（思考档位因此走 ui.json + 注入，见 DEVELOPMENT §7.9）。
 - **计划模式不要再用 prompt 前缀**：走 `plan-mode.ts` 扩展（Enter/ExitPlanMode 工具 + `tool_call` 闸门 + `before_agent_start` 系统提示注入 + 审批卡片），状态是与会话文件同级的 `.plan-mode.json`。注意系统提示 section 名必须匹配 `^[a-z][a-z0-9_-]*$`（写成 `"Plan mode"` 会让 pi 拒绝整个请求，见 DEVELOPMENT §7.11.1）。
 - **远程访问是内置模块**：`electron/remote-extension.js` 把应用自带的 `pi-mobile` 及整棵依赖复制到 `<agent>/extensions/pi-mobile` + `extensions/node_modules`；不要再把 `pi-mobile` 加进「推荐扩展」。`/remote` 是 pi 扩展命令，必须以 prompt 文本发送（pi 会先执行命令、不入模型回合），并且手机只走 HTTPS（Tailscale/自建反代），hub 只监听回环。

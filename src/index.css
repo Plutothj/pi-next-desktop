@@ -230,10 +230,3 @@
 .doc-preview img { max-width: 100%; border-radius: 4px; margin: 0.5em 0; }
 .doc-preview a { color: var(--primary); text-decoration: underline; }
 .doc-preview hr { border: 0; border-top: 1px solid var(--border); margin: 1em 0; }
-
-/* 长会话滚动：离屏回合跳过布局与绘制（ZCode 的 content-visibility 思路）。
-   contain-intrinsic-size 的 auto 会记住上次渲染高度，可见时几乎不跳。 */
-.chat-cv {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 360px;
-}

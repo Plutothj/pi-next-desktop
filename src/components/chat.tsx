@@ -1,5 +1,6 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { mermaid } from "@streamdown/mermaid";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useStickToBottomContext } from "use-stick-to-bottom";
 import { stripAttachmentBlocks, stripDirective, stripImageNotes, stripSkillBlock } from "@/lib/promptPrefixes";
 import {
@@ -628,22 +629,37 @@ function BashCard({ message }: { message: PiMessage }) {
   );
 }
 
-// 每页消息数：首屏只挂最近 24 条（约 12 个回合），滚上去再按页续；
-// 长会话首屏渲染成本因此降到 1/3 以下（60 条大消息在重会话里要 300-500ms）。
-const PAGE = 24;
+// 一个回合里 pi 会产生多条 assistant 消息（每次工具调用一轮），逐条渲染会出
+// 一长串「已工作 N 秒」。这里按回合合并成一行；同时作为虚拟列表的 row model。
+type TurnRow =
+  | { kind: "user"; key: string; message: PiMessage }
+  | {
+      kind: "assistant";
+      key: string;
+      blocks: ContentBlock[];
+      atTail: boolean;
+      liveTail: boolean;
+      durationMs?: number;
+      startedAt?: number;
+      message: PiMessage;
+    }
+  | { kind: "summary"; key: string; role: "compactionSummary" | "branchSummary" }
+  | { kind: "bash"; key: string; message: PiMessage }
+  | { kind: "live"; key: "live"; startedAt?: number };
 
-/** 主聊天与并行会话共用的转录视图：消息流 + 流式块 + 等待占位。 */
+/** 主聊天与并行会话共用的转录视图：虚拟化消息流 + 流式块 + 等待占位。 */
 export function Transcript(props: {
   messages: PiMessage[];
   streaming: ContentBlock[] | null;
   isStreaming: boolean;
   tools: Record<string, ToolExec>;
   cwd: string;
+  loading?: boolean;
   onFork?: (message: PiMessage) => void;
 }) {
   return (
     <Conversation>
-      {/* body 必须在 StickToBottom 的 provider 内：滚动续页要拿 scrollRef */}
+      {/* body 必须在 StickToBottom 的 provider 内：虚拟列表要拿 scrollRef */}
       <TranscriptBody {...props} />
       <ConversationScrollButton />
     </Conversation>
@@ -656,6 +672,7 @@ function TranscriptBody({
   isStreaming,
   tools,
   cwd,
+  loading = false,
   onFork,
 }: {
   messages: PiMessage[];
@@ -663,17 +680,11 @@ function TranscriptBody({
   isStreaming: boolean;
   tools: Record<string, ToolExec>;
   cwd: string;
+  loading?: boolean;
   onFork?: (message: PiMessage) => void;
 }) {
-  // Long sessions get one page at a time: the DOM stays small no matter how
-  // many turns the transcript holds.
-  const [limit, setLimit] = useState(PAGE);
   const resolveAttachments = useSavedAttachments(cwd);
-  // 滚到顶部附近自动续一页（ZCode 的 loadOlder / opencode 的窗口化同思路）：
-  // 不要求用户点按钮。前置内容会让视口跳动，所以加载前后用 scrollHeight 差值回补。
   const { scrollRef } = useStickToBottomContext();
-  const loadAnchor = useRef<{ top: number; height: number } | null>(null);
-  const startRef = useRef(0);
 
   // toolResult messages live in the transcript but render inside their card.
   const results = useMemo(() => {
@@ -684,172 +695,156 @@ function TranscriptBody({
     return map;
   }, [messages]);
 
-  const visible = messages.filter(
-    (m) => m.role !== "toolResult" && m.role !== "system" && m.role !== "bashExecution",
-  );
-  const start = Math.max(0, visible.length - limit);
-  const windowed = visible.slice(start);
-  startRef.current = start;
+  const streamingStarted = Boolean(streaming && streaming.length > 0);
+  // 回合是否仍在进行：用 chat 级 isStreaming（跨工具轮保持 true），
+  // 而不是瞬时的 streaming 块（工具轮之间会短暂为 null，导致反复折叠）
+  const rows = useMemo<TurnRow[]>(() => {
+    const out: TurnRow[] = [];
+    const visible = messages.filter(
+      (m) => m.role !== "toolResult" && m.role !== "system" && m.role !== "bashExecution",
+    );
+    let lastUserTs: number | undefined;
+    let i = 0;
+    while (i < visible.length) {
+      const message = visible[i];
+      if (message.role === "user") {
+        if (message.timestamp) lastUserTs = message.timestamp;
+        out.push({ kind: "user", key: `u-${i}`, message });
+        i += 1;
+        continue;
+      }
+      if (message.role === "assistant") {
+        const group: PiMessage[] = [message];
+        let j = i + 1;
+        while (j < visible.length && visible[j].role === "assistant") {
+          group.push(visible[j]);
+          j += 1;
+        }
+        const atTail = j === visible.length;
+        const lastMsg = group[group.length - 1];
+        const liveTail = atTail && isStreaming;
+        out.push({
+          kind: "assistant",
+          key: `a-${i}`,
+          blocks: group.flatMap((m) => blocksOf(m)),
+          atTail,
+          liveTail,
+          durationMs:
+            !liveTail && lastMsg.timestamp && lastUserTs
+              ? lastMsg.timestamp - lastUserTs
+              : undefined,
+          startedAt: lastUserTs,
+          message: lastMsg,
+        });
+        i = j;
+        continue;
+      }
+      if (message.role === "compactionSummary" || message.role === "branchSummary") {
+        out.push({ kind: "summary", key: `s-${i}`, role: message.role });
+        i += 1;
+        continue;
+      }
+      i += 1;
+    }
+    // 还没有任何 assistant 消息的回合（首个工具轮之前）
+    if (streamingStarted && (out.length === 0 || out[out.length - 1]?.kind === "user")) {
+      out.push({ kind: "live", key: "live", startedAt: lastUserTs });
+    }
+    return out;
+  }, [messages, isStreaming, streamingStarted]);
 
-  const loadOlder = useCallback(() => {
-    if (startRef.current <= 0) return;
-    const el = scrollRef.current;
-    if (el) loadAnchor.current = { top: el.scrollTop, height: el.scrollHeight };
-    setLimit((n) => n + PAGE);
-  }, [scrollRef]);
+  const renderRow = (row: TurnRow): React.ReactNode => {
+    switch (row.kind) {
+      case "user":
+        return (
+          <UserMessage
+            files={resolveAttachments(row.message.timestamp)}
+            message={row.message}
+            onFork={onFork}
+          />
+        );
+      case "assistant":
+        return (
+          <AssistantMessage
+            active={row.liveTail}
+            blocks={row.liveTail ? [...row.blocks, ...(streaming ?? [])] : row.blocks}
+            durationMs={row.durationMs}
+            message={row.message}
+            onFork={onFork}
+            results={results}
+            startedAt={row.liveTail ? row.startedAt : undefined}
+            streaming={row.atTail && Boolean(streaming)}
+            tools={tools}
+          />
+        );
+      case "summary":
+        return (
+          <div className="flex items-center gap-3 text-muted-foreground text-xs">
+            <div className="h-px flex-1 bg-border" />
+            {row.role === "compactionSummary" ? "上下文已压缩" : "分支摘要"}
+            <div className="h-px flex-1 bg-border" />
+          </div>
+        );
+      case "bash":
+        return <BashCard message={row.message} />;
+      case "live":
+        return (
+          <AssistantMessage
+            active
+            blocks={streaming ?? []}
+            results={results}
+            startedAt={row.startedAt}
+            streaming
+            tools={tools}
+          />
+        );
+    }
+  };
 
-  // 补页后把视口钉在原来那条消息上（否则新内容插到上面会让画面往上跳）
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    const anchor = loadAnchor.current;
-    if (!el || !anchor) return;
-    loadAnchor.current = null;
-    el.scrollTop = anchor.top + (el.scrollHeight - anchor.height);
-  }, [limit, scrollRef]);
+  // 只挂可视区附近的行（opencode 同款虚拟化）：React 渲染 + shiki 高亮
+  // 与历史长度解耦；动态测高由 measureElement + ResizeObserver 完成。
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 220,
+    overscan: 6,
+    getItemKey: (index) => rows[index].key,
+  });
 
-  // 滚到顶部附近自动续页（留一点余量，手感更连续）
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    let raf = 0;
-    const onScroll = () => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        if (el.scrollTop < 200) loadOlder();
-      });
-    };
-    el.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      el.removeEventListener("scroll", onScroll);
-      if (raf) cancelAnimationFrame(raf);
-    };
-  }, [scrollRef, loadOlder]);
+  const showEmpty = rows.length === 0 && !isStreaming && !loading;
 
   return (
     <ConversationContent className="mx-auto w-full max-w-3xl gap-2 px-5 py-4 lg:max-w-4xl xl:max-w-5xl 2xl:max-w-6xl min-[1800px]:max-w-7xl">
-        {visible.length === 0 && !streaming ? (
+        {loading && rows.length === 0 ? (
+          <div className="flex items-center justify-center gap-2 py-16 text-xs text-muted-foreground">
+            <Loader2Icon className="size-3.5 animate-spin" />
+            正在打开会话…
+          </div>
+        ) : null}
+
+        {showEmpty ? (
           <ConversationEmptyState
             title="开始对话"
             description={`工作目录 ${cwd || "~"}`}
           />
         ) : null}
 
-        {start > 0 ? (
-          <button
-            className="mx-auto rounded-md border px-3 py-1 text-xs text-muted-foreground hover:bg-accent"
-            onClick={loadOlder}
-            type="button"
-          >
-            加载更早的 {Math.min(start, PAGE)} 条消息（共 {visible.length} 条）
-          </button>
+        {rows.length > 0 ? (
+          <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+            {virtualizer.getVirtualItems().map((item) => (
+              <div
+                className="absolute left-0 top-0 w-full pb-2"
+                data-chat-node={rows[item.index].key}
+                data-index={item.index}
+                key={item.key}
+                ref={virtualizer.measureElement}
+                style={{ transform: `translateY(${item.start}px)` }}
+              >
+                {renderRow(rows[item.index])}
+              </div>
+            ))}
+          </div>
         ) : null}
-
-        {(() => {
-          // 一个回合里 pi 会产生多条 assistant 消息（每次工具调用一轮），
-          // 逐条渲染会出现一长串「已工作 N 秒」。这里把同一回合的连续
-          // assistant 消息合并成一个段落：一条耗时条 + 合并后的思考/工具/正文。
-          const nodes: { key: string; node: React.ReactNode }[] = [];
-          // 回合是否仍在进行：用 chat 级 isStreaming（跨工具轮保持 true），
-          // 而不是瞬时的 streaming 块（工具轮之间会短暂为 null，导致反复折叠）
-          const turnActive = isStreaming;
-          let lastUserTs: number | undefined;
-          let i = 0;
-          while (i < windowed.length) {
-            const message = windowed[i];
-            if (message.role === "user") {
-              if (message.timestamp) lastUserTs = message.timestamp;
-              nodes.push({
-                key: `u-${start + i}`,
-                node: (
-                  <UserMessage
-                    files={resolveAttachments(message.timestamp)}
-                    message={message}
-                    onFork={onFork}
-                  />
-                ),
-              });
-              i += 1;
-              continue;
-            }
-            if (message.role === "assistant") {
-              const group: PiMessage[] = [message];
-              let j = i + 1;
-              while (j < windowed.length && windowed[j].role === "assistant") {
-                group.push(windowed[j]);
-                j += 1;
-              }
-              const atTail = j === windowed.length;
-              // 回合收尾段：进行中显示"正在工作"并追加流式块；结束后显示总计
-              const liveTail = atTail && turnActive;
-              const mergedBlocks = group.flatMap((m) => blocksOf(m));
-              const lastMsg = group[group.length - 1];
-              nodes.push({
-                key: `a-${start + i}`,
-                node: (
-                  <AssistantMessage
-                    active={liveTail}
-                    blocks={liveTail ? [...mergedBlocks, ...(streaming ?? [])] : mergedBlocks}
-                    durationMs={
-                      !liveTail && lastMsg.timestamp && lastUserTs
-                        ? lastMsg.timestamp - lastUserTs
-                        : undefined
-                    }
-                    message={lastMsg}
-                    onFork={onFork}
-                    results={results}
-                    startedAt={liveTail ? lastUserTs : undefined}
-                    streaming={atTail && Boolean(streaming)}
-                    tools={tools}
-                  />
-                ),
-              });
-              i = j;
-              continue;
-            }
-            if (message.role === "compactionSummary" || message.role === "branchSummary") {
-              nodes.push({
-                key: `s-${start + i}`,
-                node: (
-                  <div className="flex items-center gap-3 text-muted-foreground text-xs">
-                    <div className="h-px flex-1 bg-border" />
-                    {message.role === "compactionSummary" ? "上下文已压缩" : "分支摘要"}
-                    <div className="h-px flex-1 bg-border" />
-                  </div>
-                ),
-              });
-              i += 1;
-              continue;
-            }
-            if (message.role === "bashExecution") {
-              nodes.push({ key: `b-${start + i}`, node: <BashCard message={message} /> });
-            }
-            i += 1;
-          }
-          // 还没有任何 assistant 消息的回合（首个工具轮之前）
-          if (streaming && (nodes.length === 0 || windowed[windowed.length - 1]?.role === "user")) {
-            nodes.push({
-              key: "live",
-              node: (
-                <AssistantMessage
-                  active={turnActive}
-                  blocks={streaming}
-                  results={results}
-                  startedAt={lastUserTs}
-                  streaming
-                  tools={tools}
-                />
-              ),
-            });
-          }
-          // 离屏回合跳过布局/绘制（ZCode 同款 content-visibility）：长会话滚动
-          // 不再为看不见的历史反复排版；最后一段（可能是正在流式的回合）保持活跃。
-          return nodes.map((n, idx) => (
-            <div className={idx === nodes.length - 1 ? undefined : "chat-cv"} data-chat-node={n.key} key={n.key}>
-              {n.node}
-            </div>
-          ));
-        })()}
 
         {messages
           .filter((m) => m.role === "bashExecution")
@@ -875,6 +870,7 @@ export function Chat(props: { state: State; onFork?: (message: PiMessage) => voi
       key={state.sessionFile ?? ""}
       cwd={state.cwd}
       isStreaming={state.isStreaming}
+      loading={state.loadingSession}
       messages={state.messages}
       onFork={onFork}
       streaming={state.streaming}

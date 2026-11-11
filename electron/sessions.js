@@ -6,10 +6,12 @@ import path from "node:path";
 import { requireString } from "./ipc-helpers.js";
 import { safeHandle } from "./ipc.js";
 import { logLine } from "./logs.js";
-import { buildForkLines, scanSessions, searchSessions, sessionsRoot } from "./session-files.js";
+import { buildForkLines, searchSessions, sessionsRoot } from "./session-files.js";
+import { scanSessionsIndexed } from "./session-index.js";
 
 export function registerSessionHandlers({ pi, dialog, shell }) {
-  safeHandle("pi:sessions", () => scanSessions());
+  // SQLite 元数据索引：只 stat 文件，没变的行直接查表（冷扫描不再重读 JSONL）
+  safeHandle("pi:sessions", () => scanSessionsIndexed());
   safeHandle("pi:searchSessions", (_e, { query } = {}) => searchSessions(query));
 
   // pi's RPC fork only branches *before a user message*. For forking at an
