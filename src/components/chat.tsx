@@ -1,6 +1,6 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { mermaid } from "@streamdown/mermaid";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
 import { useStickToBottomContext } from "use-stick-to-bottom";
 import { stripAttachmentBlocks, stripDirective, stripImageNotes, stripSkillBlock } from "@/lib/promptPrefixes";
 import {
@@ -677,6 +677,11 @@ type TurnRow =
   | { kind: "bash"; key: string; message: PiMessage }
   | { kind: "live"; key: "live"; startedAt?: number };
 
+// 每个会话记住离开时的滚动位置与已测行高：切回来先恢复阅读位置，
+// 行高快照直接喂给 virtualizer，省掉"估算→实测→滚动条跳动"。
+type ScrollSnapshot = { offset: number; atBottom: boolean; snapshot: VirtualItem[] };
+const scrollCache = new Map<string, ScrollSnapshot>();
+
 /** 主聊天与并行会话共用的转录视图：虚拟化消息流 + 流式块 + 等待占位。 */
 export function Transcript(props: {
   messages: PiMessage[];
@@ -685,12 +690,15 @@ export function Transcript(props: {
   tools: Record<string, ToolExec>;
   cwd: string;
   loading?: boolean;
+  sessionKey?: string;
   onFork?: (message: PiMessage) => void;
 }) {
+  const saved = props.sessionKey ? scrollCache.get(props.sessionKey) : undefined;
+  const restore = Boolean(saved && !saved.atBottom);
   return (
-    <Conversation>
+    <Conversation initial={restore ? false : "smooth"}>
       {/* body 必须在 StickToBottom 的 provider 内：虚拟列表要拿 scrollRef */}
-      <TranscriptBody {...props} />
+      <TranscriptBody {...props} restore={restore ? saved : undefined} />
       <ConversationScrollButton />
     </Conversation>
   );
@@ -703,7 +711,9 @@ function TranscriptBody({
   tools,
   cwd,
   loading = false,
+  sessionKey,
   onFork,
+  restore,
 }: {
   messages: PiMessage[];
   streaming: ContentBlock[] | null;
@@ -711,7 +721,9 @@ function TranscriptBody({
   tools: Record<string, ToolExec>;
   cwd: string;
   loading?: boolean;
+  sessionKey?: string;
   onFork?: (message: PiMessage) => void;
+  restore?: ScrollSnapshot;
 }) {
   const resolveAttachments = useSavedAttachments(cwd);
   const { scrollRef } = useStickToBottomContext();
@@ -839,7 +851,81 @@ function TranscriptBody({
     estimateSize: () => 220,
     overscan: 6,
     getItemKey: (index) => rows[index].key,
+    // 回到这个会话时复用上次实测的行高，减少测量抖动
+    initialMeasurementsCache: restore?.snapshot ?? [],
   });
+
+  const virtualizerRef = useRef(virtualizer);
+  virtualizerRef.current = virtualizer;
+
+  // 恢复上次离开时的阅读位置（只有当时不在底部才恢复；在底部继续跟随新消息）。
+  // 虚拟列表刚挂载时高度还是估算值，scrollTop 会被钳位，所以重试几百毫秒
+  // 直到落点稳定（用户一旦自己滚动就停）。
+  useLayoutEffect(() => {
+    if (!restore) return;
+    let tries = 0;
+    let done = false;
+    let followTimer: ReturnType<typeof setTimeout> | null = null;
+    const apply = () => {
+      if (done) return;
+      const el = scrollRef.current;
+      if (!el) return;
+      el.scrollTop = restore.offset;
+      if (Math.abs(el.scrollTop - restore.offset) <= 2 || ++tries >= 12) {
+        done = true;
+        return;
+      }
+      followTimer = setTimeout(apply, 120);
+    };
+    const el = scrollRef.current;
+    const abort = () => {
+      done = true;
+    };
+    // 用户在恢复过程中自己滚动/按键就立刻让位，别每 120ms 把位置拽回去
+    el?.addEventListener("wheel", abort, { passive: true });
+    el?.addEventListener("touchmove", abort, { passive: true });
+    el?.addEventListener("keydown", abort);
+    const first = setTimeout(apply, 0);
+    return () => {
+      done = true;
+      clearTimeout(first);
+      if (followTimer) clearTimeout(followTimer);
+      el?.removeEventListener("wheel", abort);
+      el?.removeEventListener("touchmove", abort);
+      el?.removeEventListener("keydown", abort);
+    };
+  }, [restore, scrollRef]);
+
+  // 记住滚动位置 + 行高快照：滚动时节流写、卸载时补一次。这样切会话的新组件
+  // 在 **render 阶段**就能读到上一会话的位置（卸载 cleanup 发生在 render 之后，
+  // 只在 unmount 写会来不及）。
+  useLayoutEffect(() => {
+    if (!sessionKey) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const save = () => {
+      const total = virtualizerRef.current.getTotalSize();
+      scrollCache.set(sessionKey, {
+        offset: el.scrollTop,
+        atBottom: el.scrollTop + el.clientHeight >= total - 4,
+        snapshot: virtualizerRef.current.takeSnapshot(),
+      });
+    };
+    const onScroll = () => {
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        save();
+      }, 80);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      if (timer) clearTimeout(timer);
+      save();
+    };
+  }, [sessionKey, scrollRef]);
 
   const showEmpty = rows.length === 0 && !isStreaming && !loading;
 
@@ -902,6 +988,7 @@ export function Chat(props: { state: State; onFork?: (message: PiMessage) => voi
       isStreaming={state.isStreaming}
       loading={state.loadingSession}
       messages={state.messages}
+      sessionKey={state.sessionFile}
       onFork={onFork}
       streaming={state.streaming}
       tools={state.tools}

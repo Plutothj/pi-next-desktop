@@ -136,6 +136,20 @@ function TaskRow({
   onExport: () => void;
 }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // 悬停 150ms 预热：点击时 pi 进程已经起来，冷会话也能秒开
+  const warmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startWarm = () => {
+    if (active || streaming) return;
+    if (warmTimer.current) clearTimeout(warmTimer.current);
+    warmTimer.current = setTimeout(() => {
+      warmTimer.current = null;
+      void window.pi.warmSession(session.path, session.cwd).catch(() => null);
+    }, 150);
+  };
+  const cancelWarm = () => {
+    if (warmTimer.current) clearTimeout(warmTimer.current);
+    warmTimer.current = null;
+  };
   // Cross-project sessions carry a badge so the unified list stays readable.
   const project = baseName(session.cwd);
   const showBadge = showProject && session.cwd !== currentCwd;
@@ -159,7 +173,7 @@ function TaskRow({
     );
   }
   return (
-    <div className="group relative">
+    <div className="group relative" onPointerEnter={startWarm} onPointerLeave={cancelWarm}>
       <button
         className={cn(
           "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 pr-9 text-left hover:bg-sidebar-accent",
@@ -237,6 +251,7 @@ function TaskRow({
 
 /** Left rail: project switcher, session list, settings/theme footer. */
 const COLLAPSED_COUNT = 10;
+const EXPANDED_PAGE = 50;
 
 function SessionSidebarBase({
   state,
@@ -281,8 +296,10 @@ function SessionSidebarBase({
   // 重新添加该文件夹即可恢复）。否则有会话的项目删完会立刻"长回来"。
   const removedSet = new Set(state.removedProjects);
   const visibleSessions = state.sessions.filter((s) => !removedSet.has(s.cwd));
-  // Groups collapse to the newest few sessions; expanded groups show all.
+  // Groups collapse to the newest few sessions; expanded groups page 50 at a
+  // time so a workspace with hundreds of sessions can't build a huge DOM.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [groupLimits, setGroupLimits] = useState<Record<string, number>>({});
   const toggleGroup = (label: string) =>
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -390,7 +407,8 @@ function SessionSidebarBase({
                 ) : null}
                 {groupSessions(visibleSessions, state.projects, view, sort, state.runningSessions).map(([label, items]) => {
             const open = view === "timeline" || expanded.has(label);
-            const visible = open ? items : items.slice(0, COLLAPSED_COUNT);
+            const limit = groupLimits[label] ?? EXPANDED_PAGE;
+            const visible = open ? items.slice(0, limit) : items.slice(0, COLLAPSED_COUNT);
             // 工作区视图：分组是项目，渲染成可折叠的项目标题（带目录图标）
             const isProject = view === "workspace";
             // 项目路径：优先从会话取；没有会话的项目从 projects 列表按名称反查
@@ -512,6 +530,21 @@ function SessionSidebarBase({
                   />
                 </div>
               ))}
+              {open && items.length > visible.length ? (
+                <button
+                  className="flex w-full items-center gap-1 rounded px-2 py-1 pl-7 text-[10px] text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+                  onClick={() =>
+                    setGroupLimits((prev) => ({
+                      ...prev,
+                      [label]: (prev[label] ?? EXPANDED_PAGE) + EXPANDED_PAGE,
+                    }))
+                  }
+                  type="button"
+                >
+                  <ChevronDownIcon className="size-3" />
+                  再显示 {Math.min(EXPANDED_PAGE, items.length - visible.length)} 条（还剩 {items.length - visible.length}）
+                </button>
+              ) : null}
               {items.length > COLLAPSED_COUNT ? (
                 <button
                   className="flex w-full items-center gap-1 rounded px-2 py-1 pl-7 text-[10px] text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"

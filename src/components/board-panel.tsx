@@ -105,6 +105,7 @@ export function BoardPanel({
               cwd={openAgent.cwd}
               isStreaming={view.isStreaming}
               messages={view.messages}
+              sessionKey={`board:${openAgent.id}`}
               streaming={view.streaming}
               tools={view.tools}
             />

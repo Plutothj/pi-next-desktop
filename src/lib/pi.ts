@@ -456,6 +456,8 @@ export type PiBridge = {
     }>;
   /** 持久化的尾部消息缓存（重启后 pi 还没热起来时先用它渲染） */
   sessionView: (path: string) => Promise<{ messages: PiMessage[] } | null>;
+  /** 后台预热一个会话进程（侧栏悬停触发；已在跑则 no-op） */
+  warmSession: (sessionFile: string, cwd?: string) => Promise<{ ok: boolean; running?: boolean }>;
   deleteSession: (filePath: string) => Promise<{ ok: boolean; switched?: boolean; error?: string }>;
   forkSessionAt: (entryId: string) => Promise<{ ok: boolean; sessionFile?: string; error?: string }>;
   respondUi: (

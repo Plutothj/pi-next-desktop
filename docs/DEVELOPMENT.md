@@ -793,8 +793,7 @@ null，会导致段落反复折叠/展开、滚动位置跳动）。耗时 = 最
     实测重会话（1000 条/2.9MB）切换 70ms → 9~17ms。
   - 贴底跟随仍交给 `use-stick-to-bottom`（不再手工 `scrollToIndex`：手工滚动会让它
     误判"用户上滚"从而停止跟随）；虚拟列表内容高度变化会触发它的 resize 跟随。
-  - 离屏跳过：每条回合节点套 `.chat-cv`（`content-visibility: auto; contain-intrinsic-size: auto 360px`），
-    浏览器跳过看不见的回合的布局/绘制（ZCode 同款）；最后一条（可能是流式回合）不套。
+  - （`.chat-cv` + content-visibility 的过渡方案已删除：真虚拟化后不再需要，别加回来。）
   - 切会话不重搬历史（ZCode 的 tail-window 思路）：渲染层 `viewCache` 按会话缓存
     `{messages, state, ui}`，切回时先即时上屏；`get_state.messageCount` 没变就**跳过**
     `get_messages`；进程被回收时 `pi:switchSession({wait:false})` 返回后主进程 `warmSession`
@@ -811,6 +810,17 @@ null，会导致段落反复折叠/展开、滚动位置跳动）。耗时 = 最
   - **侧栏 memo**（v0.4.0）：`SessionSidebar` 只比较 sessionFile/sessions/projects/removed/
     runningSessions/isStreaming/cwd/theme/update，流式 delta 不再触发侧栏重渲染（实测
     10s 回合：App 77 次渲染、侧栏 1 次；调优时可用 `window.__perfRender` 计数）。
+  - **悬停预热 + LRU 上限**（v0.4.1）：侧栏 `TaskRow` 指针停留 150ms 触发
+    `pi:warmSession`（离开即取消）；主进程 `warming` Map 去重、**并发上限 3**（快速扫过
+    一列会话不会一次拉起一堆进程）；每次预热结束 `pool.trim(MAX_WARM_SESSIONS=8)`，
+    只回收 idle（非 active/observed/streaming）里最久未用的槽，sweep 时也 trim。
+  - **滚动位置与行高恢复**（v0.4.1）：模块级 `scrollCache`（按 sessionKey）记
+    `{offset, atBottom, snapshot}`，`snapshot` 来自 virtualizer `takeSnapshot()`，切回时
+    作为 `initialMeasurementsCache` 省掉重新测高；滚动监听 80ms debounce 写入 +
+    `useLayoutEffect` 卸载保存；非贴底会话切回后重试恢复 offset（最多 12×120ms，
+    因为行高测量在内容上屏后才收敛）。**不要**手工 `scrollToIndex`（会破坏贴底跟随）。
+  - **侧栏分组分页**：每个项目默认 50 条，展开更多用「再显示 N 条」累加，避免大项目
+    一次挂几百行。
 - **图片消息**：用户消息里的图片移到气泡外、右对齐显示为缩略图（max-h-40 / max-w-240，点击放大），气泡只装文字——宽图不会再撑出大片空白
 - **todo widget**：复选框 + 完成划线 + 头部进度（1/3）；上一回合完成的项在下一回合开始时撤下；全部完成后停留 4 秒自动消失（清单已完成无常驻价值）
 - **侧栏折叠**：头部「收起侧栏」按钮 / ⌘B（Ctrl+B），状态持久化在 ui.json；折叠后由主界面头部按钮展开

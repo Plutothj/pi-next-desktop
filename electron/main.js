@@ -796,19 +796,42 @@ safeHandle("remote:tunnelStop", () => stopRemoteTunnel());
 
 // 后台预热（不阻塞切会话）：只把进程拉起来，不动 activeSession，也不清对话框。
 // 渲染层有缓存时先显示旧内容，再由 `session_status(alive)` / 轮询拿到新数据。
+// 常驻 pi 进程上限：超出的空闲会话按 lastActive 淘汰（活动/观察中/正在跑的除外）
+const MAX_WARM_SESSIONS = 8;
+const warming = new Map(); // file -> promise（悬停和切会话可能同时触发，去重）
+
 async function warmSession(file, cwd) {
-  try {
-    await pool.ensure(file, cwd && fs.existsSync(cwd) ? cwd : os.homedir(), { active: false });
-    for (let i = 0; i < 60; i++) {
-      await new Promise((r) => setTimeout(r, 250));
-      const st = await pool.command(file, { type: "get_state" }).catch(() => null);
-      if (st?.data?.model) break;
+  const existing = warming.get(file);
+  if (existing) return existing;
+  const task = (async () => {
+    try {
+      await pool.ensure(file, cwd && fs.existsSync(cwd) ? cwd : os.homedir(), { active: false });
+      for (let i = 0; i < 60; i++) {
+        await new Promise((r) => setTimeout(r, 250));
+        const st = await pool.command(file, { type: "get_state" }).catch(() => null);
+        if (st?.data?.model) break;
+      }
+      send({ type: "session_status", sessionFile: file, isStreaming: false, alive: true });
+    } catch (err) {
+      logLine("warm", err);
+    } finally {
+      warming.delete(file);
+      pool.trim(MAX_WARM_SESSIONS);
     }
-    send({ type: "session_status", sessionFile: file, isStreaming: false, alive: true });
-  } catch (err) {
-    logLine("warm", err);
-  }
+  })();
+  warming.set(file, task);
+  return task;
 }
+
+// 悬停预热：侧栏行 hover 150ms 后由渲染层调用；已经在跑就什么都不做。
+safeHandle("pi:warmSession", (_e, { sessionFile, cwd } = {}) => {
+  const file = requireString(sessionFile, "sessionFile");
+  if (pool.isRunning(file)) return { ok: true, running: true };
+  // 悬停扫过一列会话时别一次拉起太多进程：并发预热上限 3
+  if (warming.size >= 3) return { ok: true, skipped: true };
+  void warmSession(file, cwd);
+  return { ok: true, running: false };
+});
 
 // 切换界面显示的会话：只切活动指针（后台会话进程继续跑，不中断）。
 safeHandle("pi:switchSession", async (_e, { sessionFile, cwd, wait = true } = {}) => {
@@ -1062,7 +1085,10 @@ app.whenReady().then(() => {
   installHrSkills(AGENT_DIR);
   scheduler.start();
   // 空闲会话回收：非活动且静默 10 分钟的 pi 进程停掉（切回时按 --session 重启）
-  setInterval(() => pool.sweep(), 60_000).unref();
+  setInterval(() => {
+    pool.sweep();
+    pool.trim(MAX_WARM_SESSIONS);
+  }, 60_000).unref();
   // 内置扩展：首次启动（或应用升级后）离线装进 agent 目录，失败不阻塞启动
   void installBundledExtensions({
     resourcesPath: process.resourcesPath,

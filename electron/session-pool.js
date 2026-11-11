@@ -192,6 +192,29 @@ export function createSessionPool({ send, makeEnv, buildArgs, activeKey, idleMs 
     }
   }
 
+  /**
+   * 常驻进程上限：超出 max 时按 lastActive 淘汰最久未用的"空闲"槽。
+   * 正在跑回合 / 并排窗格观察 / 活动会话永远不淘汰；被淘汰的会话切回时按
+   * --session 重新拉起（或由悬停预热提前拉起）。
+   */
+  function trim(max = 8) {
+    const idle = [];
+    for (const [file, slot] of slots) {
+      if (isActive(file) || slot.observed || slot.streaming) continue;
+      idle.push([file, slot]);
+    }
+    const excess = slots.size - max;
+    if (excess <= 0) return 0;
+    idle.sort((a, b) => a[1].lastActive - b[1].lastActive);
+    let stopped = 0;
+    for (const [file, slot] of idle.slice(0, excess)) {
+      slot.proc.stop();
+      slots.delete(file);
+      stopped += 1;
+    }
+    return stopped;
+  }
+
   /** 把槽从旧键迁移到新键（新会话落盘后 pi 才分配文件路径）。 */
   function rebind(oldKey, newKey) {
     const slot = slots.get(oldKey);
@@ -214,6 +237,7 @@ export function createSessionPool({ send, makeEnv, buildArgs, activeKey, idleMs 
     stop,
     stopAll,
     sweep,
+    trim,
     isRunning: (file) => Boolean(slots.get(file)?.proc.running),
     files: () => [...slots.keys()],
     count: () => slots.size,

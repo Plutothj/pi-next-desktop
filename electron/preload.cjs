@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("pi", {
   remoteTunnelStop: () => ipcRenderer.invoke("remote:tunnelStop"),
   switchSession: (sessionFile, cwd, options) =>
     ipcRenderer.invoke("pi:switchSession", { sessionFile, cwd, ...options }),
+  warmSession: (sessionFile, cwd) => ipcRenderer.invoke("pi:warmSession", { sessionFile, cwd }),
   send: (payload) => ipcRenderer.invoke("pi:send", payload),
   pickFolder: () => ipcRenderer.invoke("pi:pickFolder"),
   sessions: () => ipcRenderer.invoke("pi:sessions"),
