@@ -12,7 +12,7 @@ import {
   WrenchIcon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import logo from "@/assets/logo.png";
 import { Button } from "@/components/ui/button";
 import {
@@ -238,7 +238,7 @@ function TaskRow({
 /** Left rail: project switcher, session list, settings/theme footer. */
 const COLLAPSED_COUNT = 10;
 
-export function SessionSidebar({
+function SessionSidebarBase({
   state,
   theme,
   onOpenPalette,
@@ -272,6 +272,7 @@ export function SessionSidebar({
   onUpdateAction: () => void;
   onRemoveProject: (dir: string) => Promise<void>;
 }) {
+  if ((window as any).__perfRender) (window as any).__perfRender.sidebar++;
   const [view, setView] = useState<"grouped" | "workspace" | "timeline">("workspace");
   const [sort, setSort] = useState<"updated" | "created">("updated");
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -597,3 +598,22 @@ function updateTitle(update: UpdateState) {
       return current ? `${current} · 检查更新` : "检查更新";
   }
 }
+
+
+// 流式 delta 每 16ms 更新一次 state；侧栏只关心会话/项目/运行状态这些低频字段，
+// memo 掉 messages/streaming/tools 的变化，流式期间不再跟着整棵树重渲染。
+export const SessionSidebar = memo(SessionSidebarBase, (prev, next) => {
+  const a = prev.state;
+  const b = next.state;
+  return (
+    prev.theme === next.theme &&
+    prev.update === next.update &&
+    a.sessionFile === b.sessionFile &&
+    a.sessions === b.sessions &&
+    a.projects === b.projects &&
+    a.removedProjects === b.removedProjects &&
+    a.runningSessions === b.runningSessions &&
+    a.isStreaming === b.isStreaming &&
+    a.cwd === b.cwd
+  );
+});

@@ -87,6 +87,7 @@ export default function App() {
 }
 
 function Shell() {
+  if ((window as any).__perfRender) (window as any).__perfRender.app++;
   const {
     state,
     boot,

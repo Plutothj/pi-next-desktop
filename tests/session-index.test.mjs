@@ -122,4 +122,12 @@ test("FTS5 全文搜索与会话视图缓存", async () => {
   assert.ok(afterCold, "冷启动后视图缓存仍在");
   const coldSearch = await searchSessionsIndexed("白屏");
   assert.ok(coldSearch.hits.length >= 1);
+
+  // 文件被重写且变小（compaction）→ 走全量重建，旧内容不能残留
+  fs.writeFileSync(file, `${[header(), user("全新的主题：量子计算")].join("\n")}\n`);
+  await scanSessionsIndexed();
+  const gone = await searchSessionsIndexed("白屏");
+  assert.ok(!gone.hits.some((h) => h.path === file), "旧索引应被清掉");
+  const neu = await searchSessionsIndexed("量子");
+  assert.ok(neu.hits.some((h) => h.path === file), "新内容应可搜到");
 });

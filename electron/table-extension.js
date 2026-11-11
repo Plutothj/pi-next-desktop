@@ -16,7 +16,16 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import fs from "node:fs";
 import path from "node:path";
-import XLSX from "xlsx";
+// SheetJS 体积不小（几百 KB 解析）：不要在扩展加载时 import，等真正调用
+// table 工具时再动态加载（省每个 pi 进程的启动时间/内存）
+let xlsxModule: any = null;
+const loadXlsx = async () => {
+  if (!xlsxModule) {
+    const mod: any = await import("xlsx");
+    xlsxModule = mod.default ?? mod;
+  }
+  return xlsxModule;
+};
 
 // 单元格：字符串/数字，或 { v: 值, f: "=SUM(B2:B5)" }（公式以 = 开头）
 const Cell = Type.Union([
@@ -95,6 +104,12 @@ export default function (pi: ExtensionAPI) {
       if (!target.toLowerCase().endsWith(".xlsx")) {
         return errorResult(new Error("only .xlsx is supported"));
       }
+      let XLSX: any;
+      try {
+        XLSX = await loadXlsx();
+      } catch (err) {
+        return errorResult(err);
+      }
 
       if (params.action === "read") {
         try {
@@ -152,14 +167,14 @@ export default function (pi: ExtensionAPI) {
         const wb = XLSX.utils.book_new();
         for (const sheet of params.sheets) {
           // 二维数组 → 工作表；公式格用坐标写入 cell.f（SheetJS 不认前导 =）
-          const ws: XLSX.WorkSheet = {};
+          const ws: any = {};
           let maxCol = 0;
           sheet.rows.forEach((row, r) => {
             row.forEach((raw, c) => {
               const addr = XLSX.utils.encode_cell({ r, c });
               const cell = cellOf(raw);
               maxCol = Math.max(maxCol, c + 1);
-              const out: XLSX.CellObject = { t: typeof cell.v === "number" ? "n" : "s" } as XLSX.CellObject;
+              const out: any = { t: typeof cell.v === "number" ? "n" : "s" } as any;
               if (cell.v !== undefined) out.v = cell.v as string | number;
               if (cell.f) out.f = cell.f;
               ws[addr] = out;

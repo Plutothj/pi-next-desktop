@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { mermaid } from "@streamdown/mermaid";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useStickToBottomContext } from "use-stick-to-bottom";
@@ -202,6 +202,33 @@ function ThinkingRow({
   );
 }
 
+// 流式 markdown 的解析/高亮成本随文本长度线性增长：把"正在写的最后一块"按
+// 60ms 节流（文本本身仍按 16ms 批量更新），并且流式期间关闭 shiki 高亮——
+// 代码块等回合结束后一次性着色，避免每帧重新高亮。
+function useThrottledText(text: string, active: boolean, ms = 60) {
+  const [value, setValue] = useState(text);
+  const lastAt = useRef(0);
+  useEffect(() => {
+    if (!active) {
+      setValue(text);
+      lastAt.current = Date.now();
+      return;
+    }
+    const elapsed = Date.now() - lastAt.current;
+    if (elapsed >= ms) {
+      setValue(text);
+      lastAt.current = Date.now();
+      return;
+    }
+    const timer = setTimeout(() => {
+      setValue(text);
+      lastAt.current = Date.now();
+    }, ms - elapsed);
+    return () => clearTimeout(timer);
+  }, [text, active, ms]);
+  return active ? value : text;
+}
+
 function Block({
   block,
   exec,
@@ -219,6 +246,9 @@ function Block({
   thinkingLive?: boolean;
   last?: boolean;
 }) {
+  // hook 必须无条件调用（block 类型可能从 text 变成 toolCall）
+  const liveText = Boolean(last && streaming);
+  const shownText = useThrottledText(block.type === "text" ? block.text : "", liveText);
   if (block.type === "thinking") {
     if (!block.thinking.trim()) return null;
     return <ThinkingRow block={block} streaming={thinkingLive} />;
@@ -230,11 +260,11 @@ function Block({
     if (!block.text.trim()) return null;
     return (
       <MessageResponse
-        className={cn("chat-md", last && streaming && "after:animate-pulse")}
+        className={cn("chat-md", liveText && "after:animate-pulse")}
         plugins={{ mermaid }}
-        shikiTheme={["github-light", "github-dark-dimmed"]}
+        shikiTheme={liveText ? undefined : ["github-light", "github-dark-dimmed"]}
       >
-        {block.text}
+        {shownText}
       </MessageResponse>
     );
   }

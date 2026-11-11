@@ -147,7 +147,8 @@ pi.stop() → 清理挂起对话框 → resolveRuntime()
 - **会话索引（v0.3.0/v0.3.10，`electron/session-index.js`）**：`node:sqlite`（Electron 45 自带
   Node 24，**支持 FTS5**）持久化三张表：
   - `sessions`：path/cwd/title/mtime/size/changed → 列表扫描只 `stat` + `SELECT`；
-  - `messages_fts`（FTS5）：user/assistant 正文全文索引，后台队列按 tick 增量重建（文件变了才做）；
+  - `messages_fts`（FTS5）：user/assistant 正文全文索引，后台队列按 tick 增量重建；会话是
+    append-only，索引记 `fts_offset`，**只解析追加的字节**（文件变小/重写才全量重建）；
     **CJK 必须特殊处理**：unicode61 把连续汉字当一个词，"白屏"搜不到"请排查白屏问题" ——
     入索引时在 CJK 字符之间插空格（每字一 token），查询同样转成短语（`"白 屏"`），
     snippet 再删掉 CJK 之间的空格。`⌘K` 面板输入 ≥2 字调用它（FTS 失败回退全量扫描）；
@@ -738,7 +739,9 @@ npm run stage             # 把本机 pi bundle 复制进 runtime/
   onExit"（重启竞态护栏误伤，槽清理/退出钩子都挂在它上面）；`before-quit` 等子进程死透再退
 - **文件预览**：`files:readTable/readDoc/readPdf/extractText` + AG Grid / mammoth /
   pdfjs-dist / DOMPurify（见 §7.10）；预览「问 AI」与回合结束自动重读
-- **table 扩展**：模型可读写带公式的 xlsx；依赖复制到 `<agent>/extensions/node_modules`
+- **table 扩展**：模型可读写带公式的 xlsx；依赖复制到 `<agent>/extensions/node_modules`。
+  v0.4.0 起 SheetJS 不在扩展加载时 import，第一次调用 table 工具才 `await import("xlsx")`
+  （每个 pi 进程省一次几百 KB 解析）
 - **todo 扩展（`TodoWrite`）**：契约对齐 Claude Code / ZCode / opencode——工具名
   `TodoWrite`，**每次调用发送全量列表**（`todos: [{content, status: pending|in_progress|completed, priority?}]`），
   整份替换上一份。旧的 add/toggle/remove 增量接口模型懒得维护，已废弃（`reconstruct` 仍兼容旧 `todo` 的 `done` 格式）。
@@ -803,6 +806,11 @@ null，会导致段落反复折叠/展开、滚动位置跳动）。耗时 = 最
   - 流式合并：`message_update` 的 delta 攒 16ms 再进 reducer（`setTimeout`，**不要用 rAF**：
     窗口被遮挡/最小化时 rAF 暂停，deltas 会憋到 `message_end` 一次性出现 = 流式全丢，实测踩过）；
     其它事件先同步冲刷，保证 `message_end/agent_end` 顺序。
+  - **流式 markdown 节流**（v0.4.0）：正在写的最后一块按 60ms 节流再交给 Streamdown，且
+    流式期间不传 `shikiTheme`（代码块等回合结束一次性高亮）；文本本身仍 16ms 批量更新。
+  - **侧栏 memo**（v0.4.0）：`SessionSidebar` 只比较 sessionFile/sessions/projects/removed/
+    runningSessions/isStreaming/cwd/theme/update，流式 delta 不再触发侧栏重渲染（实测
+    10s 回合：App 77 次渲染、侧栏 1 次；调优时可用 `window.__perfRender` 计数）。
 - **图片消息**：用户消息里的图片移到气泡外、右对齐显示为缩略图（max-h-40 / max-w-240，点击放大），气泡只装文字——宽图不会再撑出大片空白
 - **todo widget**：复选框 + 完成划线 + 头部进度（1/3）；上一回合完成的项在下一回合开始时撤下；全部完成后停留 4 秒自动消失（清单已完成无常驻价值）
 - **侧栏折叠**：头部「收起侧栏」按钮 / ⌘B（Ctrl+B），状态持久化在 ui.json；折叠后由主界面头部按钮展开

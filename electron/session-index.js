@@ -7,7 +7,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { APP_HOME } from "./app-home.js";
 import { logLine } from "./logs.js";
-import { scanSessions, sessionMessageTexts, sessionTitle, sessionsRoot } from "./session-files.js";
+import {
+  messageTextsOfRaw,
+  scanSessions,
+  sessionMessageTexts,
+  sessionTitle,
+  sessionsRoot,
+} from "./session-files.js";
 
 const DB_FILE = path.join(APP_HOME, "sessions-index.sqlite");
 const VIEW_LIMIT = 120;
@@ -47,7 +53,8 @@ function openDb() {
       removed INTEGER NOT NULL DEFAULT 0,
       version INTEGER,
       fts_mtime REAL,
-      fts_size REAL
+      fts_size REAL,
+      fts_offset INTEGER
     );
   `);
   // 老库没有 fts_* 列：补上（重复添加会抛，忽略即可）
@@ -56,6 +63,9 @@ function openDb() {
   } catch {}
   try {
     db.exec("ALTER TABLE sessions ADD COLUMN fts_size REAL");
+  } catch {}
+  try {
+    db.exec("ALTER TABLE sessions ADD COLUMN fts_offset INTEGER");
   } catch {}
   db.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
@@ -80,7 +90,7 @@ function openDb() {
         size = excluded.size, added = excluded.added, removed = excluded.removed,
         version = excluded.version
     `),
-    setFtsMeta: db.prepare("UPDATE sessions SET fts_mtime = ?, fts_size = ? WHERE path = ?"),
+    setFtsMeta: db.prepare("UPDATE sessions SET fts_mtime = ?, fts_size = ?, fts_offset = ? WHERE path = ?"),
     paths: db.prepare("SELECT path FROM sessions"),
     del: db.prepare("DELETE FROM sessions WHERE path = ?"),
     count: db.prepare("SELECT COUNT(*) AS n FROM sessions"),
@@ -154,15 +164,43 @@ let scheduled = false;
 function runIndex(file) {
   try {
     const stat = fs.statSync(file);
-    const entries = sessionMessageTexts(file);
+    const row = statements.get.get(file);
+    const prevOffset = Number(row?.fts_offset ?? 0);
+    const prevSize = Number(row?.fts_size ?? 0);
+    let entries = null;
+    let offset = stat.size;
+    let incremental = false;
+    // 会话 JSONL 是 append-only：只解析上次索引之后追加的字节；
+    // 文件变小/重写（compaction）或上次没建过索引 → 全量重建。
+    if (prevOffset > 0 && prevSize > 0 && stat.size >= prevSize && prevOffset <= stat.size) {
+      const fd = fs.openSync(file, "r");
+      try {
+        const length = stat.size - prevOffset;
+        const buf = Buffer.alloc(length);
+        if (length > 0) fs.readSync(fd, buf, 0, length, prevOffset);
+        let text = buf.toString("utf8");
+        const nl = text.lastIndexOf("\n");
+        // 末尾可能是半行：只消费到最后一个换行，下次再读这一小截
+        if (nl >= 0 && nl + 1 < text.length) {
+          offset = prevOffset + Buffer.byteLength(text.slice(0, nl + 1), "utf8");
+          text = text.slice(0, nl + 1);
+        }
+        entries = messageTextsOfRaw(text);
+      } finally {
+        fs.closeSync(fd);
+      }
+      incremental = true;
+    } else {
+      entries = sessionMessageTexts(file);
+    }
     db.exec("BEGIN");
     try {
-      statements.ftsDel.run(file);
+      if (!incremental) statements.ftsDel.run(file);
       if (entries) {
         for (const entry of entries) statements.ftsIns.run(file, entry.role, ftsText(entry.text));
       }
       // entries=null（文件过大/不可读）也记下 meta，避免每次扫描都重试
-      statements.setFtsMeta.run(stat.mtimeMs, stat.size, file);
+      statements.setFtsMeta.run(stat.mtimeMs, stat.size, incremental ? offset : stat.size, file);
       db.exec("COMMIT");
     } catch (err) {
       db.exec("ROLLBACK");

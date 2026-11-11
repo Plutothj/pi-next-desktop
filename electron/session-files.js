@@ -172,14 +172,7 @@ const textOfContent = (content) => {
     .join("\n");
 };
 
-export function sessionMessageTexts(file) {
-  let raw;
-  try {
-    if (fs.statSync(file).size > INDEX_FILE_MAX) return null;
-    raw = fs.readFileSync(file, "utf8");
-  } catch {
-    return null;
-  }
+export function messageTextsOfRaw(raw) {
   const out = [];
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
@@ -197,6 +190,17 @@ export function sessionMessageTexts(file) {
     out.push({ id: rec.id ?? "", role, text: text.slice(0, INDEX_TEXT_MAX) });
   }
   return out;
+}
+
+export function sessionMessageTexts(file) {
+  let raw;
+  try {
+    if (fs.statSync(file).size > INDEX_FILE_MAX) return null;
+    raw = fs.readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+  return messageTextsOfRaw(raw);
 }
 
 // 会话全文搜索：显式动作才触发（O(总字节)，与 scanSessions 同源已知代价）。
